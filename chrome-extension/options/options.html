@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dabba Settings</title>
+  <link rel="stylesheet" href="../popup/popup.css">
+  <style>
+    body {
+      width: 600px;
+      margin: 0 auto;
+      padding: 0;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+
+    .options-container {
+      padding: 24px;
+    }
+
+    .options-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .options-header .logo {
+      font-size: 32px;
+      color: var(--accent);
+    }
+
+    .options-header h1 {
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    .options-header .version {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .section {
+      margin-bottom: 28px;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .field .hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .field input[type="text"],
+    .field input[type="password"],
+    .field input[type="url"],
+    .field select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: var(--accent);
+    }
+
+    .field select {
+      cursor: pointer;
+    }
+
+    .field-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .field-row .field {
+      flex: 1;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+
+    .btn:hover {
+      border-color: var(--accent);
+      background: var(--accent-muted);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: var(--bg-primary);
+      border-color: var(--accent);
+    }
+
+    .btn.primary:hover {
+      background: var(--accent-hover);
+    }
+
+    .btn.danger {
+      color: var(--error);
+      border-color: var(--error);
+    }
+
+    .btn.danger:hover {
+      background: rgba(243, 139, 168, 0.1);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+      margin-top: 24px;
+      flex-wrap: wrap;
+    }
+
+    .status-message {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    .status-message.success {
+      background: rgba(166, 227, 161, 0.1);
+      color: var(--success);
+      border: 1px solid rgba(166, 227, 161, 0.3);
+    }
+
+    .status-message.error {
+      background: rgba(243, 139, 168, 0.1);
+      color: var(--error);
+      border: 1px solid rgba(243, 139, 168, 0.3);
+    }
+
+    .status-message.info {
+      background: rgba(137, 180, 250, 0.1);
+      color: var(--info);
+      border: 1px solid rgba(137, 180, 250, 0.3);
+    }
+
+    .about-section {
+      padding: 16px;
+      background: var(--bg-secondary);
+      border-radius: var(--radius-lg);
+    }
+
+    .about-section p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .about-section .tech-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .about-section .tech-tag {
+      padding: 4px 10px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <span class="logo">◆</span>
+      <h1>dabba</h1>
+      <span class="version">v1.0.0</span>
+    </header>
+
+    <div id="statusMessage" class="status-message hidden"></div>
+
+    <section class="section">
+      <h2 class="section-title">API Configuration</h2>
+
+      <div class="field">
+        <label for="apiEndpoint">API Endpoint URL</label>
+        <input type="url" id="apiEndpoint" placeholder="http://localhost:8080" value="http://localhost:8080">
+        <p class="hint">The URL of your dabba API server (e.g., http://localhost:8080)</p>
+      </div>
+
+      <div class="field">
+        <label for="apiKey">API Key (optional)</label>
+        <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off">
+        <p class="hint">Required if your server uses authentication</p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="modelSelect">Default Model</label>
+          <select id="modelSelect">
+            <option value="dabba">dabba</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Appearance</h2>
+
+      <div class="field">
+        <label for="themeSelect">Theme</label>
+        <select id="themeSelect">
+          <option value="system">System</option>
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Actions</h2>
+
+      <div class="btn-group">
+        <button id="testConnectionBtn" class="btn">Test Connection</button>
+        <button id="saveBtn" class="btn primary">Save Settings</button>
+        <button id="resetBtn" class="btn danger">Reset to Defaults</button>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">Import / Export</h2>
+
+      <div class="btn-group">
+        <button id="exportConfigBtn" class="btn">Export Configuration</button>
+        <button id="importConfigBtn" class="btn">Import Configuration</button>
+        <input type="file" id="importFileInput" accept=".json" style="display:none">
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title">About</h2>
+
+      <div class="about-section">
+        <p><strong>dabba AI Assistant</strong> v1.0.0</p>
+        <p>A Chrome extension for interacting with the dabba AI platform. Chat with web pages, get explanations, summaries, and more — powered by your own dabba API server.</p>
+        <div class="tech-list">
+          <span class="tech-tag">Manifest V3</span>
+          <span class="tech-tag">Chrome Extension</span>
+          <span class="tech-tag">dabba API</span>
+          <span class="tech-tag">OpenAI Compatible</span>
+          <span class="tech-tag">Streaming</span>
+          <span class="tech-tag">Dark Mode</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

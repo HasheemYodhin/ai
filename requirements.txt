@@ -1,0 +1,51 @@
+# dabba - Core dependencies
+torch>=2.0.0
+numpy>=1.24.0
+pyyaml>=6.0
+
+# Data processing
+datasets>=2.14.0
+
+# Logging & visualization
+tensorboard>=2.13.0
+
+# API server (Session 5)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+httpx>=0.25.0
+
+# RAG (Session 2)
+sentence-transformers>=2.2.0
+chromadb>=0.4.0
+faiss-cpu>=1.7.0  # or faiss-gpu if CUDA available
+rank-bm25>=0.2.0
+
+# Agent (Session 3)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Multimodal (Session 4)
+pillow>=10.0.0
+torchvision>=0.15.0
+timm>=0.9.0  # optional, for vision encoders
+opencv-python>=4.8.0  # optional, for video processing
+openai-whisper>=20231117  # optional, for audio transcription
+
+# Document parsing
+pymupdf>=1.23.0  # optional, for PDF parsing
+pdfminer.six>=20221105  # optional, fallback for PDF parsing
+
+# Document generation (artifact tools — markdown_to_pdf / markdown_to_docx)
+reportlab>=3.6.0
+python-docx>=1.1.0
+
+# MCP (Model Context Protocol) client — connects to external MCP servers
+mcp>=1.0.0
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0

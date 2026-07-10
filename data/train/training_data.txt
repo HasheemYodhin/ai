@@ -1,0 +1,97 @@
+What is machine learning? Machine learning is a subset of artificial intelligence where systems learn patterns from data without being explicitly programmed. It includes supervised learning, unsupervised learning, and reinforcement learning techniques.
+
+What is a neural network? A neural network is a computational model inspired by how brains work. It consists of interconnected nodes organized in layers that process information through weighted connections.
+
+Explain transformers. A transformer is a neural network architecture that uses attention mechanisms to understand relationships between words in text. Transformers are the foundation for modern large language models like GPT and Claude.
+
+What is NLP? Natural Language Processing is the field of AI focused on understanding and generating human language. It includes tasks like translation, sentiment analysis, question answering, and chatbots.
+
+What are embeddings? Embeddings are numerical representations of text that capture semantic meaning. Similar concepts have similar embeddings, making them useful for comparison and retrieval tasks.
+
+How do transformers work? Transformers use self-attention mechanisms to process entire sequences in parallel. Each token attends to all other tokens to understand context and relationships.
+
+What is deep learning? Deep learning uses neural networks with multiple layers to learn complex patterns from data. It powers modern AI applications like image recognition, language translation, and chatbots.
+
+Explain attention mechanisms. Attention allows models to focus on relevant parts of input data. It helps models understand which words or features are most important for a particular task.
+
+What is supervised learning? Supervised learning is training models on labeled data where both inputs and correct outputs are provided. Examples include image classification and sentiment analysis.
+
+What is unsupervised learning? Unsupervised learning finds patterns in unlabeled data without predefined outputs. It includes clustering and dimensionality reduction techniques.
+
+What is reinforcement learning? Reinforcement learning trains agents to make decisions by rewarding desired behaviors. It's used in game playing, robotics, and autonomous systems.
+
+How do language models work? Language models predict the next word based on previous context. They are trained on large amounts of text data to learn language patterns and relationships.
+
+What is tokenization? Tokenization breaks text into smaller units like words or subwords. BPE tokenization is commonly used to handle rare words efficiently.
+
+Explain gradient descent. Gradient descent is an optimization algorithm that adjusts model parameters to minimize loss. It's the foundation for training neural networks.
+
+What is backpropagation? Backpropagation is the algorithm that computes gradients through neural networks during training. It enables efficient learning of complex patterns.
+
+What is an LLM? A Large Language Model is an AI model trained on vast amounts of text to understand and generate language. Examples include GPT-4, Claude, and Llama models.
+
+How are language models trained? Language models are trained using next-token prediction. The model learns to predict the next word given previous words, and this process is repeated over massive datasets.
+
+What is fine-tuning? Fine-tuning takes a pre-trained model and continues training it on task-specific data. This adapts the model for particular applications while retaining learned knowledge.
+
+What is prompt engineering? Prompt engineering is the art of writing effective prompts to get better outputs from language models. It includes techniques like few-shot learning and chain-of-thought reasoning.
+
+Explain zero-shot learning. Zero-shot learning enables models to perform tasks without seeing examples. Models generalize from training data to handle new tasks directly.
+
+What is few-shot learning? Few-shot learning uses a small number of examples to teach models new tasks. It leverages the general knowledge gained during pre-training.
+
+Explain context window. The context window is the maximum length of text a model can consider at once. Longer context windows allow models to understand longer documents and conversations.
+
+What is temperature in generation? Temperature controls randomness in text generation. Low temperature makes outputs more deterministic, while high temperature increases diversity.
+
+What is top-k sampling? Top-k sampling only considers the k most likely next tokens. It reduces the chance of very unlikely tokens being generated.
+
+What is nucleus sampling? Nucleus sampling selects from the smallest set of tokens whose cumulative probability exceeds a threshold. It balances diversity and quality in generation.
+
+How do you evaluate language models? Language models are evaluated using metrics like perplexity, BLEU score, and human evaluation. Task-specific metrics assess performance on downstream applications.
+
+What is transfer learning? Transfer learning reuses learned representations from one task for another. Pre-training on large data then fine-tuning on specific tasks is the dominant approach in NLP.
+
+Explain positional encoding. Positional encoding adds information about word positions to embeddings. It helps transformers understand word order despite processing all tokens in parallel.
+
+What is multi-head attention? Multi-head attention applies attention multiple times with different learned projections. This allows the model to attend to different aspects simultaneously.
+
+What is a knowledge base? A knowledge base is a structured store of information. RAG systems use knowledge bases to provide models with relevant context for better answers.
+
+What is retrieval augmented generation? RAG combines information retrieval with text generation. It retrieves relevant documents from a knowledge base before generating responses.
+
+How do you handle long documents? Long documents are chunked into overlapping segments. Models process these chunks and aggregate information to understand the full document.
+
+Explain model quantization. Quantization reduces model size by using lower precision numbers. It makes models faster and smaller while maintaining reasonable accuracy.
+
+What is distillation? Knowledge distillation transfers knowledge from a large model to a smaller one. The smaller model learns to mimic the larger model's behavior.
+
+What is data augmentation? Data augmentation generates new training examples from existing data. It helps prevent overfitting and improves model robustness.
+
+Explain regularization. Regularization prevents models from overfitting by penalizing complex solutions. Common techniques include dropout and L1/L2 regularization.
+
+What is batch normalization? Batch normalization normalizes activations across mini-batches. It stabilizes training and allows higher learning rates.
+
+Explain dropout. Dropout randomly deactivates neurons during training. It prevents co-adaptation and improves model generalization.
+
+What is the loss function? The loss function measures how well a model performs. During training, the model minimizes this loss to improve performance.
+
+What is the optimizer? The optimizer adjusts model parameters based on gradients. Common optimizers include Adam, SGD, and RMSprop.
+
+Explain the training loop. The training loop iterates through data, computes loss, computes gradients, and updates parameters. This process repeats for multiple epochs.
+
+What is an epoch? An epoch is one complete pass through the entire training dataset. Multiple epochs allow the model to see all data multiple times.
+
+What is a batch? A batch is a subset of training data processed together. Batching enables efficient GPU computation.
+
+How do you prevent overfitting? Techniques include regularization, dropout, early stopping, and using validation data. Overfitting occurs when models memorize training data.
+
+What is cross-validation? Cross-validation splits data into multiple folds for robust evaluation. It provides more reliable estimates of model performance.
+
+Explain early stopping. Early stopping halts training when validation performance stops improving. It prevents overfitting and saves computation.
+
+What is hyperparameter tuning? Hyperparameter tuning finds optimal settings like learning rate and batch size. Grid search and random search are common approaches.
+
+What is ablation study? Ablation study removes components to understand their importance. It helps identify which parts contribute to model performance.
+
+How do you handle imbalanced data? Techniques include resampling, class weighting, and different evaluation metrics. Imbalanced data can bias models toward majority classes.

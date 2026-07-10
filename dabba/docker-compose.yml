@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  dabba:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dabba:latest
+    container_name: dabba-server
+    ports:
+      - "8000:8000"
+    environment:
+      - DABBA_API_KEY=${DABBA_API_KEY:-}
+      - DABBA_MODEL=${DABBA_MODEL:-dabba-small}
+      - DABBA_MAX_TOKENS=${DABBA_MAX_TOKENS:-2048}
+      - DABBA_DEVICE=${DABBA_DEVICE:-auto}
+      - DABBA_LOG_LEVEL=${DABBA_LOG_LEVEL:-info}
+    volumes:
+      - dabba-models:/app/models
+      - dabba-data:/app/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  dabba-models:
+    driver: local
+  dabba-data:
+    driver: local

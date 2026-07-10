@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# dabba-cli — Terminal CLI Agent for the dabba framework
+#
+# Entry point script that runs the dabba CLI agent.
+# Usage: dabba-cli [command] [options]
+#
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+export PYTHONPATH="${PROJECT_DIR}:${PYTHONPATH:-}"
+
+exec python3 -m dabba.cli.main "$@"

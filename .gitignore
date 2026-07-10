@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+venv/
+.venv/
+
+# Node
+node_modules/
+out/
+*.vsix
+
+# Model weights & training artifacts (large binaries, regenerate via training pipeline)
+checkpoints/
+dabba-checkpoints/
+dabba-8b-gguf/
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# Logs & runtime data
+logs/
+dabba_logs/
+*.log
+attachments/
+.initialized
+.dabba/
+
+# Local personal settings (not for sharing)
+.claude/settings.local.json
+
+# Editor / OS
+.vscode-test/
+.DS_Store
+
+# Stray empty artifacts from shell mishaps
+/dabba black
+/dabba-chat@1.0.0

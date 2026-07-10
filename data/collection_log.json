@@ -1,0 +1,12 @@
+{
+  "total_lines": 13089,
+  "total_chars": 5406129,
+  "est_tokens": 1351532,
+  "sources": {
+    "knowledge_base_topics": 47,
+    "question_variants_per_topic": 14,
+    "out_of_scope_pairs": 9,
+    "conversation_examples": 6,
+    "gutenberg_books": 10
+  }
+}

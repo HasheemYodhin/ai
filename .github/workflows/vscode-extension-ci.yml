@@ -1,0 +1,74 @@
+name: VS Code Extension CI
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - 'vscode-extension/**'
+      - '.github/workflows/vscode-extension-ci.yml'
+  pull_request:
+    paths:
+      - 'vscode-extension/**'
+      - '.github/workflows/vscode-extension-ci.yml'
+
+defaults:
+  run:
+    working-directory: vscode-extension
+
+jobs:
+  verify:
+    name: Lint, compile, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Compile (tsc)
+        run: npm run compile
+
+      - name: Unit tests
+        run: npm run test
+
+  version-bump-check:
+    name: package.json version was bumped
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history (and tags) to diff against the last release —
+          # a shallow checkout would only see this PR's commits.
+          fetch-depth: 0
+
+      - name: Compare against the last git tag
+        run: |
+          set -euo pipefail
+          LAST_TAG=$(git tag --sort=-v:refname | head -1 || true)
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+
+          if [ -z "$LAST_TAG" ]; then
+            echo "No tags exist yet — nothing to compare against, skipping."
+            exit 0
+          fi
+
+          TAG_VERSION=$(git show "${LAST_TAG}:vscode-extension/package.json" 2>/dev/null \
+            | node -e "process.stdin.resume(); let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>console.log(JSON.parse(d).version))" \
+            || echo "unknown")
+
+          echo "Current version: $CURRENT_VERSION"
+          echo "Last tagged ($LAST_TAG) version: $TAG_VERSION"
+
+          if [ "$CURRENT_VERSION" = "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($CURRENT_VERSION) is unchanged since $LAST_TAG. Bump it before merging — see vscode-extension/scripts/check-version.js for the same check locally."
+            exit 1
+          fi

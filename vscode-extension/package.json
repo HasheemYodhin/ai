@@ -1,0 +1,272 @@
+{
+  "name": "dabba-vscode",
+  "displayName": "dabba AI",
+  "description": "AI-powered code assistance with dabba - chat, explain, refactor, and review code",
+  "version": "0.3.3",
+  "publisher": "dabba",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Chat",
+    "Programming",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "dabba",
+    "ai",
+    "chat",
+    "code",
+    "assistant",
+    "refactor",
+    "explain"
+  ],
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "dabba.openChat",
+        "title": "dabba: Open Chat",
+        "category": "dabba AI",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "dabba.focusPanel",
+        "title": "dabba: Focus Chat Panel",
+        "category": "dabba AI",
+        "icon": "$(layout-sidebar-right)"
+      },
+      {
+        "command": "dabba.newSession",
+        "title": "dabba: New Session",
+        "category": "dabba AI",
+        "icon": "$(add)"
+      },
+      {
+        "command": "dabba.inlineChat",
+        "title": "dabba: Inline Chat",
+        "category": "dabba AI",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "dabba.explainCode",
+        "title": "dabba: Explain Code",
+        "category": "dabba AI",
+        "icon": "$(book)"
+      },
+      {
+        "command": "dabba.refactorCode",
+        "title": "dabba: Refactor Code",
+        "category": "dabba AI",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "dabba.reviewFile",
+        "title": "dabba: Review File",
+        "category": "dabba AI",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "dabba.setApiKey",
+        "title": "dabba: Set API Key",
+        "category": "dabba AI",
+        "icon": "$(key)"
+      },
+      {
+        "command": "dabba.clearConversation",
+        "title": "dabba: Clear Conversation",
+        "category": "dabba AI",
+        "icon": "$(clear-all)"
+      }
+    ],
+    "views": {
+      "dabba": [
+        {
+          "type": "webview",
+          "id": "dabba.chat",
+          "name": "dabba AI",
+          "icon": "media/icon.svg",
+          "contextualTitle": "dabba AI Chat"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "dabba",
+          "title": "dabba AI",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "dabba.inlineChat",
+        "key": "ctrl+shift+i",
+        "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "dabba.focusPanel",
+        "key": "ctrl+shift+c",
+        "when": "true"
+      },
+      {
+        "command": "dabba.openChat",
+        "key": "ctrl+shift+j",
+        "when": "!editorTextFocus"
+      },
+      {
+        "command": "dabba.newSession",
+        "key": "ctrl+shift+n",
+        "when": "focusedView == dabba.chat"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorHasSelection",
+          "command": "dabba.explainCode",
+          "group": "dabba@1"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "dabba.refactorCode",
+          "group": "dabba@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "dabba.openChat",
+          "when": "true"
+        },
+        {
+          "command": "dabba.focusPanel",
+          "when": "true"
+        },
+        {
+          "command": "dabba.newSession",
+          "when": "true"
+        },
+        {
+          "command": "dabba.inlineChat",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "dabba.explainCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "dabba.refactorCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "dabba.reviewFile",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "dabba.setApiKey",
+          "when": "true"
+        },
+        {
+          "command": "dabba.clearConversation",
+          "when": "true"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "dabba AI",
+      "properties": {
+        "dabba.apiEndpoint": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "The dabba API server endpoint URL"
+        },
+        "dabba.model": {
+          "type": "string",
+          "default": "dabba",
+          "description": "Default model to use for completions"
+        },
+        "dabba.effort": {
+          "type": "string",
+          "default": "medium",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "description": "Default reasoning effort tier to use for agent completions"
+        },
+        "dabba.maxTokens": {
+          "type": "integer",
+          "default": 4096,
+          "minimum": 128,
+          "maximum": 128000,
+          "description": "Maximum tokens for generation"
+        },
+        "dabba.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature for response generation"
+        },
+        "dabba.autoReviewOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically review code when saving files"
+        },
+        "dabba.enableDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered diagnostics and problem markers"
+        },
+        "dabba.theme": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "description": "Theme for dabba chat panels"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package-compile",
+    "clean": "rm -rf out",
+    "check-types": "tsc --noEmit -p ./",
+    "compile": "npm run clean && npm run check-types && node esbuild.js",
+    "package-compile": "npm run clean && npm run check-types && node esbuild.js --production",
+    "watch:types": "tsc --noEmit -w -p ./",
+    "watch:bundle": "node esbuild.js --watch",
+    "watch": "npm run watch:types & npm run watch:bundle",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "verify": "npm run lint && npm run compile && npm run test",
+    "check-version": "node scripts/check-version.js",
+    "prepackage": "npm run check-version && npm run package-compile",
+    "package": "npm run prepackage && vsce package --no-dependencies --allow-missing-repository && node scripts/record-version.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.19.0",
+    "@typescript-eslint/parser": "^6.19.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.28.1",
+    "eslint": "^8.56.0",
+    "typescript": "^5.3.3",
+    "vitest": "^2.1.9"
+  }
+}

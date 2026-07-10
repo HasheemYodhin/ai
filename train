@@ -1,0 +1,1 @@
+public class Main { public static void main(String[] args) { String str = "madam"; if (str.equals(new StringBuilder(str).reverse().toString())) System.out.println(str + " is a palindrome."); else System.out.println(str + " is not a palindrome."); } }
