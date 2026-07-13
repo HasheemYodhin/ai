@@ -14,6 +14,11 @@ import { apiClient } from '@/api/client'
 // ArtifactPanel) instead of rendering the full code inline — keeps long
 // generated files from dominating the chat while still being one click away.
 const ARTIFACT_LINE_THRESHOLD = 15
+const RUNNABLE_LANGUAGES = new Set([
+  'python', 'py', 'python3', 'javascript', 'js', 'node', 'typescript', 'ts', 'tsx',
+  'java', 'c', 'cpp', 'c++', 'cc', 'go', 'golang', 'rust', 'rs', 'ruby', 'rb',
+  'php', 'bash', 'sh', 'shell', 'zsh', 'kotlin', 'kt', 'swift',
+])
 
 function guessTitle(language: string, code: string): string {
   const firstLine = code.split('\n', 1)[0]?.trim() ?? ''
@@ -152,6 +157,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated?: boolean; durationMs: number; phase?: string } | null>(null)
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
+  const canRun = RUNNABLE_LANGUAGES.has(language.toLowerCase())
 
   const handleCopy = useCallback(async () => {
     try {
@@ -182,12 +188,12 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
     }
   }, [language, code, stdin])
 
-  const runner = (
+  const runner = canRun ? (
     <>
       <button
         onClick={handleRun}
-        disabled={running || !language}
-        title={language ? `Run ${language}` : 'Add a language to this code fence to run it'}
+        disabled={running}
+        title={`Run ${language} locally`}
         className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white transition-colors"
       >
         {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -201,9 +207,9 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
         <TerminalSquare className="w-3.5 h-3.5" /> Input
       </button>
     </>
-  )
+  ) : null
 
-  const executionPanel = (stdinOpen || result || runError) && (
+  const executionPanel = canRun && (stdinOpen || result || runError) && (
     <div className="border-t border-border dark:border-border-dark bg-gray-950 text-gray-100">
       {stdinOpen && (
         <div className="p-3 border-b border-gray-800">
@@ -218,7 +224,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
         </div>
       )}
       {(result || runError) && (
-        <div className="relative p-3 font-mono text-xs">
+        <div className="relative p-3 font-mono text-xs max-h-80 overflow-auto">
           <button onClick={() => { setResult(null); setRunError('') }} className="absolute right-2 top-2 p-1 text-gray-500 hover:text-gray-200" title="Close output"><X className="w-3.5 h-3.5" /></button>
           <div className="flex items-center gap-2 mb-2 pr-6 font-sans text-[10px]">
             <span className={cn('font-semibold', runError || result?.exitCode !== 0 ? 'text-red-400' : 'text-green-400')}>

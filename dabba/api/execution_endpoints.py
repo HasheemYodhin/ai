@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 import re
 import shutil
 import subprocess
@@ -161,6 +162,13 @@ def create_execution_router(auth: Optional[ApiKeyAuth] = None, rate_limiter: Opt
 
     @router.post("/execute")
     async def execute(req: ExecutionRequest, request: Request, api_key: Optional[str] = Depends(authorize)):
+        client_host = request.client.host if request.client else ""
+        try:
+            is_local = ipaddress.ip_address(client_host).is_loopback
+        except ValueError:
+            is_local = client_host == "localhost"
+        if not is_local:
+            raise HTTPException(status_code=403, detail="Code execution is restricted to local clients")
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
         try:
