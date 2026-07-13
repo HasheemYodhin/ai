@@ -1,5 +1,30 @@
 import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Message, ModelCatalog, TokenUsage, McpServer, Conversation } from '@/types'
 
+async function responseError(response: Response, fallback: string): Promise<Error> {
+  const text = await response.text().catch(() => '')
+  if (!text) return new Error(fallback)
+
+  try {
+    const body = JSON.parse(text) as {
+      detail?: unknown
+      error?: { message?: unknown }
+    }
+    if (typeof body.error?.message === 'string') return new Error(body.error.message)
+    if (typeof body.detail === 'string') return new Error(body.detail)
+    if (Array.isArray(body.detail)) {
+      const details = body.detail
+        .map(item => typeof item?.msg === 'string' ? item.msg : '')
+        .filter(Boolean)
+        .join('; ')
+      if (details) return new Error(details)
+    }
+  } catch {
+    // Some proxies return plain-text errors instead of JSON.
+  }
+
+  return new Error(text.trim() || fallback)
+}
+
 export class ApiClient {
   private baseUrl: string
   private apiKey: string
@@ -56,8 +81,11 @@ export class ApiClient {
       signal,
     })
     if (!response.ok) {
-      const body = await response.json().catch(() => null)
-      throw new Error(body?.detail ?? `Execution failed (status ${response.status})`)
+      const error = await responseError(response, `Execution failed (status ${response.status})`)
+      if (response.status === 422 && language.toLowerCase() === 'java' && error.message.includes('Runtime not installed')) {
+        throw new Error('Java runtime is not installed. Install the Java JDK, then restart the Dabba backend.')
+      }
+      throw error
     }
     return response.json()
   }
@@ -210,7 +238,7 @@ export class ApiClient {
       signal: opts?.signal,
     })
     if (!response.ok) {
-      throw new Error(`Transcription request failed (status ${response.status})`)
+      throw await responseError(response, `Transcription request failed (status ${response.status})`)
     }
     const data = await response.json()
     if (data.error) throw new Error(data.error)
@@ -226,8 +254,7 @@ export class ApiClient {
       signal: opts?.signal,
     })
     if (!response.ok) {
-      const body = await response.json().catch(() => null)
-      throw new Error(body?.detail ?? `Speech synthesis failed (status ${response.status})`)
+      throw await responseError(response, `Speech synthesis failed (status ${response.status})`)
     }
     return response.blob()
   }

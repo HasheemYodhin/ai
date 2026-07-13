@@ -4,7 +4,16 @@ import { X, Plug, Loader2 } from 'lucide-react'
 interface ConnectorModalProps {
   isOpen: boolean
   onClose: () => void
-  onSubmit: (input: { name: string; command: string; args: string[] }) => Promise<void>
+  onSubmit: (input: { name: string; command: string; args: string[]; env?: Record<string, string> }) => Promise<void>
+  preset?: ConnectorPreset | null
+}
+
+export interface ConnectorPreset {
+  name: string
+  command?: string
+  args?: string
+  env?: string
+  note?: string
 }
 
 /**
@@ -12,21 +21,23 @@ interface ConnectorModalProps {
  * connects it immediately (no server restart needed). Same shape as
  * Claude Desktop's mcpServers config: a command + args to launch it.
  */
-export function ConnectorModal({ isOpen, onClose, onSubmit }: ConnectorModalProps) {
+export function ConnectorModal({ isOpen, onClose, onSubmit, preset }: ConnectorModalProps) {
   const [name, setName] = useState('')
   const [command, setCommand] = useState('')
   const [args, setArgs] = useState('')
+  const [env, setEnv] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (isOpen) {
-      setName('')
-      setCommand('')
-      setArgs('')
+      setName(preset?.name ?? '')
+      setCommand(preset?.command ?? '')
+      setArgs(preset?.args ?? '')
+      setEnv(preset?.env ?? '')
       setError(null)
     }
-  }, [isOpen])
+  }, [isOpen, preset])
 
   if (!isOpen) return null
 
@@ -40,7 +51,21 @@ export function ConnectorModal({ isOpen, onClose, onSubmit }: ConnectorModalProp
       // Splits on whitespace but keeps "quoted strings" together — same
       // convention as a shell command line, since args launch a real process.
       const parsedArgs = args.match(/"[^"]*"|'[^']*'|\S+/g)?.map(a => a.replace(/^['"]|['"]$/g, '')) ?? []
-      await onSubmit({ name: name.trim(), command: command.trim(), args: parsedArgs })
+      const parsedEnv = Object.fromEntries(
+        env.split('\n')
+          .map(line => line.trim())
+          .filter(line => line && line.includes('='))
+          .map(line => {
+            const separator = line.indexOf('=')
+            return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()]
+          })
+      )
+      await onSubmit({
+        name: name.trim(),
+        command: command.trim(),
+        args: parsedArgs,
+        ...(Object.keys(parsedEnv).length ? { env: parsedEnv } : {}),
+      })
       onClose()
     } catch (err) {
       setError((err as Error).message || 'Failed to add connector')
@@ -66,8 +91,14 @@ export function ConnectorModal({ isOpen, onClose, onSubmit }: ConnectorModalProp
 
         <div className="p-5 space-y-4">
           <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
-            Adds a stdio MCP server — the same config shape Claude Desktop uses. It connects immediately, no server restart needed.
+            Adds a stdio MCP server. Review the command before connecting; it starts immediately without a server restart.
           </p>
+
+          {preset?.note && (
+            <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">
+              {preset.note}
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Name</label>
@@ -97,6 +128,17 @@ export function ConnectorModal({ isOpen, onClose, onSubmit }: ConnectorModalProp
               onChange={e => setArgs(e.target.value)}
               placeholder='-y @modelcontextprotocol/server-filesystem /path'
               className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors font-mono"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Environment <span className="text-text-tertiary font-normal">(optional, one KEY=value per line)</span></label>
+            <textarea
+              value={env}
+              onChange={e => setEnv(e.target.value)}
+              placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=your-token"
+              rows={3}
+              className="w-full resize-y px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors font-mono"
             />
           </div>
 

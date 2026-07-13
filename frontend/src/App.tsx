@@ -62,9 +62,11 @@ function ChatApp() {
   // temporary chats, which only ever live in useChat's in-memory state.
   useEffect(() => {
     if (messages.length > 0 && !isTemporaryChat) {
-      saveConversation(messages)
+      // Bind each save to the ID from this render. A chat switch must never
+      // let the outgoing messages overwrite the newly selected conversation.
+      saveConversation(messages, currentId ?? undefined)
     }
-  }, [messages, isTemporaryChat])
+  }, [messages, currentId, isTemporaryChat, saveConversation])
 
   // Web search and image generation start their own fresh conversation the
   // same way a normal message does — ensure one exists before sending.
@@ -119,12 +121,21 @@ function ChatApp() {
   }, [clearMessages, setCurrentId])
 
   const handleSelectConversation = useCallback((id: string) => {
+    if (id === currentId) return
+
+    stopGeneration()
+    if (currentId && messages.length > 0 && !isTemporaryChat) {
+      saveConversation(messages, currentId)
+    }
+
     const conv = loadConversation(id)
     if (conv) {
-      setMessages(conv.messages)
+      // Copy the array so React always commits the selected conversation,
+      // even if its message array was previously used by the chat view.
+      setMessages([...conv.messages])
       setIsTemporaryChat(false)
     }
-  }, [loadConversation, setMessages])
+  }, [currentId, isTemporaryChat, loadConversation, messages, saveConversation, setMessages, stopGeneration])
 
   const handleDeleteConversation = useCallback((id: string) => {
     if (currentId === id) {
@@ -232,7 +243,7 @@ function ChatApp() {
         )}
         {view === 'agents' && <div className="flex-1 min-h-0"><AgentsPage /></div>}
         {view === 'tools' && <div className="flex-1 min-h-0"><ToolsPage /></div>}
-        {view === 'connectors' && <div className="flex-1 min-h-0"><ConnectorsPage /></div>}
+        {view === 'connectors' && <div className="flex-1 min-h-0"><ConnectorsPage onOpenSkills={() => setView('skills')} /></div>}
         {view === 'skills' && <div className="flex-1 min-h-0"><SkillsPage /></div>}
       </main>
       <SettingsModal

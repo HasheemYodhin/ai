@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { Conversation, Project } from '@/types'
-import { cn, formatRelativeTime, truncate } from '@/lib/utils'
+import { cn, truncate } from '@/lib/utils'
 import {
   Trash2, MessageSquare, AlertTriangle, Pin, PinOff, Pencil,
   FolderMinus, MoreHorizontal,
@@ -17,15 +17,6 @@ interface ConversationListProps {
   onRename: (id: string, title: string) => void
   onTogglePin: (id: string) => void
   onAssignToProject: (id: string, projectId: string | null) => void
-}
-
-/** Last model that actually replied in this conversation, for the badge next to each chat. */
-function lastModel(conv: Conversation): string | undefined {
-  for (let i = conv.messages.length - 1; i >= 0; i--) {
-    const m = conv.messages[i]
-    if (m.role === 'assistant' && m.model) return m.model
-  }
-  return undefined
 }
 
 export function ConversationList({
@@ -97,8 +88,9 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary dark:text-text-dark-tertiary">
-        Recent Chats
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary">
+        <span>Recent</span>
+        <span className="font-normal tracking-normal">{filtered.length}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2" onClick={() => setMoveMenuFor(null)}>
@@ -109,28 +101,27 @@ export function ConversationList({
             {search.trim() && <p className="mt-1 text-[10px] opacity-75">Try a different search</p>}
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {filtered.map((conv) => {
               const project = conv.projectId ? projects.find(p => p.id === conv.projectId) : undefined
-              const model = lastModel(conv)
               return (
                 <div
                   key={conv.id}
                   onClick={() => editingId !== conv.id && handleSelect(conv.id)}
                   className={cn(
-                    'w-full text-left px-3 py-2.5 rounded-lg transition-colors group relative cursor-pointer',
+                    'w-full text-left px-2 py-1.5 rounded-lg transition-colors group relative cursor-pointer',
                     conv.id === currentId
                       ? 'bg-surface dark:bg-surface-dark-tertiary text-text-primary dark:text-text-dark-primary'
                       : 'bg-transparent hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary'
                   )}
                 >
-                  <div className="flex items-start gap-2.5">
+                  <div className="flex items-center gap-2">
                     {project ? (
-                      <span className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ background: project.color }} title={project.name} />
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: project.color }} title={project.name} />
                     ) : conv.pinned ? (
-                      <Pin className="w-4 h-4 mt-0.5 flex-shrink-0 text-accent" />
+                      <Pin className="w-3.5 h-3.5 flex-shrink-0 text-accent" />
                     ) : (
-                      <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 opacity-60" />
+                      <MessageSquare className="w-3.5 h-3.5 flex-shrink-0 opacity-50" />
                     )}
                     <div className="flex-1 min-w-0">
                       {editingId === conv.id ? (
@@ -141,78 +132,44 @@ export function ConversationList({
                           onKeyDown={handleRenameKeyDown}
                           onBlur={commitRename}
                           onClick={e => e.stopPropagation()}
-                          className="w-full text-sm font-medium bg-transparent border-b border-accent outline-none text-text-primary dark:text-text-dark-primary"
+                          className="w-full text-[13px] font-medium bg-transparent border-b border-accent outline-none text-text-primary dark:text-text-dark-primary"
                         />
                       ) : (
-                        <p className="text-sm font-medium truncate">
+                        <p className="text-[13px] leading-5 font-medium truncate">
                           {truncate(conv.title, 40)}
                         </p>
                       )}
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-[10px] opacity-70 font-medium">
-                          {formatRelativeTime(conv.updatedAt)}
-                        </span>
-                        {model && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary dark:text-text-dark-tertiary truncate max-w-[100px]">
-                            {model}
-                          </span>
-                        )}
-                      </div>
                     </div>
 
-                    <div className="flex items-center gap-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0 relative">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); onTogglePin(conv.id) }}
-                        className="p-1.5 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-accent transition-colors"
-                        title={conv.pinned ? 'Unpin' : 'Pin'}
-                      >
-                        {conv.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />}
-                      </button>
-                      <button
-                        onClick={(e) => startRename(e, conv)}
-                        className="p-1.5 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
-                        title="Rename"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                    <div className="relative flex-shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100">
                       <button
                         onClick={(e) => { e.stopPropagation(); setMoveMenuFor(moveMenuFor === conv.id ? null : conv.id) }}
-                        className="p-1.5 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
-                        title="Add to project"
+                        className="p-1 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                        title="Conversation actions"
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(e, conv.id)}
-                        className={cn(
-                          'p-1.5 rounded-md transition-colors',
-                          confirmDelete === conv.id
-                            ? 'bg-red-100 dark:bg-red-900/30 text-red-500'
-                            : 'hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-red-500'
-                        )}
-                        title={confirmDelete === conv.id ? 'Confirm delete' : 'Delete conversation'}
-                      >
-                        {confirmDelete === conv.id ? (
-                          <AlertTriangle className="w-3.5 h-3.5" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5" />
-                        )}
                       </button>
 
                       {moveMenuFor === conv.id && (
                         <div
                           onClick={e => e.stopPropagation()}
-                          className="absolute right-0 top-full mt-1 w-48 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-30 py-1 animate-fade-in"
+                          className="absolute right-0 top-full mt-1 w-44 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-30 py-1 animate-fade-in"
                         >
-                          <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-text-tertiary">Move to project</div>
-                          {projects.map(p => (
+                          <button onClick={() => { onTogglePin(conv.id); setMoveMenuFor(null) }} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary">
+                            {conv.pinned ? <PinOff className="w-3.5 h-3.5" /> : <Pin className="w-3.5 h-3.5" />} {conv.pinned ? 'Unpin' : 'Pin'}
+                          </button>
+                          <button onClick={(e) => { setMoveMenuFor(null); startRename(e, conv) }} className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-text-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary">
+                            <Pencil className="w-3.5 h-3.5" /> Rename
+                          </button>
+                          {projects.length > 0 && <div className="my-1 border-t border-border dark:border-border-dark" />}
+                          {projects.map(projectItem => (
                             <button
-                              key={p.id}
-                              onClick={() => { onAssignToProject(conv.id, p.id); setMoveMenuFor(null) }}
+                              key={projectItem.id}
+                              onClick={() => { onAssignToProject(conv.id, projectItem.id); setMoveMenuFor(null) }}
                               className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors text-xs"
                             >
-                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} />
-                              <span className="truncate text-text-primary dark:text-text-dark-primary">{p.name}</span>
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: projectItem.color }} />
+                              <span className="truncate text-text-primary dark:text-text-dark-primary">Move to {projectItem.name}</span>
                             </button>
                           ))}
                           {conv.projectId && (
@@ -223,9 +180,11 @@ export function ConversationList({
                               <FolderMinus className="w-3.5 h-3.5" /> Remove from project
                             </button>
                           )}
-                          {projects.length === 0 && (
-                            <p className="px-3 py-2 text-[10px] text-text-tertiary">No projects yet — create one from Projects in the sidebar.</p>
-                          )}
+                          <div className="my-1 border-t border-border dark:border-border-dark" />
+                          <button onClick={(e) => handleDelete(e, conv.id)} className={cn('w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors', confirmDelete === conv.id ? 'bg-red-500/10 text-red-500' : 'text-red-500 hover:bg-red-500/10')}>
+                            {confirmDelete === conv.id ? <AlertTriangle className="w-3.5 h-3.5" /> : <Trash2 className="w-3.5 h-3.5" />}
+                            {confirmDelete === conv.id ? 'Click again to delete' : 'Delete'}
+                          </button>
                         </div>
                       )}
                     </div>

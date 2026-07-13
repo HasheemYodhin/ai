@@ -99,7 +99,7 @@ export function Sidebar({
       onClick={() => onChangeView(v)}
       aria-current={view === v ? 'page' : undefined}
       className={cn(
-        'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+        'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors',
         view === v
           ? 'bg-accent/10 text-accent'
           : 'text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary'
@@ -126,14 +126,14 @@ export function Sidebar({
         className={cn(
           'fixed md:relative z-30 h-full flex flex-col transition-all duration-200 ease-in-out',
           'bg-surface-secondary dark:bg-surface-dark-secondary border-r border-border dark:border-border-dark',
-          isOpen ? 'w-[272px] translate-x-0' : 'w-[272px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
+          isOpen ? 'w-[248px] translate-x-0' : 'w-[248px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
         )}
       >
         {/* Brand header */}
-        <div className="flex items-center justify-between px-3.5 py-3 border-b border-border dark:border-border-dark">
+        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border dark:border-border-dark">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="Dabba Logo" className="w-6 h-6 object-contain rounded-md" />
-            <span className="font-bold text-sm text-text-primary dark:text-text-dark-primary">Dabba</span>
+            <img src={logo} alt="Dabba Logo" className="w-5 h-5 object-contain rounded-md" />
+            <span className="font-semibold text-sm text-text-primary dark:text-text-dark-primary">Dabba</span>
           </div>
           <button
             onClick={onToggle}
@@ -144,11 +144,11 @@ export function Sidebar({
           </button>
         </div>
 
-        <div className="p-3 pb-0 space-y-1.5">
+        <div className="px-2.5 pt-2.5 space-y-1.5">
           <div className="flex items-center gap-1.5">
             <button
               onClick={onNew}
-              className="flex-1 flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors"
+              className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-[13px] font-medium transition-colors"
             >
               <Plus className="w-4 h-4" />
               New Chat
@@ -156,7 +156,7 @@ export function Sidebar({
             <button
               onClick={onNewTemporary}
               title="New temporary chat — not saved to history"
-              className="p-2 rounded-lg border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              className="p-1.5 rounded-lg border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               <Ghost className="w-4 h-4" />
             </button>
@@ -164,7 +164,7 @@ export function Sidebar({
         </div>
 
         {/* Search — deliberately given breathing room below New Chat */}
-        <div className="px-3 pt-4 pb-1">
+        <div className="px-2.5 pt-2.5 pb-0.5">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" />
             <input
@@ -180,7 +180,7 @@ export function Sidebar({
               }}
               placeholder="Search chats…"
               aria-label="Search conversations"
-              className="w-full pl-9 pr-16 py-2 text-sm rounded-lg glass-input
+              className="w-full pl-8 pr-14 py-1.5 text-[13px] rounded-lg glass-input
                 text-text-primary dark:text-text-dark-primary placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary
                 focus:border-accent/50 outline-none transition-colors"
             />
@@ -201,16 +201,16 @@ export function Sidebar({
         </div>
 
         {/* Navigation */}
-        <div className="px-3 pt-3">
+        <div className="px-2.5 pt-2.5">
           <button
             onClick={() => setNavigationOpen(o => !o)}
-            className="w-full flex items-center justify-between px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary dark:text-text-dark-tertiary"
+            className="w-full flex items-center justify-between px-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary"
             aria-expanded={navigationOpen}
           >
             <span>Navigation</span>
             <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !navigationOpen && '-rotate-90')} />
           </button>
-          {navigationOpen && <nav className="space-y-0.5">
+          {navigationOpen && <nav>
             {navItem('chat', <MessageSquare className="w-4 h-4 flex-shrink-0" />, 'Chats',
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary flex-shrink-0">{conversations.length}</span>)}
             {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects')}
@@ -221,7 +221,7 @@ export function Sidebar({
             {navItem('skills', <BookOpen className="w-4 h-4 flex-shrink-0" />, 'Prompt library')}
             <button
               onClick={onStartResearch}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
             >
               <Telescope className="w-4 h-4 flex-shrink-0" />
               <span className="flex-1 text-left">Research mode</span>
@@ -230,21 +230,21 @@ export function Sidebar({
         </div>
 
         {/* Projects quick list */}
-        <div className="px-3 pt-3">
+        <div className="px-2.5 pt-2.5">
           <button
             onClick={() => setProjectsOpen(o => !o)}
-            className="w-full flex items-center justify-between px-1 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary dark:text-text-dark-tertiary"
+            className="w-full flex items-center justify-between px-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary"
             aria-expanded={projectsOpen}
           >
             <span>Projects <span className="ml-1 opacity-70">{projects.length}</span></span>
             <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !projectsOpen && '-rotate-90')} />
           </button>
-          {projectsOpen && <div className="space-y-0.5 max-h-32 overflow-y-auto scrollbar-thin">
+          {projectsOpen && <div className="max-h-24 overflow-y-auto scrollbar-thin">
             {projects.map(p => (
               <button
                 key={p.id}
                 onClick={() => onChangeView('projects')}
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
               >
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} />
                 <span className="flex-1 text-left truncate">{p.name}</span>
@@ -252,7 +252,7 @@ export function Sidebar({
             ))}
             <button
               onClick={() => setProjectModalOpen(true)}
-              className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded-lg text-xs font-medium text-accent hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
+              className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-medium text-accent hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
             >
               <FolderPlus className="w-3.5 h-3.5 flex-shrink-0" />
               <span className="flex-1 text-left">New project</span>
@@ -260,7 +260,7 @@ export function Sidebar({
           </div>}
         </div>
 
-        <div className="flex-1 min-h-0 mt-2 border-t border-border dark:border-border-dark pt-1 relative">
+        <div className="flex-1 min-h-0 mt-1.5 border-t border-border dark:border-border-dark relative">
           {pinnedCount > 0 && (
             <div className="absolute right-3 top-2 z-10 flex items-center gap-1 text-[9px] text-text-tertiary" title={`${pinnedCount} pinned conversation${pinnedCount === 1 ? '' : 's'}`}>
               <Pin className="w-2.5 h-2.5" /> {pinnedCount}
@@ -280,10 +280,10 @@ export function Sidebar({
         </div>
 
         {/* Profile — replaces the old theme toggle (theme now lives in Settings > General) */}
-        <div className="p-3 border-t border-border dark:border-border-dark relative" ref={profileRef}>
+        <div className="p-2 border-t border-border dark:border-border-dark relative" ref={profileRef}>
           <button
             onClick={() => setProfileMenuOpen(o => !o)}
-            className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+            className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
           >
             <div
               className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"

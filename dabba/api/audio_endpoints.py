@@ -11,16 +11,24 @@ shipped here for local transcription — no cloud audio API involved.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
+import importlib.util
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-_whisper_model = None
+WHISPER_MODELS = {"tiny", "base", "small", "medium", "large"}
+DEFAULT_VOICE = "en_US-lessac-medium"
+VOICE_DIR = Path.home() / ".local" / "share" / "piper-voices"
+
+_whisper_models: dict[str, object] = {}
+_model_lock = threading.Lock()
 
 
 class TranscribeRequest(BaseModel):
@@ -29,37 +37,78 @@ class TranscribeRequest(BaseModel):
 
 
 def _get_whisper_model(model_name: str):
-    global _whisper_model
-    if _whisper_model is None:
-        import whisper
-        _whisper_model = whisper.load_model(model_name)
-    return _whisper_model
+    cached = _whisper_models.get(model_name)
+    if cached is not None:
+        return cached
+
+    # Concurrent first requests must not load the same large model twice.
+    with _model_lock:
+        cached = _whisper_models.get(model_name)
+        if cached is None:
+            import whisper
+            cached = whisper.load_model(model_name)
+            _whisper_models[model_name] = cached
+    return cached
+
+
+def _transcribe_file(path: str, model_name: str) -> str:
+    model = _get_whisper_model(model_name)
+    result = model.transcribe(path, fp16=False)
+    return (result.get("text") or "").strip()
 
 
 def create_audio_router() -> APIRouter:
-    router = APIRouter()
+    router = APIRouter(prefix="/v1", tags=["audio"])
 
-    @router.post("/v1/transcribe")
+    @router.get("/audio/status")
+    async def audio_status():
+        whisper_installed = importlib.util.find_spec("whisper") is not None
+        ffmpeg_installed = shutil.which("ffmpeg") is not None
+        voice_path = VOICE_DIR / f"{DEFAULT_VOICE}.onnx"
+        return {
+            "transcription": {
+                "available": whisper_installed and ffmpeg_installed,
+                "whisperInstalled": whisper_installed,
+                "ffmpegInstalled": ffmpeg_installed,
+                "loadedModels": sorted(_whisper_models),
+            },
+            "speech": {
+                "available": importlib.util.find_spec("piper") is not None and voice_path.exists(),
+                "piperInstalled": importlib.util.find_spec("piper") is not None,
+                "defaultVoice": DEFAULT_VOICE,
+                "voiceDownloaded": voice_path.exists(),
+            },
+        }
+
+    @router.post("/transcribe")
     async def transcribe(req: TranscribeRequest):
         # whisper.load_audio() shells out to ffmpeg unconditionally to decode
         # audio, regardless of input format — check up front so a missing
         # ffmpeg produces one clear message instead of a raw traceback.
         if shutil.which("ffmpeg") is None:
-            return {
-                "error": (
+            raise HTTPException(
+                status_code=503,
+                detail=(
                     "ffmpeg is required for voice transcription but was not found. "
                     "Install it with `sudo apt-get install ffmpeg` (Linux), "
                     "`brew install ffmpeg` (macOS), or download it for Windows."
-                )
-            }
+                ),
+            )
+
+        model_name = (req.model or "base").strip().lower()
+        if model_name not in WHISPER_MODELS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported Whisper model '{model_name}'. Choose: {', '.join(sorted(WHISPER_MODELS))}",
+            )
 
         try:
-            audio_bytes = base64.b64decode(req.audio_base64)
+            audio_bytes = base64.b64decode(req.audio_base64, validate=True)
         except Exception as exc:
-            return {"error": f"Invalid audio data: {exc}"}
+            raise HTTPException(status_code=400, detail=f"Invalid audio data: {exc}") from exc
 
         if len(audio_bytes) == 0:
-            return {"error": "No audio recorded — check your microphone."}
+            raise HTTPException(status_code=400, detail="No audio recorded - check your microphone.")
 
         tmp_path = None
         try:
@@ -67,11 +116,17 @@ def create_audio_router() -> APIRouter:
                 f.write(audio_bytes)
                 tmp_path = f.name
 
-            model = _get_whisper_model(req.model or "base")
-            result = model.transcribe(tmp_path, fp16=False)
-            return {"text": (result.get("text") or "").strip()}
+            text = await asyncio.to_thread(_transcribe_file, tmp_path, model_name)
+            return {"text": text}
+        except HTTPException:
+            raise
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Whisper is not installed. Install the openai-whisper package to enable voice input.",
+            ) from exc
         except Exception as exc:
-            return {"error": f"Transcription failed: {exc}"}
+            raise HTTPException(status_code=422, detail=f"Transcription failed: {exc}") from exc
         finally:
             if tmp_path:
                 Path(tmp_path).unlink(missing_ok=True)
