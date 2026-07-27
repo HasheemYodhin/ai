@@ -15,6 +15,9 @@ class TestAgentConfig:
         assert cfg.system_prompt is not None
         assert cfg.max_iterations == 10
 
+    def test_allowed_tools_defaults_to_unrestricted(self):
+        assert AgentConfig().allowed_tools == []
+
     def test_custom(self):
         cfg = AgentConfig(system_prompt="You are a test bot.", max_iterations=5)
         assert cfg.max_iterations == 5
@@ -136,6 +139,21 @@ class TestMCPHandler:
 
 
 class TestContextManager:
+    def test_remove_entry_rolls_back_only_the_unanswered_last_message(self):
+        cm = ContextManager(max_history=100)
+        failed = cm.add_entry("user", "failed request")
+
+        cm.remove_entry(failed)
+
+        assert cm.entry_count == 0
+        assert cm.history == []
+
+        completed = cm.add_entry("user", "completed request")
+        cm.add_entry("assistant", "answer")
+        cm.remove_entry(completed)
+
+        assert cm.entry_count == 2
+
     def test_initialization(self):
         cm = ContextManager(max_history=100)
         assert len(cm.history) == 0

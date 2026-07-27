@@ -270,7 +270,9 @@ const SUGGESTED_CONNECTORS: SuggestedConnector[] = [
   {
     id: 'linkedin', name: 'LinkedIn', category: 'Productivity', icon: MessageCircle, customBrand: 'linkedin',
     description: 'Research professional profiles, companies, and industry context.',
-    note: 'Enter the command and approved credentials from your LinkedIn MCP provider.',
+    command: 'python3', args: '-m dabba.scripts.linkedin_mcp',
+    env: 'LINKEDIN_ACCESS_TOKEN=',
+    note: 'Runs the built-in LinkedIn MCP server. Leave LINKEDIN_ACCESS_TOKEN blank to run in simulation mode, or provide a real LinkedIn OAuth token to publish posts.',
     iconClass: 'text-[#0A66C2]', tileClass: 'bg-blue-50 dark:bg-blue-950/50',
   },
   {
@@ -512,7 +514,7 @@ export function ConnectorsPage({ onOpenSkills }: ConnectorsPageProps) {
   }
 
   const handleDelete = async (name: string) => {
-    if (!confirm(`Remove connector "${name}"? If it is connected, it stays live until the server restarts.`)) return
+    if (!confirm(`Remove connector "${name}"?`)) return
     setDeletingName(name)
     try {
       await apiClient.deleteMcpServer(name)
@@ -565,7 +567,17 @@ export function ConnectorsPage({ onOpenSkills }: ConnectorsPageProps) {
               {servers.map(server => {
                 const catalogConnector = SUGGESTED_CONNECTORS.find(connector => connector.name.toLowerCase() === server.name.toLowerCase())
                 return (
-                  <div key={server.name} className="group relative" title={`${server.name} - ${server.connected ? `${server.tools?.length ?? 0} tools` : 'disconnected'}`}>
+                  <div
+                    key={server.name}
+                    className="group relative"
+                    title={server.message || `${server.name} - ${server.connected
+                      ? `verified, ${server.tools?.length ?? 0} tools`
+                      : server.verifiedStatus === 'authentication_required'
+                        ? 'authentication required'
+                        : server.processRunning
+                          ? 'running, but no authenticated tools were discovered'
+                          : 'stopped'}`}
+                  >
                     <span className={cn('relative flex h-10 w-10 items-center justify-center rounded-xl border border-border/70 dark:border-border-dark', catalogConnector?.tileClass ?? 'bg-surface-secondary dark:bg-surface-dark-tertiary')}>
                       {catalogConnector ? <ConnectorIcon connector={catalogConnector} /> : <Plug className="h-4 w-4 text-text-tertiary" />}
                       <span className={cn('absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-surface dark:border-surface-dark', server.connected ? 'bg-emerald-500' : 'bg-gray-400')} />

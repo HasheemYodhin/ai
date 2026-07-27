@@ -8,6 +8,7 @@ authentication, rate limiting, CORS, and health checks.
 import logging
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from dabba.config.api_config import ApiConfig
 from dabba.api.auth import ApiKeyAuth
@@ -542,20 +544,43 @@ def create_app(
         allow_headers=["*"],
     )
 
+    try:
+        from dabba.platform.services import TelemetryService
+        telemetry = TelemetryService()
+    except Exception:
+        telemetry = None
+
     @app.middleware("http")
     async def log_requests(request: Request, call_next):
-        """Log incoming requests and their durations."""
-        if not config.log_requests:
-            return await call_next(request)
-
+        """Trace incoming requests and correlate logs with a request id."""
+        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
         start = time.time()
-        response = await call_next(request)
+        if telemetry:
+            with telemetry.span(
+                "http.request",
+                **{
+                    "http.method": request.method,
+                    "http.route": request.url.path,
+                    "dabba.request_id": request_id,
+                },
+            ):
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
         duration = time.time() - start
-
-        logger.info(
-            f"{request.method} {request.url.path} "
-            f"{response.status_code} {duration:.3f}s"
-        )
+        if telemetry:
+            telemetry.record_http(
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration * 1000,
+            )
+        response.headers["X-Request-ID"] = request_id
+        if config.log_requests:
+            logger.info(
+                f"request_id={request_id} {request.method} {request.url.path} "
+                f"{response.status_code} {duration:.3f}s"
+            )
         return response
 
     @app.get("/health")
@@ -566,6 +591,23 @@ def create_app(
             "version": "0.1.0",
             "model_loaded": app.state.model_engine.model is not None,
         }
+
+    @app.get("/ready")
+    async def readiness_check():
+        """Readiness includes durable platform storage, not local-model availability."""
+        try:
+            from dabba.platform.core import get_platform_store
+            get_platform_store().fetchone("SELECT 1 AS ok")
+            storage_ready = True
+        except Exception:
+            storage_ready = False
+        return JSONResponse(
+            status_code=200 if storage_ready else 503,
+            content={
+                "status": "ready" if storage_ready else "not_ready",
+                "storage": storage_ready,
+            },
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException):
@@ -580,6 +622,21 @@ def create_app(
                 }
             },
         )
+
+    try:
+        from dabba.platform.provider_gateway import ProviderFailure
+
+        @app.exception_handler(ProviderFailure)
+        async def provider_exception_handler(request: Request, exc: ProviderFailure):
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"error": exc.as_dict()},
+                headers={
+                    "Retry-After": str(max(1, (exc.retry_after_ms or 1000) // 1000))
+                } if exc.retryable else None,
+            )
+    except ImportError:
+        pass
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request: Request, exc: Exception):
@@ -653,20 +710,47 @@ def create_app(
     except Exception as _tts_exc:
         logger.warning(f"Speech endpoints unavailable: {_tts_exc}")
 
-    @app.get("/")
-    async def root():
-        """Root endpoint with API information."""
-        return {
-            "name": "dabba API",
-            "version": "0.1.0",
-            "endpoints": {
-                "chat": "/v1/chat/completions",
-                "embeddings": "/v1/embeddings",
-                "models": "/v1/models",
-                "health": "/health",
-            },
-            "docs": "/docs",
-        }
+    # PDF, Word, and text extraction for web-chat attachments.
+    try:
+        from dabba.api.document_endpoints import create_document_router
+        app.include_router(create_document_router())
+    except Exception as _document_exc:
+        logger.warning(f"Document endpoints unavailable: {_document_exc}")
+
+    # Shared durable platform services used by web, CLI, and extensions.
+    try:
+        from dabba.api.platform_endpoints import create_platform_router
+        app.include_router(create_platform_router())
+    except Exception as _platform_exc:
+        logger.warning(f"Platform endpoints unavailable: {_platform_exc}")
+
+    # User-configurable event hooks (session/tool-call shell commands)
+    try:
+        from dabba.api.hooks_endpoints import create_hooks_router
+        app.include_router(create_hooks_router())
+    except Exception as _hooks_exc:
+        logger.warning(f"Hooks endpoints unavailable: {_hooks_exc}")
+
+    frontend_dir = os.environ.get("DABBA_FRONTEND_DIR")
+    if frontend_dir and Path(frontend_dir).is_dir():
+        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+    else:
+        @app.get("/")
+        async def root():
+            """Root endpoint with API information."""
+            return {
+                "name": "dabba API",
+                "version": "0.1.0",
+                "endpoints": {
+                    "chat": "/v1/chat/completions",
+                    "embeddings": "/v1/embeddings",
+                    "models": "/v1/models",
+                    "health": "/health",
+                    "readiness": "/ready",
+                    "platform": "/v1/platform/capabilities",
+                },
+                "docs": "/docs",
+            }
 
     return app
 

@@ -12,6 +12,15 @@ export interface TextFormat {
   mime: string
 }
 
+export type DocumentFormat = 'pdf' | 'docx' | 'xlsx' | 'pptx'
+
+const DOCUMENT_MIME_TYPES: Record<DocumentFormat, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
+
 // Broad set of text-based formats. Add more here as needed.
 export const TEXT_FORMATS: TextFormat[] = [
   { ext: 'txt', label: 'Plain text', mime: 'text/plain' },
@@ -57,6 +66,15 @@ function triggerDownload(filename: string, data: Blob | string, mime = 'text/pla
   URL.revokeObjectURL(url)
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error ?? new Error('Could not encode generated file'))
+    reader.readAsDataURL(blob)
+  })
+}
+
 /** Pull the first fenced code block out of a markdown string, if any. */
 export function firstCodeBlock(content: string): { code: string; lang: string } | null {
   const match = /```(\w+)?\n([\s\S]*?)```/.exec(content)
@@ -93,6 +111,11 @@ function escapeHtml(s: string): string {
 }
 
 export async function downloadPdf(content: string, baseName: string) {
+  const blob = await createPdfBlob(content)
+  triggerDownload(safeFileName(baseName, 'pdf'), blob, DOCUMENT_MIME_TYPES.pdf)
+}
+
+export async function createPdfBlob(content: string): Promise<Blob> {
   const { jsPDF } = await import('jspdf')
   const doc = new jsPDF({ unit: 'pt', format: 'a4' })
   const margin = 40
@@ -110,18 +133,21 @@ export async function downloadPdf(content: string, baseName: string) {
     doc.text(line, margin, y)
     y += 15
   }
-  doc.save(safeFileName(baseName, 'pdf'))
+  return doc.output('blob')
 }
 
 export async function downloadDocx(content: string, baseName: string) {
+  const blob = await createDocxBlob(content)
+  triggerDownload(safeFileName(baseName, 'docx'), blob, DOCUMENT_MIME_TYPES.docx)
+}
+
+export async function createDocxBlob(content: string): Promise<Blob> {
   const { Document, Packer, Paragraph, TextRun } = await import('docx')
   const paragraphs = content.split('\n').map(
     line => new Paragraph({ children: [new TextRun(line)] })
   )
   const doc = new Document({ sections: [{ children: paragraphs }] })
-  const blob = await Packer.toBlob(doc)
-  triggerDownload(safeFileName(baseName, 'docx'), blob,
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+  return Packer.toBlob(doc)
 }
 
 /**
@@ -129,14 +155,144 @@ export async function downloadDocx(content: string, baseName: string) {
  * the sheet rows; otherwise each line becomes a single-column row.
  */
 export async function downloadXlsx(content: string, baseName: string) {
-  const XLSX = await import('xlsx')
+  const blob = await createXlsxBlob(content)
+  triggerDownload(safeFileName(baseName, 'xlsx'), blob, DOCUMENT_MIME_TYPES.xlsx)
+}
+
+export async function createXlsxBlob(content: string): Promise<Blob> {
+  const { default: ExcelJS } = await import('exceljs')
   const rows = parseMarkdownTable(content) ?? content.split('\n').map(l => [l])
-  const ws = XLSX.utils.aoa_to_sheet(rows)
-  const wb = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
-  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' })
-  triggerDownload(safeFileName(baseName, 'xlsx'), new Blob([out]),
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'Dabba'
+  const worksheet = workbook.addWorksheet('Sheet1')
+  worksheet.addRows(rows)
+  if (rows.length > 0) {
+    worksheet.getRow(1).font = { bold: true }
+    worksheet.columns.forEach(column => {
+      const width = Math.min(
+        60,
+        Math.max(12, ...rows.map(row => String(row[(column.number ?? 1) - 1] ?? '').length + 2)),
+      )
+      column.width = width
+    })
+  }
+  const out = await workbook.xlsx.writeBuffer()
+  return new Blob([out], { type: DOCUMENT_MIME_TYPES.xlsx })
+}
+
+export async function downloadPptx(content: string, baseName: string) {
+  const blob = await createPptxBlob(content, baseName)
+  triggerDownload(safeFileName(baseName, 'pptx'), blob, DOCUMENT_MIME_TYPES.pptx)
+}
+
+export async function createPptxBlob(content: string, baseName: string): Promise<Blob> {
+  const { default: PptxGenJS } = await import('pptxgenjs')
+  const pptx = new PptxGenJS()
+  pptx.layout = 'LAYOUT_WIDE'
+  pptx.author = 'Dabba'
+  pptx.subject = baseName
+  pptx.title = baseName
+  pptx.company = 'Dabba'
+  pptx.theme = {
+    headFontFace: 'Aptos Display',
+    bodyFontFace: 'Aptos',
+  }
+
+  const sections = parsePresentationSections(content, baseName)
+  sections.forEach((section, index) => {
+    const slide = pptx.addSlide()
+    slide.background = { color: index === 0 ? 'F4F7F2' : 'FFFFFF' }
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0,
+      y: 0,
+      w: 0.16,
+      h: 7.5,
+      fill: { color: '25A65A' },
+      line: { color: '25A65A' },
+    })
+    slide.addText(section.title, {
+      x: 0.65,
+      y: index === 0 ? 1.6 : 0.55,
+      w: 11.9,
+      h: index === 0 ? 1.1 : 0.6,
+      fontFace: 'Aptos Display',
+      fontSize: index === 0 ? 30 : 24,
+      bold: true,
+      color: '18231C',
+      margin: 0,
+      breakLine: false,
+    })
+    if (index === 0) {
+      slide.addText(section.body.join('\n') || 'Generated by Dabba', {
+        x: 0.7,
+        y: 3,
+        w: 10.8,
+        h: 2,
+        fontFace: 'Aptos',
+        fontSize: 17,
+        color: '526159',
+        margin: 0,
+        breakLine: false,
+        valign: 'top',
+      })
+    } else {
+      slide.addText(
+        section.body.slice(0, 8).map(text => ({
+          text: stripMarkdown(text),
+          options: { bullet: { indent: 16 }, hanging: 4, breakLine: true },
+        })),
+        {
+          x: 0.8,
+          y: 1.45,
+          w: 11.4,
+          h: 5.35,
+          fontFace: 'Aptos',
+          fontSize: 17,
+          color: '334139',
+          breakLine: false,
+          margin: 0.06,
+          paraSpaceAfter: 12,
+          valign: 'top',
+        }
+      )
+    }
+    slide.addText(String(index + 1), {
+      x: 12.15,
+      y: 7.05,
+      w: 0.5,
+      h: 0.2,
+      fontSize: 9,
+      color: '7B887F',
+      align: 'right',
+      margin: 0,
+    })
+  })
+
+  const result = await pptx.write({ outputType: 'blob', compression: true })
+  if (result instanceof Blob) return result
+  if (typeof result === 'string') return new Blob([result], { type: DOCUMENT_MIME_TYPES.pptx })
+  if (result instanceof ArrayBuffer) return new Blob([result], { type: DOCUMENT_MIME_TYPES.pptx })
+  return new Blob([new Uint8Array(result).buffer], { type: DOCUMENT_MIME_TYPES.pptx })
+}
+
+export async function createGeneratedDocument(
+  content: string,
+  baseName: string,
+  format: DocumentFormat,
+) {
+  const creators: Record<DocumentFormat, () => Promise<Blob>> = {
+    pdf: () => createPdfBlob(content),
+    docx: () => createDocxBlob(content),
+    xlsx: () => createXlsxBlob(content),
+    pptx: () => createPptxBlob(content, baseName),
+  }
+  const blob = await creators[format]()
+  return {
+    name: safeFileName(baseName, format),
+    size: blob.size,
+    type: DOCUMENT_MIME_TYPES[format],
+    dataUrl: await blobToDataUrl(blob),
+  }
 }
 
 /** Parse the first GitHub-flavored markdown table into a 2D array of cells. */
@@ -163,4 +319,46 @@ function parseMarkdownTable(content: string): string[][] | null {
     rows.push(cells)
   }
   return rows.length ? rows : null
+}
+
+function stripMarkdown(value: string): string {
+  return value
+    .replace(/^\s*[-*+]\s+/, '')
+    .replace(/^\s*\d+\.\s+/, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .trim()
+}
+
+function parsePresentationSections(content: string, fallbackTitle: string) {
+  const lines = content.split('\n')
+  const sections: { title: string; body: string[] }[] = []
+  let current = { title: fallbackTitle || 'Dabba presentation', body: [] as string[] }
+
+  for (const line of lines) {
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line.trim())
+    if (heading) {
+      if (current.body.length || sections.length === 0) sections.push(current)
+      current = { title: stripMarkdown(heading[2]), body: [] }
+      continue
+    }
+    const text = stripMarkdown(line)
+    if (text) current.body.push(text)
+  }
+  if (current.body.length || !sections.length) sections.push(current)
+
+  const slides: { title: string; body: string[] }[] = []
+  for (const section of sections) {
+    if (section.body.length <= 8) {
+      slides.push(section)
+      continue
+    }
+    for (let i = 0; i < section.body.length; i += 8) {
+      slides.push({
+        title: i === 0 ? section.title : `${section.title} (continued)`,
+        body: section.body.slice(i, i + 8),
+      })
+    }
+  }
+  return slides.slice(0, 30)
 }

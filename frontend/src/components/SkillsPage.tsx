@@ -39,7 +39,7 @@ export function SkillsPage() {
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-text-primary dark:text-text-dark-primary truncate">{sk.name}</h3>
                   <button
-                    onClick={() => deleteSkill(sk.id)}
+                    onClick={() => void deleteSkill(sk.id)}
                     className="p-1 rounded-md hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -47,6 +47,7 @@ export function SkillsPage() {
                 </div>
                 {sk.description && <p className="text-xs text-text-secondary dark:text-text-dark-secondary">{sk.description}</p>}
                 <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary line-clamp-3 italic">"{sk.instructions}"</p>
+                {sk.script && <code className="mt-1 truncate rounded bg-surface-tertiary px-1.5 py-1 text-[10px] text-text-tertiary dark:bg-surface-dark-secondary">{sk.script}</code>}
               </div>
             ))}
           </div>

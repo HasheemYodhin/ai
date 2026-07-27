@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Download, FileText, FileType, FileSpreadsheet, Loader2, ChevronRight } from 'lucide-react'
+import { Download, FileText, FileType, FileSpreadsheet, Presentation, Loader2, ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   TEXT_FORMATS,
@@ -7,6 +7,7 @@ import {
   downloadPdf,
   downloadDocx,
   downloadXlsx,
+  downloadPptx,
   type TextFormat,
 } from '@/lib/download'
 
@@ -68,6 +69,8 @@ export function DownloadMenu({ content, baseName }: DownloadMenuProps) {
             onClick={() => run('docx', () => downloadDocx(content, baseName))} />
           <MenuItem icon={<FileSpreadsheet className="w-3.5 h-3.5 text-green-600" />} label="Excel (.xlsx)" busy={busy === 'xlsx'}
             onClick={() => run('xlsx', () => downloadXlsx(content, baseName))} />
+          <MenuItem icon={<Presentation className="w-3.5 h-3.5 text-orange-500" />} label="PowerPoint (.pptx)" busy={busy === 'pptx'}
+            onClick={() => run('pptx', () => downloadPptx(content, baseName))} />
 
           <div className="my-1 border-t border-border dark:border-border-dark" />
 

@@ -1,0 +1,16 @@
+.git
+.pytest_cache
+**/__pycache__
+**/*.pyc
+frontend/node_modules
+frontend/dist
+vscode-extension/node_modules
+vscode-extension/out
+llama.cpp
+checkpoints
+data
+logs
+dabba_logs
+scratch
+*.vsix
+*.gguf

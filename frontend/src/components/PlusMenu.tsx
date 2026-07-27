@@ -1,8 +1,15 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   Plus, Paperclip, Camera, FolderPlus, Sparkles, Globe,
-  Wand2, Plug, Puzzle, Telescope, ChevronRight, Check, Loader2, Trash2,
+  Wand2, Plug, Puzzle, Telescope, ChevronRight, Check, Loader2, Trash2, Slack as SlackIcon,
 } from 'lucide-react'
+import type { SimpleIcon } from 'simple-icons'
+import {
+  siAtlassian, siBitbucket, siCloudflare, siConfluence, siDocker, siFigma,
+  siGithub, siGitlab, siGmail, siGoogledrive, siJira, siKubernetes,
+  siLinear, siMongodb, siNotion, siPostgresql, siRedis,
+  siSentry, siShopify, siSqlite, siStripe, siSupabase, siYoutube,
+} from 'simple-icons'
 import type { Project } from '@/types'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
 import { useSkills } from '@/hooks/useSkills'
@@ -30,6 +37,65 @@ interface PlusMenuProps {
   projects: Project[]
   currentProjectId?: string | null
   onAddToProject: (projectId: string) => void
+}
+
+const CONNECTOR_MENU_ICONS: Record<string, SimpleIcon> = {
+  atlassian: siAtlassian,
+  bitbucket: siBitbucket,
+  cloudflare: siCloudflare,
+  confluence: siConfluence,
+  docker: siDocker,
+  figma: siFigma,
+  github: siGithub,
+  gitlab: siGitlab,
+  gmail: siGmail,
+  'google drive': siGoogledrive,
+  drive: siGoogledrive,
+  jira: siJira,
+  kubernetes: siKubernetes,
+  linear: siLinear,
+  mongodb: siMongodb,
+  notion: siNotion,
+  postgres: siPostgresql,
+  postgresql: siPostgresql,
+  redis: siRedis,
+  sentry: siSentry,
+  shopify: siShopify,
+  sqlite: siSqlite,
+  stripe: siStripe,
+  supabase: siSupabase,
+  youtube: siYoutube,
+}
+
+export function ConnectorMenuIcon({ name, status, compact = false }: {
+  name: string
+  status?: 'connected' | 'available' | 'stopped'
+  compact?: boolean
+}) {
+  const normalizedName = name.trim().toLowerCase()
+  const icon = CONNECTOR_MENU_ICONS[normalizedName]
+  return (
+    <span className={cn(
+      'relative flex flex-shrink-0 items-center justify-center',
+      compact ? 'h-4 w-4 bg-transparent' : 'h-7 w-7 rounded-lg border border-border/70 bg-white dark:border-border-dark'
+    )}>
+      {normalizedName === 'linkedin' ? (
+        <span aria-label="LinkedIn logo" role="img" className="text-[14px] font-extrabold leading-none tracking-[-0.08em] text-[#0A66C2]">in</span>
+      ) : normalizedName === 'slack' ? (
+        <SlackIcon aria-label="Slack logo" role="img" className="h-4 w-4 text-[#611f69]" />
+      ) : icon ? (
+        <svg className="h-4 w-4" viewBox="0 0 24 24" aria-label={`${name} logo`} role="img">
+          <path fill={`#${icon.hex}`} d={icon.path} />
+        </svg>
+      ) : (
+        <Plug className="h-3.5 w-3.5 text-text-tertiary" />
+      )}
+      {status && <span className={cn(
+        'absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border-2 border-surface dark:border-surface-dark-secondary',
+        status === 'connected' ? 'bg-green-500' : status === 'available' ? 'bg-amber-500' : 'bg-gray-400'
+      )} />}
+    </span>
+  )
 }
 
 export function PlusMenu({
@@ -69,7 +135,13 @@ export function PlusMenu({
   }
 
 
-  const allTools = mcpServers.flatMap(s => s.tools.map(t => ({ server: s.name, tool: t, connected: s.connected })))
+  const connectorAvailable = (server: typeof mcpServers[number]) =>
+    server.connected || (!!server.processRunning && server.tools.length > 0)
+  const allTools = mcpServers.flatMap(s => s.tools.map(t => ({
+    server: s.name,
+    tool: t,
+    connected: connectorAvailable(s),
+  })))
 
   return (
     <div className="relative" ref={ref}>
@@ -121,20 +193,22 @@ export function PlusMenu({
             ) : mcpServers.length === 0 ? (
               <EmptyHint>No MCP connectors configured on the server.</EmptyHint>
             ) : (
-              mcpServers.map(s => (
-                <SubItem key={s.name}
-                  onClick={() => s.connected && setAgentMode(
+              mcpServers.map(s => {
+                const available = connectorAvailable(s)
+                return <SubItem key={s.name}
+                  onClick={() => available && setAgentMode(
                     `Connector: ${s.name}`, undefined,
-                    `Prefer using the ${s.name} tools for this request when relevant.`
+                    `Use the ${s.name} MCP connector for this request. Its available tools are: ${s.tools.join(', ')}. ` +
+                    `When an appropriate ${s.name} tool exists, call it instead of substituting generic web_fetch or web_search.`
                   )}
-                  disabled={!s.connected}
+                  disabled={!available}
                   active={mode.kind === 'agent' && mode.label === `Connector: ${s.name}`}
                 >
-                  <span className={cn('w-1.5 h-1.5 rounded-full flex-shrink-0', s.connected ? 'bg-green-500' : 'bg-gray-400')} />
+                  <ConnectorMenuIcon name={s.name} status={s.connected ? 'connected' : available ? 'available' : 'stopped'} />
                   <span className="truncate">{s.name}</span>
                   <span className="text-[9px] text-text-tertiary ml-auto flex-shrink-0">{s.tools.length} tools</span>
                 </SubItem>
-              ))
+              })
             )}
           </Submenu>
 

@@ -1373,14 +1373,15 @@ class DabbaTUI(App[None]):
         save_path = Path(path) if path else default
         try:
             save_path.parent.mkdir(parents=True, exist_ok=True)
-            history = []
-            if self.agent._agent_loop:
-                ctx = self.agent._agent_loop.context
-                if hasattr(ctx, "messages"):
-                    history = ctx.messages
+            # AgentLoop has no "context"/"messages" attribute (that was never
+            # a real API — see checkpoint_context(), which reads the actual
+            # context_manager.serialize() output the CLI's /save also uses).
+            context = self.agent.checkpoint_context()
             with open(save_path, "w") as f:
-                for e in history:
-                    f.write(json.dumps(e) + "\n")
+                if context is not None:
+                    for entry in context.get("entries", []):
+                        f.write(json.dumps({"role": entry["role"], "content": entry["content"]}) + "\n")
+                    f.write(json.dumps({"__checkpoint__": True, "context_manager": context}) + "\n")
             self._post_system(f"Saved → {save_path}")
         except Exception as exc:
             self._post_system(f"Save failed: {exc}")
@@ -1738,6 +1739,22 @@ class DabbaTUI(App[None]):
                     elif ctype == "tool_call":
                         tool_name = content.get("name", "") if isinstance(content, dict) else ""
                         self.call_from_thread(self._post_system, f"🔧 {tool_name}()")
+                    elif ctype == "question":
+                        # ask_user ends the turn here — render the question as
+                        # the visible reply (see agent_loop.py's stream_chat)
+                        # so the user can just type their answer next, same as
+                        # any other assistant message.
+                        question = content.get("question", "") if isinstance(content, dict) else ""
+                        options = content.get("options") if isinstance(content, dict) else None
+                        text = f"❓ {question}"
+                        if options:
+                            text += "\n" + "\n".join(f"  • {o}" for o in options)
+                        collected += text
+                        if first:
+                            self.call_from_thread(self._start_stream, collected)
+                            first = False
+                        else:
+                            self.call_from_thread(self._update_stream, collected)
                     elif ctype == "error":
                         self.call_from_thread(self._post_system, f"Error: {content}")
 

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSettings, type AppSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
 import { useModels } from '@/hooks/useModels'
@@ -31,6 +31,10 @@ import {
   Wrench,
   BarChart3,
   Loader2,
+  ShieldCheck,
+  Bot,
+  BrainCircuit,
+  Bell,
 } from 'lucide-react'
 
 interface SettingsModalProps {
@@ -38,7 +42,7 @@ interface SettingsModalProps {
   onClose: () => void
 }
 
-type TabType = 'general' | 'model' | 'prompt' | 'keys' | 'tools' | 'usage' | 'data'
+type TabType = 'general' | 'model' | 'prompt' | 'keys' | 'tools' | 'usage' | 'data' | 'permissions' | 'agent' | 'memory'
 
 const KEY_PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -71,6 +75,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [keyBusy, setKeyBusy] = useState<string | null>(null)
   const [keySaveError, setKeySaveError] = useState<string | null>(null)
   const [keyPromptModel, setKeyPromptModel] = useState<ModelInfo | null>(null)
+  const [selectedModelForKey, setSelectedModelForKey] = useState('')
+
+  const handleAddModelKeyClick = () => {
+    const m = models.find(x => x.id === selectedModelForKey)
+    if (m) {
+      setKeyPromptModel(m)
+      setSelectedModelForKey('')
+    }
+  }
 
   const { keys: providerKeys, isLoading: keysLoading, error: keysError, reload: reloadKeys } =
     useProviderKeys(isOpen && activeTab === 'keys')
@@ -229,6 +242,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               {navItem('prompt', <MessageSquareCode className="w-4 h-4" />, 'System Prompts')}
               {navItem('keys', <KeyRound className="w-4 h-4" />, 'API Keys')}
               {navItem('tools', <Plug className="w-4 h-4" />, 'Tools (MCP)')}
+              {navItem('permissions', <ShieldCheck className="w-4 h-4" />, 'Permissions & Safety')}
+              {navItem('agent', <Bot className="w-4 h-4" />, 'Agent Behavior')}
+              {navItem('memory', <BrainCircuit className="w-4 h-4" />, 'Memory')}
               {navItem('usage', <BarChart3 className="w-4 h-4" />, 'Usage')}
               {navItem('data', <Database className="w-4 h-4" />, 'Data Controls')}
             </nav>
@@ -254,6 +270,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 : activeTab === 'keys' ? 'Provider API Keys'
                 : activeTab === 'tools' ? 'MCP Servers & Tools'
                 : activeTab === 'usage' ? 'Usage Statistics'
+                : activeTab === 'permissions' ? 'Permissions & Safety'
+                : activeTab === 'agent' ? 'Agent Behavior'
+                : activeTab === 'memory' ? 'Persistent Memory'
                 : activeTab + ' settings'}
             </h3>
             <button
@@ -309,7 +328,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       type="text"
                       value={localSettings.baseUrl}
                       onChange={e => setLocalSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
-                      placeholder="e.g. http://localhost:8080"
+                      placeholder="Same server (recommended)"
                       className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors font-medium"
                     />
                   </div>
@@ -359,6 +378,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       />
                     </div>
                   )}
+
+                  <label className="flex items-center justify-between gap-3 pt-3 border-t border-border dark:border-border-dark">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                      <Bell className="w-3.5 h-3.5" /> Desktop notifications
+                    </span>
+                    <Toggle
+                      checked={localSettings.desktopNotifications}
+                      onChange={v => {
+                        setLocalSettings(prev => ({ ...prev, desktopNotifications: v }))
+                        if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                          void Notification.requestPermission()
+                        }
+                      }}
+                    />
+                  </label>
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary leading-relaxed">
+                    Get an OS notification when a Cowork run or background process finishes, fails, or gets interrupted. In-app banners always show regardless of this setting.
+                  </p>
                 </div>
               </div>
             )}
@@ -459,9 +496,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     onChange={v => setLocalSettings(prev => ({ ...prev, temperature: v }))}
                     marks={['Deterministic (0.0)', 'Balanced (0.7)', 'Creative (1.5)']} />
 
-                  <Slider label="Max Completion Output" value={localSettings.maxTokens} min={256} max={8192} step={256} unit=" tokens"
+                  <Slider label="Max Completion Output" value={localSettings.maxTokens} min={256} max={32768} step={256} unit=" tokens"
                     onChange={v => setLocalSettings(prev => ({ ...prev, maxTokens: v }))}
-                    marks={['Short (256)', 'Standard (2048)', 'Extended (8192)']} />
+                    marks={['Short (256)', 'Standard (8192)', 'Extended (32768)']} />
 
                   <Slider label="Top P (nucleus sampling)" value={localSettings.topP} min={0} max={1} step={0.05}
                     onChange={v => setLocalSettings(prev => ({ ...prev, topP: v }))}
@@ -597,6 +634,36 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         </div>
                       </div>
                     ))}
+
+                    {/* Section to configure model-specific key */}
+                    <div className="pt-4 border-t border-border dark:border-border-dark space-y-2 mt-4">
+                      <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                        Configure key for a specific model
+                      </label>
+                      <div className="flex gap-2">
+                        <select
+                          value={selectedModelForKey}
+                          onChange={e => setSelectedModelForKey(e.target.value)}
+                          className="flex-1 px-3 py-2 text-xs rounded-xl glass-input border border-border dark:border-border-dark outline-none text-text-primary dark:text-text-dark-primary bg-surface dark:bg-surface-dark-secondary focus:border-accent/40 transition-colors"
+                        >
+                          <option value="">Select a model...</option>
+                          {models
+                            .filter(m => m.provider !== 'dabba' && m.provider !== 'ollama')
+                            .map(m => (
+                              <option key={m.id} value={m.id}>
+                                {m.name} ({providerLabel(m.provider)})
+                              </option>
+                            ))}
+                        </select>
+                        <button
+                          onClick={handleAddModelKeyClick}
+                          disabled={!selectedModelForKey}
+                          className="px-4 py-2 rounded-xl text-xs font-bold bg-accent hover:bg-accent-hover text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Configure Key
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -662,6 +729,122 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
               </div>
             )}
+
+            {/* Permissions & Safety Tab */}
+            {activeTab === 'permissions' && (
+              <div className="space-y-5 animate-fade-in">
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                    Default tool-approval mode
+                  </label>
+                  <div className="grid grid-cols-3 gap-2 max-w-md">
+                    {(['ask', 'allow', 'deny'] as const).map(mode => (
+                      <button
+                        key={mode}
+                        onClick={() => setLocalSettings(prev => ({ ...prev, defaultPermissionMode: mode }))}
+                        className={cn(
+                          'p-3 rounded-xl border text-xs font-semibold capitalize transition-all',
+                          localSettings.defaultPermissionMode === mode
+                            ? 'bg-surface dark:bg-surface-dark-tertiary border-accent/40 text-accent shadow-sm'
+                            : 'bg-transparent border-border dark:border-border-dark text-text-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
+                        )}
+                      >
+                        {mode}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary leading-relaxed">
+                    "Ask" pauses for your approval before dangerous tool calls (shell commands, file writes). "Allow" runs everything automatically. "Deny" blocks dangerous tools outright. Cowork and scheduled runs always run with tools enabled regardless of this setting.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-2xl bg-surface-secondary dark:bg-surface-dark-tertiary border border-border dark:border-border-dark space-y-2">
+                  <h4 className="text-xs font-bold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-accent" />
+                    Git safety rules (always on)
+                  </h4>
+                  <ul className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed list-disc pl-4 space-y-1">
+                    <li>Direct commits to <code className="text-[11px]">main</code>/<code className="text-[11px]">master</code>/<code className="text-[11px]">develop</code>/<code className="text-[11px]">dev</code> are blocked outright — no setting overrides this.</li>
+                    <li>Force-pushing to a protected branch is blocked outright.</li>
+                    <li>Force-pushing to any other branch, or a plain push to a protected branch, requires explicit confirmation even in "Allow" mode.</li>
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Agent Behavior Tab */}
+            {activeTab === 'agent' && (
+              <div className="space-y-5 animate-fade-in">
+                <label className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Plan before acting, by default</span>
+                    <span className="block text-[11px] text-text-tertiary dark:text-text-dark-tertiary mt-0.5">Propose a multi-step plan and wait for your approval before running it, on every agent turn (not just when the chat "Plan mode" chip is on).</span>
+                  </div>
+                  <Toggle
+                    checked={localSettings.planModeDefault}
+                    onChange={v => setLocalSettings(prev => ({ ...prev, planModeDefault: v }))}
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-3 pt-3 border-t border-border dark:border-border-dark">
+                  <div>
+                    <span className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Deferred tool loading</span>
+                    <span className="block text-[11px] text-text-tertiary dark:text-text-dark-tertiary mt-0.5">Only load a small set of tool schemas up front; the model searches for the rest as needed. Reduces prompt size when many tools/connectors are registered.</span>
+                  </div>
+                  <Toggle
+                    checked={localSettings.useToolSearch}
+                    onChange={v => setLocalSettings(prev => ({ ...prev, useToolSearch: v }))}
+                  />
+                </label>
+
+                <div className="space-y-1.5 pt-3 border-t border-border dark:border-border-dark">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Max steps per turn</span>
+                    <span className="font-bold text-accent">{localSettings.maxSteps ?? 'Backend default'}</span>
+                  </div>
+                  <input
+                    type="range" min="0" max="100" step="5"
+                    value={localSettings.maxSteps ?? 0}
+                    onChange={e => {
+                      const value = parseInt(e.target.value)
+                      setLocalSettings(prev => ({ ...prev, maxSteps: value === 0 ? null : value }))
+                    }}
+                    className="w-full accent-accent bg-surface-tertiary dark:bg-surface-dark-tertiary h-1.5 rounded-lg cursor-pointer"
+                  />
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary">0 = use the backend's own default instead of overriding it.</p>
+                </div>
+
+                <div className="space-y-1.5 pt-3 border-t border-border dark:border-border-dark">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Context compaction threshold</span>
+                    <span className="font-bold text-accent">{Math.round(localSettings.contextCompactionThreshold * 100)}%</span>
+                  </div>
+                  <input
+                    type="range" min="0.3" max="0.95" step="0.05"
+                    value={localSettings.contextCompactionThreshold}
+                    onChange={e => setLocalSettings(prev => ({ ...prev, contextCompactionThreshold: parseFloat(e.target.value) }))}
+                    className="w-full accent-accent bg-surface-tertiary dark:bg-surface-dark-tertiary h-1.5 rounded-lg cursor-pointer"
+                  />
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary">Older turns get LLM-summarized once the context fills past this fraction, so long tasks don't lose earlier context.</p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Recent turns always kept verbatim</span>
+                    <span className="font-bold text-accent">{localSettings.contextCompactionKeepRecent}</span>
+                  </div>
+                  <input
+                    type="range" min="2" max="20" step="1"
+                    value={localSettings.contextCompactionKeepRecent}
+                    onChange={e => setLocalSettings(prev => ({ ...prev, contextCompactionKeepRecent: parseInt(e.target.value) }))}
+                    className="w-full accent-accent bg-surface-tertiary dark:bg-surface-dark-tertiary h-1.5 rounded-lg cursor-pointer"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Memory Tab */}
+            {activeTab === 'memory' && <MemoryTabContent />}
 
             {/* Usage Tab */}
             {activeTab === 'usage' && usageStats && (
@@ -776,12 +959,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
       {keyPromptModel && (
         <ApiKeyPromptModal
+          target={keyPromptModel.id}
           provider={keyPromptModel.provider}
           modelName={keyPromptModel.name}
           onClose={() => setKeyPromptModel(null)}
           onSaved={() => {
             setLocalSettings(prev => ({ ...prev, model: keyPromptModel.id }))
             reloadModels()
+            if (activeTab === 'keys') {
+              reloadKeys()
+            }
           }}
         />
       )}
@@ -819,6 +1006,87 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
     >
       <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
     </button>
+  )
+}
+
+interface MemoryEntry { id: string; scope: string; key: string; content: string; updatedAt: number }
+
+/** Lists/adds/deletes the facts Dabba remembers across sessions (MemoryService's "preference" scope). */
+function MemoryTabContent() {
+  const [memories, setMemories] = useState<MemoryEntry[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newFact, setNewFact] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const refresh = useCallback(async () => {
+    setError('')
+    try { setMemories(await apiClient.listMemories('preference')) }
+    catch (err) { setError((err as Error).message) }
+    finally { setLoading(false) }
+  }, [])
+  useEffect(() => { void refresh() }, [refresh])
+
+  const addFact = async () => {
+    const content = newFact.trim()
+    if (!content || busy) return
+    setBusy(true); setError('')
+    try {
+      await apiClient.saveMemory('preference', `fact-${Date.now()}`, content)
+      setNewFact('')
+      await refresh()
+    } catch (err) { setError((err as Error).message) }
+    finally { setBusy(false) }
+  }
+
+  const removeFact = async (id: string) => {
+    setMemories(prev => prev.filter(m => m.id !== id))
+    try { await apiClient.deleteMemory(id) }
+    catch (err) { setError((err as Error).message); await refresh() }
+  }
+
+  return (
+    <div className="space-y-5 animate-fade-in">
+      <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
+        Facts you've asked Dabba to remember — persisted across sessions and automatically included in every agent prompt.
+      </p>
+      <div className="flex items-center gap-2">
+        <input
+          value={newFact}
+          onChange={e => setNewFact(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void addFact() } }}
+          placeholder="e.g. I prefer TypeScript over JavaScript"
+          className="flex-1 px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors"
+        />
+        <button
+          disabled={!newFact.trim() || busy}
+          onClick={() => void addFact()}
+          className="px-4 py-2.5 rounded-xl text-xs font-bold bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
+        >
+          Remember
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      {loading ? (
+        <div className="flex items-center justify-center py-10 text-text-tertiary"><Loader2 className="w-5 h-5 animate-spin" /></div>
+      ) : memories.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-text-tertiary">
+          <BrainCircuit className="w-9 h-9 mb-2 opacity-30" />
+          <p className="text-sm font-medium">Nothing remembered yet</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {memories.map(m => (
+            <div key={m.id} className="flex items-start gap-2 p-3 rounded-xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary">
+              <span className="flex-1 text-xs text-text-primary dark:text-text-dark-primary leading-relaxed">{m.content}</span>
+              <button onClick={() => void removeFact(m.id)} className="p-1 rounded-md hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -7,6 +7,8 @@ function generateTitle(messages: Message[]): string {
   const first = messages.find(m => m.role === 'user')
   if (!first) return 'New conversation'
   const text = first.content.trim()
+    || first.documentAttachments?.[0]?.name
+    || 'New conversation'
   const maxLen = 60
   if (text.length <= maxLen) return text
   return text.slice(0, maxLen).trimEnd() + '…'

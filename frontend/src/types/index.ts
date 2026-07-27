@@ -16,6 +16,12 @@ export interface Message {
   images?: string[]
   /** How attached images were handled: sent to a vision model, or OCR'd to text. */
   imageMode?: 'vision' | 'ocr'
+  /** Extracted PDF/Word/text content sent to the model but hidden from the chat bubble. */
+  documentContext?: string
+  /** Non-image files rendered as attachment cards in the user message. */
+  documentAttachments?: DocumentAttachment[]
+  /** Real binary documents generated from an assistant reply. */
+  generatedFiles?: GeneratedFile[]
   /** Images the model generated in response to this message (data URLs). */
   generatedImages?: string[]
   /** True while this message represents an in-flight image generation request. */
@@ -59,6 +65,170 @@ export interface Skill {
   name: string
   description?: string
   instructions: string
+  script?: string | null
+  createdAt: number
+}
+
+export type CoworkStatus = 'inbox' | 'planned' | 'in_progress' | 'blocked' | 'done'
+export type CoworkPriority = 'low' | 'medium' | 'high' | 'urgent'
+
+export interface CoworkItem {
+  id: string
+  title: string
+  description: string
+  status: CoworkStatus
+  priority: CoworkPriority
+  assignee?: string | null
+  dueAt?: number | null
+  tags: string[]
+  conversationId?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CoworkRun {
+  id: string
+  itemId: string
+  taskId: string
+  mode: 'safe' | 'agent'
+  workspacePath?: string | null
+  status: PlatformTask['status']
+  output?: { content?: string; itemId?: string; runId?: string; toolCallCount?: number; changedFiles?: string[] } | null
+  error?: string | null
+  startedAt: number
+  completedAt?: number | null
+}
+
+export interface DirectoryEntry {
+  name: string
+  path: string
+}
+
+export interface DirectoryListing {
+  path: string | null
+  parent: string | null
+  roots: DirectoryEntry[]
+  directories: DirectoryEntry[]
+}
+
+export type ScheduleCadence = 'interval' | 'daily' | 'weekly'
+
+export interface ScheduledSkill {
+  id: string
+  name: string
+  skillName: string
+  instructions: string
+  cadence: ScheduleCadence
+  intervalMinutes?: number | null
+  timeOfDay?: string | null
+  weekdays: number[]
+  enabled: boolean
+  nextRunAt?: number | null
+  lastRunAt?: number | null
+  lastStatus?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ScheduledSkillRun {
+  id: string
+  scheduleId: string
+  taskId?: string | null
+  status: string
+  triggeredBy: string
+  output?: { message?: string } | null
+  error?: string | null
+  startedAt: number
+  completedAt?: number | null
+}
+
+export interface CoworkSubtask {
+  id: string
+  itemId: string
+  title: string
+  status: 'pending' | 'done'
+  position: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface CoworkSchedule {
+  id: string
+  itemId: string
+  cadence: 'interval' | 'daily' | 'weekly'
+  intervalMinutes?: number | null
+  timeOfDay?: string | null
+  weekdays: number[]
+  mode: 'safe' | 'agent'
+  workspacePath?: string | null
+  model?: string | null
+  effort?: string | null
+  enabled: boolean
+  nextRunAt?: number | null
+  lastRunAt?: number | null
+  lastStatus?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AgentDefinition {
+  id: string
+  userId: string
+  name: string
+  description: string
+  systemPrompt: string
+  allowedTools: string[]
+  model?: string | null
+  effort?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export type HookEvent = 'session_start' | 'session_end' | 'user_prompt_submit' | 'pre_tool_call' | 'post_tool_call'
+
+export interface AgentHook {
+  id: string
+  event: HookEvent
+  matcher: string
+  command: string
+  timeout: number
+  enabled: boolean
+  created_at: number
+}
+
+export interface HookRun {
+  hook_id: string
+  event: HookEvent
+  tool: string
+  exit_code: number | null
+  blocked: boolean
+  stdout: string
+  stderr: string
+  error: string
+  duration_ms: number
+  timestamp: number
+}
+
+export interface PlatformTask {
+  id: string
+  kind: string
+  status: 'queued' | 'planning' | 'running' | 'waiting_for_approval' | 'retrying' | 'completed' | 'failed' | 'cancelled'
+  request: Record<string, unknown>
+  result?: Record<string, unknown> | null
+  error?: { message?: string; type?: string; retryable?: boolean } | null
+  progress: number
+  currentStep?: string | null
+  model?: string | null
+  createdAt: number
+  updatedAt: number
+  completedAt?: number | null
+}
+
+export interface PlatformTaskEvent {
+  id: number
+  taskId: string
+  type: string
+  payload: Record<string, unknown>
   createdAt: number
 }
 
@@ -84,6 +254,10 @@ export interface McpServer {
   command: string
   args: string[]
   connected: boolean
+  processRunning?: boolean
+  authenticated?: boolean
+  verifiedStatus?: 'connected' | 'degraded' | 'authentication_required' | 'stopped' | 'unknown'
+  message?: string | null
   tools: string[]
 }
 
@@ -137,6 +311,27 @@ export interface UploadedFile {
   type: string
   dataUrl?: string
   preview?: string
+}
+
+export interface ExtractedDocument {
+  name: string
+  text: string
+  characters: number
+  truncated: boolean
+}
+
+export interface DocumentAttachment {
+  name: string
+  size: number
+  type: string
+  dataUrl?: string
+}
+
+export interface GeneratedFile {
+  name: string
+  size: number
+  type: string
+  dataUrl: string
 }
 
 export type Theme = 'light' | 'dark'

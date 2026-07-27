@@ -12,12 +12,14 @@ export function SkillModal({ isOpen, onClose, onSubmit }: SkillModalProps) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [instructions, setInstructions] = useState('')
+  const [script, setScript] = useState('')
 
   useEffect(() => {
     if (isOpen) {
       setName('')
       setDescription('')
       setInstructions('')
+      setScript('')
     }
   }, [isOpen])
 
@@ -27,7 +29,7 @@ export function SkillModal({ isOpen, onClose, onSubmit }: SkillModalProps) {
 
   const handleSubmit = () => {
     if (!canSubmit) return
-    onSubmit({ name, description, instructions })
+    onSubmit({ name, description, instructions, script: script.trim() || undefined })
     onClose()
   }
 
@@ -76,6 +78,17 @@ export function SkillModal({ isOpen, onClose, onSubmit }: SkillModalProps) {
               placeholder="Replaces the system prompt whenever this skill is applied to a message…"
               rows={5}
               className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 resize-none scrollbar-thin leading-relaxed"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Bundled script <span className="text-text-tertiary font-normal">(optional)</span></label>
+            <textarea
+              value={script}
+              onChange={e => setScript(e.target.value)}
+              placeholder="A shell command this skill can reference, e.g. git log --oneline -20"
+              rows={2}
+              className="w-full px-3.5 py-2.5 text-sm font-mono rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 resize-none scrollbar-thin leading-relaxed"
             />
           </div>
         </div>

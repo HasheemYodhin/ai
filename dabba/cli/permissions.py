@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from dabba.utils.paths import get_dabba_config_dir
 
@@ -30,6 +32,13 @@ DANGEROUS_TOOLS: Set[str] = {
     "ssh_exec", "scp_copy", "docker_exec", "docker_run",
     "markdown_to_pdf", "markdown_to_docx",
 }
+
+# Shell tools whose "command" argument is actually run — the only ones a git
+# safety check can meaningfully inspect.
+_SHELL_TOOLS = {"shell_exec", "powershell_exec", "execute_command"}
+PROTECTED_BRANCHES: Set[str] = {"main", "master", "develop", "dev"}
+_FORCE_PUSH_RE = re.compile(r"\bgit\s+push\b.*(--force(?!-with-lease)|(?<!-)-f\b)")
+_COMMIT_LIKE_RE = re.compile(r"\bgit\s+(commit|push|merge|rebase)\b")
 
 
 class PermissionManager:
@@ -70,7 +79,70 @@ class PermissionManager:
         self._session_allowed: Set[str] = set()
         self._session_denied: Set[str] = set()
         self._persistent_allowed: Dict[str, List[str]] = {}
+        self._last_denial_reason: Optional[str] = None
         self._load_persistent()
+
+    def get_last_denial_reason(self) -> Optional[str]:
+        """Human-readable reason for the most recent git-safety denial/prompt, if any."""
+        return self._last_denial_reason
+
+    @staticmethod
+    def _current_git_branch(cwd: Optional[str]) -> Optional[str]:
+        try:
+            result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=cwd or os.getcwd(), capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip() or None
+        except Exception:
+            pass
+        return None
+
+    def classify_git_command(self, command: str, cwd: Optional[str] = None) -> Optional[Tuple[bool, str]]:
+        """
+        Inspect a shell command for git safety issues, mirroring the
+        protected-branch / force-push rules a human operator should follow.
+
+        Returns (hard_block, reason) when risky, else None:
+          hard_block=True  — check_tool always denies; no mode/grant overrides it.
+          hard_block=False — requires an explicit confirmation prompt even in
+                              "allow" mode or with an existing session/persistent grant.
+        """
+        lowered = command.lower()
+        if "git" not in lowered:
+            return None
+
+        if _FORCE_PUSH_RE.search(lowered):
+            branch = self._current_git_branch(cwd)
+            if branch and branch in PROTECTED_BRANCHES:
+                return True, f"Force-push to protected branch '{branch}' is never allowed."
+            return False, "Force-push requires explicit confirmation — it can overwrite remote history."
+
+        if re.search(r"\bgit\s+commit\b", lowered):
+            branch = self._current_git_branch(cwd)
+            if branch and branch in PROTECTED_BRANCHES:
+                return True, (
+                    f"Direct commits to protected branch '{branch}' are not allowed. "
+                    "Create a feature branch and open a PR instead."
+                )
+            return None
+
+        if re.search(r"\bgit\s+push\b", lowered):
+            branch = self._current_git_branch(cwd)
+            if branch and branch in PROTECTED_BRANCHES:
+                return False, f"Pushing to protected branch '{branch}' requires confirmation."
+            return None
+
+        return None
+
+    def _git_risk(self, tool_name: str, arguments: Optional[Dict[str, Any]]) -> Optional[Tuple[bool, str]]:
+        if tool_name not in _SHELL_TOOLS or not arguments:
+            return None
+        command = str(arguments.get("command") or "")
+        if not command:
+            return None
+        return self.classify_git_command(command, arguments.get("cwd"))
 
     def _load_persistent(self) -> None:
         """Load persistent permissions from disk."""
@@ -154,6 +226,18 @@ class PermissionManager:
         Returns:
             True if the tool call is permitted, False otherwise.
         """
+        self._last_denial_reason = None
+        git_risk = self._git_risk(tool_name, arguments)
+        if git_risk is not None:
+            hard_block, reason = git_risk
+            self._last_denial_reason = reason
+            if hard_block:
+                return False
+            # Bypasses mode/session/persistent grants below on purpose — a
+            # standing "allow" grant for shell_exec must not silently cover
+            # a force-push or a protected-branch push too.
+            return self._prompt_user(tool_name, arguments)
+
         if tool_name in self._session_denied:
             return False
         if tool_name in self._session_allowed:

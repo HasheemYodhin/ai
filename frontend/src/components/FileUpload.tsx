@@ -8,6 +8,9 @@ const ACCEPTED_TYPES = {
   'text/*': ['.txt', '.md', '.json', '.csv', '.yaml', '.yml', '.xml'],
   'application/pdf': ['.pdf'],
   'application/json': ['.json'],
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
@@ -116,7 +119,7 @@ export function FileUpload({ files, onFilesChange, disabled = false }: FileUploa
           Drag & drop files here, or click to browse
         </p>
         <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary mt-1">
-          Images, text, PDF, JSON (max 10 MB each, up to 5 files)
+          Images, Word, Excel, PowerPoint, PDF, and text (max 10 MB each, up to 5 files)
         </p>
         <input
           ref={inputRef}

@@ -19,6 +19,7 @@ class OpenAIProvider(BaseProvider):
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
         from openai import OpenAI
+        usage_out = kwargs.pop("usage_out", None)
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError("OpenAI API key not set. Run: /keys set openai <key>")
@@ -62,6 +63,15 @@ class OpenAIProvider(BaseProvider):
         resp = client.chat.completions.create(**params)
         message = resp.choices[0].message
         text = (message.content or "").strip()
+
+        usage = getattr(resp, "usage", None)
+        if usage is not None and usage_out is not None:
+            usage_out.update({
+                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+            })
+
         tag_text = openai_tool_calls_to_tags(message)
         return (text + "\n" + tag_text).strip() if tag_text else text
 

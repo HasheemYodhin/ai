@@ -1,4 +1,4 @@
-import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Message, ModelCatalog, TokenUsage, McpServer, Conversation } from '@/types'
+import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Message, ModelCatalog, TokenUsage, McpServer, Conversation, UploadedFile, ExtractedDocument, CoworkItem, CoworkStatus, CoworkRun, CoworkSubtask, CoworkSchedule, AgentDefinition, Skill, DirectoryListing, ScheduledSkill, ScheduledSkillRun, PlatformTask, PlatformTaskEvent, AgentHook, HookEvent, HookRun } from '@/types'
 
 async function responseError(response: Response, fallback: string): Promise<Error> {
   const text = await response.text().catch(() => '')
@@ -28,8 +28,9 @@ async function responseError(response: Response, fallback: string): Promise<Erro
 export class ApiClient {
   private baseUrl: string
   private apiKey: string
+  private sessionToken = localStorage.getItem('dabba-session-token') ?? ''
 
-  constructor(baseUrl = 'http://localhost:8080', apiKey = '') {
+  constructor(baseUrl = '', apiKey = '') {
     this.baseUrl = baseUrl
     this.apiKey = apiKey
   }
@@ -42,6 +43,12 @@ export class ApiClient {
     this.apiKey = key
   }
 
+  setSessionToken(token: string) {
+    this.sessionToken = token
+    if (token) localStorage.setItem('dabba-session-token', token)
+    else localStorage.removeItem('dabba-session-token')
+  }
+
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -49,23 +56,431 @@ export class ApiClient {
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`
     }
+    if (this.sessionToken) {
+      headers['X-Dabba-Session'] = this.sessionToken
+    }
     return headers
+  }
+
+  private getPlatformHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      ...(this.sessionToken ? { Authorization: `Bearer ${this.sessionToken}` } : {}),
+    }
+  }
+
+  async signup(name: string, email: string, password: string): Promise<{ user: PlatformUser; token: string }> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/v1/platform/identity/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password }),
+      })
+    } catch {
+      throw new Error('Cannot reach the Dabba backend. Start the server and try again.')
+    }
+    if (!response.ok) throw await responseError(response, 'Signup failed')
+    const data = await response.json() as { user: PlatformUser; token: string }
+    this.setSessionToken(data.token)
+    return data
+  }
+
+  async login(email: string, password: string): Promise<{ user: PlatformUser; token: string }> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/v1/platform/identity/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      })
+    } catch {
+      throw new Error('Cannot reach the Dabba backend. Start the server and try again.')
+    }
+    if (!response.ok) throw await responseError(response, 'Login failed')
+    const data = await response.json() as { user: PlatformUser; token: string }
+    this.setSessionToken(data.token)
+    return data
+  }
+
+  async currentUser(signal?: AbortSignal): Promise<PlatformUser | null> {
+    if (!this.sessionToken) return null
+    const response = await fetch(`${this.baseUrl}/v1/platform/identity/me`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (response.status === 401) {
+      this.setSessionToken('')
+      return null
+    }
+    if (!response.ok) throw await responseError(response, 'Could not restore your session')
+    return response.json()
+  }
+
+  async logout(): Promise<void> {
+    if (this.sessionToken) {
+      await fetch(`${this.baseUrl}/v1/platform/identity/logout`, {
+        method: 'POST',
+        headers: this.getPlatformHeaders(),
+      }).catch(() => undefined)
+    }
+    this.setSessionToken('')
+  }
+
+  private async platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/v1/platform${path}`, {
+        ...init,
+        headers: { ...this.getPlatformHeaders(), ...(init?.headers ?? {}) },
+      })
+    } catch {
+      throw new Error('Cannot reach the Dabba backend. Check that the server is running.')
+    }
+    if (!response.ok) {
+      const fallback = response.status >= 500
+        ? 'The Dabba backend could not complete this request. Please retry.'
+        : `Platform request failed (${response.status})`
+      throw await responseError(response, fallback)
+    }
+    if (response.status === 204) return undefined as T
+    return response.json()
+  }
+
+  async listCoworkItems(status?: CoworkStatus): Promise<CoworkItem[]> {
+    const data = await this.platformRequest<{ items: CoworkItem[] }>(
+      `/cowork/items${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    )
+    return data.items
+  }
+
+  createCoworkItem(input: Partial<CoworkItem> & { title: string }): Promise<CoworkItem> {
+    return this.platformRequest('/cowork/items', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  updateCoworkItem(id: string, changes: Partial<CoworkItem>): Promise<CoworkItem> {
+    return this.platformRequest(`/cowork/items/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(changes),
+    })
+  }
+
+  deleteCoworkItem(id: string): Promise<void> {
+    return this.platformRequest(`/cowork/items/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async listCoworkRuns(itemId: string): Promise<CoworkRun[]> {
+    const data = await this.platformRequest<{ runs: CoworkRun[] }>(
+      `/cowork/items/${encodeURIComponent(itemId)}/runs`,
+    )
+    return data.runs
+  }
+
+  runCoworkItem(itemId: string, input: { mode: 'safe' | 'agent'; workspacePath?: string; model?: string; effort?: string }): Promise<CoworkRun> {
+    return this.platformRequest(`/cowork/items/${encodeURIComponent(itemId)}/runs`, {
+      method: 'POST', body: JSON.stringify(input),
+    })
+  }
+
+  cancelCoworkRun(runId: string): Promise<CoworkRun> {
+    return this.platformRequest(`/cowork/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' })
+  }
+
+  async listCoworkSubtasks(itemId: string): Promise<CoworkSubtask[]> {
+    const data = await this.platformRequest<{ subtasks: CoworkSubtask[] }>(
+      `/cowork/items/${encodeURIComponent(itemId)}/subtasks`,
+    )
+    return data.subtasks
+  }
+
+  addCoworkSubtask(itemId: string, title: string): Promise<CoworkSubtask> {
+    return this.platformRequest(`/cowork/items/${encodeURIComponent(itemId)}/subtasks`, {
+      method: 'POST', body: JSON.stringify({ title }),
+    })
+  }
+
+  updateCoworkSubtask(subtaskId: string, changes: { title?: string; status?: 'pending' | 'done' }): Promise<CoworkSubtask> {
+    return this.platformRequest(`/cowork/subtasks/${encodeURIComponent(subtaskId)}`, {
+      method: 'PATCH', body: JSON.stringify(changes),
+    })
+  }
+
+  deleteCoworkSubtask(subtaskId: string): Promise<void> {
+    return this.platformRequest(`/cowork/subtasks/${encodeURIComponent(subtaskId)}`, { method: 'DELETE' })
+  }
+
+  async listCoworkSchedules(itemId: string): Promise<CoworkSchedule[]> {
+    const data = await this.platformRequest<{ schedules: CoworkSchedule[] }>(
+      `/cowork/items/${encodeURIComponent(itemId)}/schedules`,
+    )
+    return data.schedules
+  }
+
+  createCoworkSchedule(itemId: string, input: Partial<Pick<CoworkSchedule, 'cadence' | 'intervalMinutes' | 'timeOfDay' | 'weekdays' | 'mode' | 'workspacePath' | 'model' | 'effort' | 'enabled'>>): Promise<CoworkSchedule> {
+    return this.platformRequest(`/cowork/items/${encodeURIComponent(itemId)}/schedules`, {
+      method: 'POST', body: JSON.stringify(input),
+    })
+  }
+
+  updateCoworkSchedule(scheduleId: string, changes: Partial<Pick<CoworkSchedule, 'cadence' | 'intervalMinutes' | 'timeOfDay' | 'weekdays' | 'mode' | 'workspacePath' | 'model' | 'effort' | 'enabled'>>): Promise<CoworkSchedule> {
+    return this.platformRequest(`/cowork/schedules/${encodeURIComponent(scheduleId)}`, {
+      method: 'PATCH', body: JSON.stringify(changes),
+    })
+  }
+
+  deleteCoworkSchedule(scheduleId: string): Promise<void> {
+    return this.platformRequest(`/cowork/schedules/${encodeURIComponent(scheduleId)}`, { method: 'DELETE' })
+  }
+
+  browseWorkspaceDirectories(path?: string): Promise<DirectoryListing> {
+    return this.platformRequest(
+      `/filesystem/directories${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    )
+  }
+
+  pickWorkspaceDirectory(initialPath?: string): Promise<{ path: string | null; cancelled: boolean }> {
+    return this.platformRequest('/filesystem/pick-directory', {
+      method: 'POST', body: JSON.stringify({ initialPath: initialPath || null }),
+    })
+  }
+
+  async publishArtifact(name: string, content: string, mediaType: string, title: string): Promise<{ slug: string; title: string; url: string }> {
+    // btoa is ASCII-only; encode as UTF-8 bytes first so non-ASCII artifact content round-trips correctly.
+    const bytes = new TextEncoder().encode(content)
+    const base64 = btoa(Array.from(bytes, b => String.fromCharCode(b)).join(''))
+    const created = await this.platformRequest<{ id: string }>('/artifacts', {
+      method: 'POST', body: JSON.stringify({ name, data: base64, mediaType }),
+    })
+    const published = await this.platformRequest<{ slug: string; title: string; url: string }>(
+      `/artifacts/${encodeURIComponent(created.id)}/publish`,
+      { method: 'POST', body: JSON.stringify({ title }) },
+    )
+    return { ...published, url: `${this.baseUrl}${published.url}` }
+  }
+
+  async listPublishedArtifacts(): Promise<Array<{ slug: string; title: string; artifactId: string; createdAt: number }>> {
+    const data = await this.platformRequest<{ published: Array<{ slug: string; title: string; artifactId: string; createdAt: number }> }>('/artifacts/published')
+    return data.published
+  }
+
+  unpublishArtifact(slug: string): Promise<void> {
+    return this.platformRequest(`/artifacts/publish/${encodeURIComponent(slug)}`, { method: 'DELETE' })
+  }
+
+  async listMemories(scope?: string): Promise<Array<{ id: string; scope: string; key: string; content: string; updatedAt: number }>> {
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : ''
+    const data = await this.platformRequest<{ memories: Array<{ id: string; scope: string; key: string; content: string; updatedAt: number }> }>(`/memory${query}`)
+    return data.memories
+  }
+
+  saveMemory(scope: string, key: string, content: string): Promise<{ scope: string; key: string; content: string; updatedAt: number }> {
+    return this.platformRequest('/memory', { method: 'PUT', body: JSON.stringify({ scope, key, content }) })
+  }
+
+  deleteMemory(memoryId: string): Promise<void> {
+    return this.platformRequest(`/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' })
+  }
+
+  async listSkills(): Promise<Skill[]> {
+    const data = await this.platformRequest<{ skills: Skill[] }>('/skills')
+    return data.skills
+  }
+
+  createSkillPackage(input: { name: string; instructions: string; description?: string; script?: string }): Promise<Skill> {
+    return this.platformRequest('/skills', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  deleteSkillPackage(id: string): Promise<void> {
+    return this.platformRequest(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async matchSkill(message: string): Promise<Skill | null> {
+    const data = await this.platformRequest<{ skill: Skill | null }>('/skills/match', {
+      method: 'POST', body: JSON.stringify({ message }),
+    })
+    return data.skill
+  }
+
+  async listAgentDefinitions(): Promise<AgentDefinition[]> {
+    const data = await this.platformRequest<{ definitions: AgentDefinition[] }>('/agent-definitions')
+    return data.definitions
+  }
+
+  createAgentDefinition(input: { name: string; systemPrompt: string; description?: string; allowedTools?: string[]; model?: string; effort?: string }): Promise<AgentDefinition> {
+    return this.platformRequest('/agent-definitions', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  updateAgentDefinition(id: string, changes: Partial<Pick<AgentDefinition, 'name' | 'description' | 'systemPrompt' | 'allowedTools' | 'model' | 'effort'>>): Promise<AgentDefinition> {
+    return this.platformRequest(`/agent-definitions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(changes) })
+  }
+
+  deleteAgentDefinition(id: string): Promise<void> {
+    return this.platformRequest(`/agent-definitions/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  dispatchAgentDefinitions(assignments: Record<string, { definitionId: string; prompt: string }>, workspacePath?: string): Promise<Record<string, { success: boolean; result?: string; error?: string }>> {
+    return this.platformRequest('/agent-definitions/dispatch', {
+      method: 'POST', body: JSON.stringify({ assignments, workspacePath }),
+    })
+  }
+
+  async runAgentDefinitionPipeline(
+    stages: Array<{ definitionId: string; promptTemplate: string; outputSchema?: Record<string, unknown> }>,
+    initialInput = '',
+    workspacePath?: string,
+  ): Promise<Array<{ role: string; success: boolean; result?: unknown; error?: string }>> {
+    const data = await this.platformRequest<{ results: Array<{ role: string; success: boolean; result?: unknown; error?: string }> }>(
+      '/agent-definitions/pipeline',
+      { method: 'POST', body: JSON.stringify({ stages, initialInput, workspacePath }) },
+    )
+    return data.results
+  }
+
+  async listScheduledSkills(): Promise<ScheduledSkill[]> {
+    const data = await this.platformRequest<{ schedules: ScheduledSkill[] }>('/scheduled-skills')
+    return data.schedules
+  }
+
+  createScheduledSkill(input: Omit<ScheduledSkill, 'id' | 'createdAt' | 'updatedAt' | 'lastRunAt' | 'lastStatus'>): Promise<ScheduledSkill> {
+    return this.platformRequest('/scheduled-skills', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  updateScheduledSkill(id: string, changes: Partial<ScheduledSkill>): Promise<ScheduledSkill> {
+    return this.platformRequest(`/scheduled-skills/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify(changes),
+    })
+  }
+
+  deleteScheduledSkill(id: string): Promise<void> {
+    return this.platformRequest(`/scheduled-skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  runScheduledSkill(id: string): Promise<ScheduledSkillRun> {
+    return this.platformRequest(`/scheduled-skills/${encodeURIComponent(id)}/run`, { method: 'POST' })
+  }
+
+  async listScheduledSkillRuns(): Promise<ScheduledSkillRun[]> {
+    const data = await this.platformRequest<{ runs: ScheduledSkillRun[] }>('/scheduled-skills/runs')
+    return data.runs
+  }
+
+  async listPlatformTasks(status?: PlatformTask['status']): Promise<PlatformTask[]> {
+    const data = await this.platformRequest<{ tasks: PlatformTask[] }>(
+      `/tasks${status ? `?status=${encodeURIComponent(status)}` : ''}`,
+    )
+    return data.tasks
+  }
+
+  getPlatformTask(id: string): Promise<PlatformTask> {
+    return this.platformRequest(`/tasks/${encodeURIComponent(id)}`)
+  }
+
+  async listPlatformTaskEvents(id: string): Promise<PlatformTaskEvent[]> {
+    const data = await this.platformRequest<{ events: PlatformTaskEvent[] }>(
+      `/tasks/${encodeURIComponent(id)}/events`,
+    )
+    return data.events
+  }
+
+  cancelPlatformTask(id: string): Promise<PlatformTask> {
+    return this.platformRequest(`/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
+  }
+
+  resumePlatformTask(id: string): Promise<PlatformTask> {
+    return this.platformRequest(`/tasks/${encodeURIComponent(id)}/resume`, { method: 'POST' })
+  }
+
+  private async hooksRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}/v1/hooks${path}`, {
+      ...init,
+      headers: { ...this.getHeaders(), ...(init?.headers ?? {}) },
+    })
+    if (!response.ok) throw await responseError(response, `Hooks request failed (${response.status})`)
+    if (response.status === 204) return undefined as T
+    return response.json()
+  }
+
+  async listHooks(): Promise<{ hooks: AgentHook[]; events: HookEvent[] }> {
+    return this.hooksRequest('')
+  }
+
+  createHook(input: { event: HookEvent; command: string; matcher?: string; timeout?: number; enabled?: boolean }): Promise<AgentHook> {
+    return this.hooksRequest('', { method: 'POST', body: JSON.stringify(input) })
+  }
+
+  updateHook(id: string, changes: Partial<Pick<AgentHook, 'event' | 'command' | 'matcher' | 'timeout' | 'enabled'>>): Promise<AgentHook> {
+    return this.hooksRequest(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(changes) })
+  }
+
+  deleteHook(id: string): Promise<void> {
+    return this.hooksRequest(`/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async listHookRuns(limit = 50): Promise<HookRun[]> {
+    const data = await this.hooksRequest<{ runs: HookRun[] }>(`/runs?limit=${limit}`)
+    return data.runs
+  }
+
+  async approveAgentCall(callId: string, approved: boolean): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/v1/agent/approve`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ call_id: callId, approved }),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not send the approval decision')
+  }
+
+  async listBackgroundProcesses(): Promise<Array<{ process_id: string; command: string; pid: number; status: string; uptime_seconds: number }>> {
+    const response = await fetch(`${this.baseUrl}/v1/agent/processes`, { headers: this.getHeaders() })
+    if (!response.ok) throw await responseError(response, 'Could not list background processes')
+    const data = await response.json()
+    return data.processes ?? []
+  }
+
+  async releaseAgentConversation(conversationId: string): Promise<void> {
+    await fetch(`${this.baseUrl}/v1/agent/conversations/${encodeURIComponent(conversationId)}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    }).catch(() => undefined)
   }
 
   private mapMessages(messages: Message[]): { role: string; content: unknown }[] {
     return messages.map(m => {
       // Vision messages carry images as OpenAI-format multimodal content parts.
       if (m.images?.length && m.imageMode === 'vision') {
+        const textContent = m.documentContext
+          ? `${m.content}\n\n${m.documentContext}`.trim()
+          : m.content
         return {
           role: m.role,
           content: [
-            ...(m.content ? [{ type: 'text', text: m.content }] : []),
+            ...(textContent ? [{ type: 'text', text: textContent }] : []),
             ...m.images.map(url => ({ type: 'image_url', image_url: { url } })),
           ],
         }
       }
-      return { role: m.role, content: m.content }
+      const content = m.documentContext
+        ? `${m.content}\n\n${m.documentContext}`.trim()
+        : m.content
+      return { role: m.role, content }
     })
+  }
+
+  async extractDocuments(files: UploadedFile[], signal?: AbortSignal): Promise<ExtractedDocument[]> {
+    const payload = files.map(file => {
+      if (!file.dataUrl) throw new Error(`Attachment "${file.name}" has no readable data.`)
+      return { name: file.name, data_url: file.dataUrl }
+    })
+    const response = await fetch(`${this.baseUrl}/v1/documents/extract`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ files: payload }),
+      signal,
+    })
+    if (!response.ok) {
+      throw await responseError(response, `Document extraction failed (status ${response.status})`)
+    }
+    const data = await response.json() as { documents?: ExtractedDocument[] }
+    return data.documents ?? []
   }
 
   async executeCode(
@@ -179,7 +594,7 @@ export class ApiClient {
   /** Loads every conversation stored server-side for this user. */
   async fetchConversations(userId: string, signal?: AbortSignal): Promise<Conversation[]> {
     const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}`, {
-      headers: this.getHeaders(),
+      headers: this.getPlatformHeaders(),
       signal,
     })
     if (!response.ok) {
@@ -193,7 +608,7 @@ export class ApiClient {
   async saveConversationRemote(userId: string, conv: Conversation): Promise<void> {
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(conv.id)}`, {
       method: 'PUT',
-      headers: this.getHeaders(),
+      headers: this.getPlatformHeaders(),
       body: JSON.stringify({
         id: conv.id,
         userId,
@@ -214,7 +629,7 @@ export class ApiClient {
   async deleteConversationRemote(userId: string, id: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
+      headers: this.getPlatformHeaders(),
     })
     if (!response.ok && response.status !== 404) {
       throw new Error(`Failed to delete conversation (status ${response.status})`)
@@ -289,6 +704,16 @@ export class ApiClient {
       signal?: AbortSignal
       model?: string
       effort?: string
+      research?: boolean
+      conversationId?: string
+      requirePlanApproval?: boolean
+      permissionMode?: 'ask' | 'allow' | 'deny'
+      useToolSearch?: boolean
+      maxSteps?: number | null
+      contextCompactionThreshold?: number
+      contextCompactionKeepRecent?: number
+      onApproval?: (request: { callId: string; name: string; arguments: unknown }) => Promise<boolean>
+      onPlanApproval?: (request: { planId: string; objective: string; steps: Array<{ step_id: string; tool: string; description: string }> }) => Promise<boolean>
       onEvent: (event: { type: string; content: unknown }) => void
     }
   ): Promise<void> {
@@ -299,7 +724,14 @@ export class ApiClient {
         message,
         model: options.model,
         effort: options.effort,
-        permission_mode: 'auto', // headless web UI — never pause for tool approval
+        research: !!options.research,
+        conversation_id: options.conversationId,
+        permission_mode: options.permissionMode ?? 'ask',
+        require_plan_approval: !!options.requirePlanApproval,
+        use_tool_search: options.useToolSearch,
+        max_steps: options.maxSteps ?? undefined,
+        context_compaction_threshold: options.contextCompactionThreshold,
+        context_compaction_keep_recent: options.contextCompactionKeepRecent,
       }),
       signal: options.signal,
     })
@@ -327,7 +759,24 @@ export class ApiClient {
         const trimmed = line.trim()
         if (!trimmed || !trimmed.startsWith('data: ')) continue
         try {
-          options.onEvent(JSON.parse(trimmed.slice(6)))
+          const event = JSON.parse(trimmed.slice(6)) as { type: string; content: unknown }
+          if (event.type === 'approval_required') {
+            const content = event.content as { call_id?: string; name?: string; arguments?: unknown }
+            const callId = content.call_id ?? ''
+            const approved = callId && options.onApproval
+              ? await options.onApproval({ callId, name: content.name ?? 'tool', arguments: content.arguments })
+              : false
+            if (callId) await this.approveAgentCall(callId, !!approved)
+          }
+          if (event.type === 'plan_approval_required') {
+            const content = event.content as { plan_id?: string; objective?: string; steps?: Array<{ step_id: string; tool: string; description: string }> }
+            const planId = content.plan_id ?? ''
+            const approved = planId && options.onPlanApproval
+              ? await options.onPlanApproval({ planId, objective: content.objective ?? '', steps: content.steps ?? [] })
+              : false
+            if (planId) await this.approveAgentCall(planId, !!approved)
+          }
+          options.onEvent(event)
         } catch {
           // skip malformed SSE payloads
         }
@@ -431,28 +880,37 @@ export class ApiClient {
           const data = trimmed.slice(6)
           if (data === '[DONE]') continue
 
+          let parsed: {
+            error?: { message?: string }
+            choices?: Array<{ delta?: { content?: string }; finish_reason?: 'stop' | 'length' | null }>
+            usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+          }
           try {
-            const parsed = JSON.parse(data)
-            const delta = parsed.choices?.[0]?.delta?.content ?? ''
-            const finishReason = parsed.choices?.[0]?.finish_reason ?? null
-
-            // Some servers emit a trailing usage object on the final SSE event.
-            if (parsed.usage) {
-              usage = {
-                promptTokens: parsed.usage.prompt_tokens ?? 0,
-                completionTokens: parsed.usage.completion_tokens ?? 0,
-                totalTokens: parsed.usage.total_tokens ?? 0,
-              }
-            }
-
-            if (delta) {
-              fullContent += delta
-              onChunk({ content: fullContent, finishReason, usage })
-            } else if (finishReason) {
-              onChunk({ content: fullContent, finishReason, usage })
-            }
+            parsed = JSON.parse(data)
           } catch {
             // skip malformed JSON chunks
+            continue
+          }
+          if (parsed.error) {
+            throw new Error(parsed.error.message ?? 'The model provider could not complete this request.')
+          }
+          const delta = parsed.choices?.[0]?.delta?.content ?? ''
+          const finishReason = parsed.choices?.[0]?.finish_reason ?? null
+
+          // Some servers emit a trailing usage object on the final SSE event.
+          if (parsed.usage) {
+            usage = {
+              promptTokens: parsed.usage.prompt_tokens ?? 0,
+              completionTokens: parsed.usage.completion_tokens ?? 0,
+              totalTokens: parsed.usage.total_tokens ?? 0,
+            }
+          }
+
+          if (delta) {
+            fullContent += delta
+            onChunk({ content: fullContent, finishReason, usage })
+          } else if (finishReason) {
+            onChunk({ content: fullContent, finishReason, usage })
           }
         }
       }
@@ -465,6 +923,15 @@ export class ApiClient {
 
     return fullContent
   }
+}
+
+export interface PlatformUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  createdAt: number
+  updatedAt: number
 }
 
 export const apiClient = new ApiClient()

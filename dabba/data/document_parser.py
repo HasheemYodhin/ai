@@ -6,6 +6,9 @@ formats: plain text, markdown, JSON, JSONL, CSV, and PDF.
 import json
 import csv
 import io
+import re
+import zipfile
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Union
 
@@ -21,6 +24,9 @@ class DocumentParser:
         - .jsonl: JSONL (one JSON object per line)
         - .csv: CSV files
         - .pdf: PDF documents (requires PyMuPDF or pdfminer)
+        - .docx: Microsoft Word documents (requires python-docx)
+        - .xlsx: Microsoft Excel workbooks
+        - .pptx: Microsoft PowerPoint presentations
 
     Usage:
         parser = DocumentParser()
@@ -80,6 +86,9 @@ class DocumentParser:
             ".jsonl": self._parse_jsonl,
             ".csv": self._parse_csv,
             ".pdf": self._parse_pdf,
+            ".docx": self._parse_docx,
+            ".xlsx": self._parse_xlsx,
+            ".pptx": self._parse_pptx,
         }
 
         parser = parsers.get(suffix)
@@ -223,6 +232,94 @@ class DocumentParser:
 
         return texts
 
+    def _parse_docx(self, path: Path) -> List[str]:
+        """Extract paragraphs and table rows from a Word DOCX document."""
+        try:
+            from docx import Document
+        except ImportError:
+            return []
+
+        document = Document(str(path))
+        texts = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+        for table in document.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    texts.append(" | ".join(cells))
+        return texts
+
+    def _parse_xlsx(self, path: Path) -> List[str]:
+        """Extract sheet names and cell values directly from an XLSX package."""
+        texts: List[str] = []
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            shared_strings: List[str] = []
+            if "xl/sharedStrings.xml" in names:
+                root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
+                for item in root.findall(".//{*}si"):
+                    shared_strings.append("".join(node.text or "" for node in item.findall(".//{*}t")))
+
+            sheet_names: Dict[str, str] = {}
+            if "xl/workbook.xml" in names:
+                workbook = ET.fromstring(archive.read("xl/workbook.xml"))
+                for index, sheet in enumerate(workbook.findall(".//{*}sheet"), start=1):
+                    sheet_names[str(index)] = sheet.attrib.get("name", f"Sheet {index}")
+
+            worksheet_paths = sorted(
+                (name for name in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name)),
+                key=lambda name: int(re.search(r"(\d+)", Path(name).stem).group(1)),
+            )
+            for index, worksheet_path in enumerate(worksheet_paths, start=1):
+                root = ET.fromstring(archive.read(worksheet_path))
+                rows: List[str] = []
+                for row in root.findall(".//{*}sheetData/{*}row"):
+                    values: List[str] = []
+                    for cell in row.findall("{*}c"):
+                        cell_type = cell.attrib.get("t")
+                        value_node = cell.find("{*}v")
+                        if cell_type == "inlineStr":
+                            value = "".join(node.text or "" for node in cell.findall(".//{*}t"))
+                        elif value_node is None:
+                            value = ""
+                        elif cell_type == "s":
+                            try:
+                                value = shared_strings[int(value_node.text or "0")]
+                            except (ValueError, IndexError):
+                                value = value_node.text or ""
+                        elif cell_type == "b":
+                            value = "TRUE" if value_node.text == "1" else "FALSE"
+                        else:
+                            value = value_node.text or ""
+                        values.append(value.strip())
+                    if any(values):
+                        rows.append(" | ".join(values))
+                if rows:
+                    title = sheet_names.get(str(index), f"Sheet {index}")
+                    texts.append(f"[Sheet: {title}]\n" + "\n".join(rows))
+        return texts
+
+    def _parse_pptx(self, path: Path) -> List[str]:
+        """Extract text from each slide in reading order from a PPTX package."""
+        texts: List[str] = []
+        with zipfile.ZipFile(path) as archive:
+            slide_paths = sorted(
+                (
+                    name for name in archive.namelist()
+                    if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+                ),
+                key=lambda name: int(re.search(r"(\d+)", Path(name).stem).group(1)),
+            )
+            for index, slide_path in enumerate(slide_paths, start=1):
+                root = ET.fromstring(archive.read(slide_path))
+                paragraphs = []
+                for paragraph in root.findall(".//{*}p"):
+                    text = "".join(node.text or "" for node in paragraph.findall(".//{*}t")).strip()
+                    if text:
+                        paragraphs.append(text)
+                if paragraphs:
+                    texts.append(f"[Slide {index}]\n" + "\n".join(paragraphs))
+        return texts
+
     def parse_directory(
         self,
         directory: str,
@@ -245,7 +342,10 @@ class DocumentParser:
             return
 
         if extensions is None:
-            extensions = [".txt", ".md", ".json", ".jsonl", ".csv", ".pdf"]
+            extensions = [
+                ".txt", ".md", ".json", ".jsonl", ".csv",
+                ".pdf", ".docx", ".xlsx", ".pptx",
+            ]
         extensions = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions]
 
         pattern = "**/*" if recursive else "*"

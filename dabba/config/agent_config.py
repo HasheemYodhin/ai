@@ -26,38 +26,58 @@ class AgentConfig:
     # AgentProxy._ensure_agent_loop — None means no grounding was provided
     # and the model has to guess from conversation history alone.
     workspace_root: Optional[str] = None
+    active_file: Optional[str] = None
     max_iterations: int = 10
     max_tool_calls_per_step: int = 5
-    max_steps: int = 20
+    max_steps: int = 50
     max_tool_retries: int = 3
+    max_llm_retries: int = 2
 
     # Planning
     use_planning: bool = True
     planning_prompt: str = "planning"
     replan_check_frequency: int = 3
+    # When True, a multi-step plan is proposed to the caller and must be
+    # explicitly approved (via the streaming "plan_approval_required" event)
+    # before the executor runs it. Defaults off so existing callers (CLI,
+    # Cowork) keep auto-executing plans exactly as before.
+    require_plan_approval: bool = False
 
     # Context management
     max_context_length: int = 128000
     context_truncation_strategy: str = "summarize"
     persist_conversation: bool = True
     conversation_dir: str = "./conversations"
+    # Proactive LLM-based compaction: when the context fills past this
+    # fraction, older turns are summarized (by the model) into one entry
+    # BEFORE the next step, so a long task keeps its earlier context as a
+    # real summary instead of losing it to a placeholder or a hard drop.
+    # Set to 0 to disable proactive compaction (emergency truncation still
+    # runs if the hard max_context_length is ever exceeded).
+    context_compaction_threshold: float = 0.75
+    # Most recent entries always kept verbatim (never folded into a summary).
+    context_compaction_keep_recent: int = 6
 
-    # Tool configuration
-    allowed_tools: List[str] = field(
-        default_factory=lambda: [
-            "file_read", "file_write", "file_edit", "file_search",
-            "shell_exec", "powershell_exec", "web_fetch", "web_search",
-            "code_analyze", "rag_query", "image_analyze",
-            "process_start", "process_list", "process_output", "process_stop",
-            "ssh_exec", "scp_copy",
-            "docker_exec", "docker_run", "docker_list_containers",
-            "markdown_to_pdf", "markdown_to_docx",
-        ]
+    # Tool configuration. Empty (the default) means unrestricted — every tool
+    # in the registry is available, matching every existing caller's behavior
+    # today. Set to a non-empty list to scope an AgentLoop to only those
+    # tools (both in what's advertised to the model and what actually
+    # executes) — used for custom subagent types with a fixed tool allowlist.
+    allowed_tools: List[str] = field(default_factory=list)
+    # When True, only a small "always visible" set of tools plus whatever the
+    # model has already activated via the tool_search meta-tool are
+    # advertised in tools=, instead of the full registry — cuts prompt bloat
+    # on a large tool registry. Off by default: every existing caller keeps
+    # seeing every allowed tool up front, same as today.
+    use_tool_search: bool = False
+    tool_search_always_visible: List[str] = field(
+        default_factory=lambda: ["tool_search", "ask_user", "todo_write", "todo_list"]
     )
     require_tool_approval: bool = True
     dangerous_tools: List[str] = field(
         default_factory=lambda: [
             "shell_exec", "powershell_exec", "file_write",
+            "transactional_edit",
             "process_start", "process_stop",
             "ssh_exec", "scp_copy", "docker_exec", "docker_run",
             "markdown_to_pdf", "markdown_to_docx",

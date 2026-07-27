@@ -216,6 +216,7 @@ export function ModelSwitcher() {
 
       {keyPromptModel && (
         <ApiKeyPromptModal
+          target={keyPromptModel.id}
           provider={keyPromptModel.provider}
           modelName={keyPromptModel.name}
           onClose={() => setKeyPromptModel(null)}

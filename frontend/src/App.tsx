@@ -15,11 +15,20 @@ import { AgentsPage } from '@/components/AgentsPage'
 import { ToolsPage } from '@/components/ToolsPage'
 import { ConnectorsPage } from '@/components/ConnectorsPage'
 import { SkillsPage } from '@/components/SkillsPage'
+import { CoworkWorkspace } from '@/components/CoworkWorkspace'
+import { ScheduledSkillsPage } from '@/components/ScheduledSkillsPage'
+import { HooksPage } from '@/components/HooksPage'
+import { SubagentsPage } from '@/components/SubagentsPage'
+import { useProcessNotifications } from '@/hooks/useRunNotifications'
+import { CheckCircle2, XCircle, X } from 'lucide-react'
+import { TaskCenterPage } from '@/components/TaskCenterPage'
 import type { ActiveMode } from '@/components/PlusMenu'
+import type { ExtractedDocument, DocumentAttachment, Message } from '@/types'
 import { RESEARCH_MODE } from '@/lib/agentModes'
 import { cn } from '@/lib/utils'
+import { apiClient } from '@/api/client'
 
-export type SidebarView = 'chat' | 'projects' | 'agents' | 'tools' | 'connectors' | 'skills'
+export type SidebarView = 'chat' | 'projects' | 'cowork' | 'scheduled-skills' | 'tasks' | 'agents' | 'tools' | 'connectors' | 'skills' | 'hooks' | 'subagents'
 
 function ChatApp() {
   const { currentUser } = useAuth()
@@ -30,22 +39,11 @@ function ChatApp() {
   // Temporary chats never touch the backend — see the auto-save effect below
   // and ensureConversation(), both of which are no-ops while this is true.
   const [isTemporaryChat, setIsTemporaryChat] = useState(false)
-  const {
-    messages,
-    isLoading,
-    sendMessage,
-    runAgentMode,
-    generateImage,
-    stopGeneration,
-    clearMessages,
-    setMessages,
-    editMessage,
-    regenerate,
-  } = useChat()
-
+  const { notices: processNotices, dismiss: dismissProcessNotice } = useProcessNotifications()
   const {
     conversations,
     currentId,
+    isLoading: isHistoryLoading,
     createConversation,
     saveConversation,
     loadConversation,
@@ -56,23 +54,74 @@ function ChatApp() {
     setCurrentId,
   } = useHistory(currentUser?.id ?? null)
 
+  const handleConversationUpdate = useCallback((conversationId: string, nextMessages: Message[]) => {
+    if (conversationId === '__temporary__') return
+    saveConversation(nextMessages, conversationId)
+  }, [saveConversation])
+
+  const {
+    messages,
+    isLoading,
+    runningConversationIds,
+    sendMessage,
+    runAgentMode,
+    generateImage,
+    stopGeneration,
+    clearMessages,
+    setMessages,
+    editMessage,
+    regenerate,
+    pendingApproval,
+    respondToApproval,
+    pendingPlanApproval,
+    respondToPlanApproval,
+  } = useChat({
+    activeConversationId: isTemporaryChat ? '__temporary__' : currentId,
+    onConversationUpdate: handleConversationUpdate,
+  })
+
   const { projects, createProject, updateProject, deleteProject } = useProjects()
 
-  // Auto-save conversation when messages change — skipped entirely for
-  // temporary chats, which only ever live in useChat's in-memory state.
+  const currentUserId = currentUser?.id ?? null
+  const [restoredUserId, setRestoredUserId] = useState<string | null>(null)
+
+  // Persist the active conversation ID in localStorage when it changes (only after initial restore has run)
   useEffect(() => {
-    if (messages.length > 0 && !isTemporaryChat) {
-      // Bind each save to the ID from this render. A chat switch must never
-      // let the outgoing messages overwrite the newly selected conversation.
-      saveConversation(messages, currentId ?? undefined)
+    if (!currentUser || restoredUserId !== currentUser.id) return
+    const storageKey = `dabba_current_conversation_id_${currentUser.id}`
+    if (currentId) {
+      localStorage.setItem(storageKey, currentId)
+    } else {
+      localStorage.removeItem(storageKey)
     }
-  }, [messages, currentId, isTemporaryChat, saveConversation])
+  }, [currentId, currentUser, restoredUserId])
+
+  // Restore the last active conversation on initial load/refresh once history is loaded
+
+  useEffect(() => {
+    if (!currentUserId || restoredUserId === currentUserId || isHistoryLoading) return
+
+    const storageKey = `dabba_current_conversation_id_${currentUserId}`
+    const storedId = localStorage.getItem(storageKey)
+    const targetId = (storedId && conversations.some(c => c.id === storedId))
+      ? storedId
+      : null
+
+    if (targetId) {
+      setCurrentId(targetId)
+      const conv = conversations.find(c => c.id === targetId)
+      if (conv) {
+        setMessages([...conv.messages], targetId)
+      }
+    }
+    setRestoredUserId(currentUserId)
+  }, [conversations, currentUserId, restoredUserId, isHistoryLoading, setCurrentId, setMessages])
 
   // Web search and image generation start their own fresh conversation the
   // same way a normal message does — ensure one exists before sending.
   // No-op for temporary chats: currentId stays null on purpose.
   const ensureConversation = useCallback(() => {
-    if (isTemporaryChat) return currentId
+    if (isTemporaryChat) return '__temporary__'
     if (!currentId) {
       const id = createConversation()
       setCurrentId(id)
@@ -86,20 +135,23 @@ function ChatApp() {
   const currentProjectId = conversations.find(c => c.id === currentId)?.projectId ?? null
   const currentProject = projects.find(p => p.id === currentProjectId) ?? null
 
-  const handleSend = useCallback((content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean }) => {
-    ensureConversation()
+  const handleSend = useCallback((content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => {
+    const conversationId = ensureConversation()
+    if (!conversationId) return
     const systemPromptOverride = opts?.systemPromptOverride ?? currentProject?.instructions
-    sendMessage(content, images, { systemPromptOverride, viaVoice: opts?.viaVoice })
+    sendMessage(content, images, { conversationId, systemPromptOverride, viaVoice: opts?.viaVoice, documents: opts?.documents, attachments: opts?.attachments })
   }, [ensureConversation, sendMessage, currentProject])
 
-  const handleRunAgentMode = useCallback((content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean }) => {
-    ensureConversation()
-    runAgentMode(content, opts)
+  const handleRunAgentMode = useCallback((content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => {
+    const conversationId = ensureConversation()
+    if (!conversationId) return
+    runAgentMode(content, { ...opts, conversationId })
   }, [ensureConversation, runAgentMode])
 
   const handleGenerateImage = useCallback((prompt: string) => {
-    ensureConversation()
-    generateImage(prompt)
+    const conversationId = ensureConversation()
+    if (!conversationId) return
+    generateImage(prompt, conversationId)
   }, [ensureConversation, generateImage])
 
   const handleAddCurrentToProject = useCallback((projectId: string) => {
@@ -108,22 +160,22 @@ function ChatApp() {
   }, [ensureConversation, assignToProject])
 
   const handleNewChat = useCallback(() => {
-    clearMessages()
-    setCurrentId(null)
+    if (currentId && messages.length > 0 && !isTemporaryChat) saveConversation(messages, currentId)
+    const id = createConversation()
+    setMessages([], id)
     setIsTemporaryChat(false)
-  }, [clearMessages, setCurrentId])
+  }, [createConversation, currentId, isTemporaryChat, messages, saveConversation, setMessages])
 
   const handleNewTemporaryChat = useCallback(() => {
-    clearMessages()
     setCurrentId(null)
     setIsTemporaryChat(true)
+    setMessages([], '__temporary__')
     setView('chat')
-  }, [clearMessages, setCurrentId])
+  }, [setCurrentId, setMessages])
 
   const handleSelectConversation = useCallback((id: string) => {
     if (id === currentId) return
 
-    stopGeneration()
     if (currentId && messages.length > 0 && !isTemporaryChat) {
       saveConversation(messages, currentId)
     }
@@ -132,17 +184,19 @@ function ChatApp() {
     if (conv) {
       // Copy the array so React always commits the selected conversation,
       // even if its message array was previously used by the chat view.
-      setMessages([...conv.messages])
+      setMessages([...conv.messages], id)
       setIsTemporaryChat(false)
     }
-  }, [currentId, isTemporaryChat, loadConversation, messages, saveConversation, setMessages, stopGeneration])
+  }, [currentId, isTemporaryChat, loadConversation, messages, saveConversation, setMessages])
 
   const handleDeleteConversation = useCallback((id: string) => {
     if (currentId === id) {
+      stopGeneration()
       clearMessages()
     }
+    void apiClient.releaseAgentConversation(id)
     deleteConversation(id)
-  }, [currentId, clearMessages, deleteConversation])
+  }, [currentId, clearMessages, deleteConversation, stopGeneration])
 
   const toggleSidebar = useCallback(() => {
     setSidebarOpen(prev => !prev)
@@ -166,10 +220,26 @@ function ChatApp() {
 
   return (
     <div className="flex h-full overflow-hidden bg-surface-secondary dark:bg-surface-dark relative">
+      {processNotices.length > 0 && (
+        <div className="pointer-events-none fixed right-4 top-4 z-50 flex w-80 flex-col gap-2">
+          {processNotices.map(notice => (
+            <div key={notice.id} className={cn(
+              'pointer-events-auto flex items-start gap-2 rounded-xl border p-3 text-xs shadow-lg backdrop-blur',
+              notice.tone === 'success' ? 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300'
+                : 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-300'
+            )}>
+              {notice.tone === 'success' ? <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" /> : <XCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />}
+              <span className="flex-1">{notice.message}</span>
+              <button onClick={() => dismissProcessNotice(notice.id)} className="text-current opacity-60 hover:opacity-100"><X className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+        </div>
+      )}
       <Sidebar
         conversations={conversations}
         projects={projects}
         currentId={currentId}
+        runningConversationIds={runningConversationIds}
         isOpen={sidebarOpen}
         view={view}
         onChangeView={setView}
@@ -226,6 +296,10 @@ function ChatApp() {
             initialMode={pendingMode}
             onInitialModeConsumed={() => setPendingMode(null)}
             isTemporary={isTemporaryChat}
+            pendingApproval={pendingApproval}
+            onApprovalDecision={respondToApproval}
+            pendingPlanApproval={pendingPlanApproval}
+            onPlanApprovalDecision={respondToPlanApproval}
           />
         </div>
 
@@ -241,10 +315,15 @@ function ChatApp() {
             />
           </div>
         )}
+        {view === 'cowork' && <div className="flex-1 min-h-0"><CoworkWorkspace /></div>}
+        {view === 'scheduled-skills' && <div className="flex-1 min-h-0"><ScheduledSkillsPage /></div>}
+        {view === 'tasks' && <div className="flex-1 min-h-0"><TaskCenterPage /></div>}
         {view === 'agents' && <div className="flex-1 min-h-0"><AgentsPage /></div>}
         {view === 'tools' && <div className="flex-1 min-h-0"><ToolsPage /></div>}
         {view === 'connectors' && <div className="flex-1 min-h-0"><ConnectorsPage onOpenSkills={() => setView('skills')} /></div>}
         {view === 'skills' && <div className="flex-1 min-h-0"><SkillsPage /></div>}
+        {view === 'hooks' && <div className="flex-1 min-h-0"><HooksPage /></div>}
+        {view === 'subagents' && <div className="flex-1 min-h-0"><SubagentsPage /></div>}
       </main>
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -255,18 +334,21 @@ function ChatApp() {
 }
 
 function AuthGate() {
-  const { currentUser } = useAuth()
+  const { currentUser, isReady } = useAuth()
+  if (!isReady) {
+    return <div className="flex h-full items-center justify-center bg-surface text-sm text-text-secondary dark:bg-surface-dark dark:text-text-dark-secondary">Restoring your Dabba session...</div>
+  }
   return currentUser ? <ChatApp /> : <AuthPage />
 }
 
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <SettingsProvider>
+      <SettingsProvider>
+        <AuthProvider>
           <AuthGate />
-        </SettingsProvider>
-      </AuthProvider>
+        </AuthProvider>
+      </SettingsProvider>
     </ThemeProvider>
   )
 }

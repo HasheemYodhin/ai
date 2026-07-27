@@ -120,6 +120,7 @@ class StreamingHandler:
         token: str,
         index: int = 0,
         finish_reason: Optional[str] = None,
+        usage: Optional[Dict[str, int]] = None,
     ) -> str:
         """
         Create a single SSE chunk for a token.
@@ -128,6 +129,9 @@ class StreamingHandler:
             token: The generated token text.
             index: Choice index.
             finish_reason: Reason for finishing (None if continuing).
+            usage: Real or estimated token counts to attach to this chunk —
+                the frontend reads this off the final chunk (paired with
+                finish_reason) to show accurate usage instead of guessing.
 
         Returns:
             SSE-formatted string.
@@ -139,5 +143,6 @@ class StreamingHandler:
                 "delta": {"content": token},
                 "finish_reason": finish_reason,
             }],
+            usage=usage,
         )
         return chunk.to_sse()

@@ -4,6 +4,8 @@ import { apiClient } from '@/api/client'
 import { providerLabel } from '@/lib/models'
 
 interface ApiKeyPromptModalProps {
+  /** The key key (provider name or model ID) to save this key under. */
+  target: string
   /** Provider id (e.g. "anthropic") of the model that was clicked without a key set. */
   provider: string
   /** Display name of the specific model that triggered this, just for the copy. */
@@ -18,7 +20,7 @@ interface ApiKeyPromptModalProps {
  * that model just sitting disabled with no way to act on it). Saves via the
  * same /v1/agent/keys endpoint the Settings > API Keys tab uses.
  */
-export function ApiKeyPromptModal({ provider, modelName, onClose, onSaved }: ApiKeyPromptModalProps) {
+export function ApiKeyPromptModal({ target, provider, modelName, onClose, onSaved }: ApiKeyPromptModalProps) {
   const [key, setKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -27,7 +29,7 @@ export function ApiKeyPromptModal({ provider, modelName, onClose, onSaved }: Api
   useEffect(() => {
     setKey('')
     setError(null)
-  }, [provider])
+  }, [target])
 
   const handleSave = async () => {
     const trimmed = key.trim()
@@ -35,7 +37,7 @@ export function ApiKeyPromptModal({ provider, modelName, onClose, onSaved }: Api
     setBusy(true)
     setError(null)
     try {
-      await apiClient.setProviderKey(provider, trimmed)
+      await apiClient.setProviderKey(target, trimmed)
       onSaved()
       onClose()
     } catch (err) {

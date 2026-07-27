@@ -144,6 +144,43 @@ class ToolRegistry:
         # override __contains__ so `"name" in list_tools()` works
         return _ToolList(fn_names + defs)
 
+    def search_tools(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
+        """
+        Rank registered ToolDefinitions by relevance to a free-text query.
+
+        Simple substring/word-overlap scoring against name + description —
+        no embeddings, so it's instant and dependency-free. Used by the
+        deferred tool-loading path (AgentConfig.use_tool_search) so a large
+        registry doesn't have to advertise every tool's full schema in every
+        prompt; the model calls a "tool_search" meta-tool to pull in just the
+        ones it needs, and only those get a full schema afterward.
+
+        Args:
+            query: Free-text description of the capability needed.
+            limit: Maximum number of matches to return.
+
+        Returns:
+            List of {"name", "description"} dicts, most relevant first.
+        """
+        words = [w for w in query.lower().split() if w]
+        if not words:
+            return []
+
+        scored: List[tuple[int, str]] = []
+        for definition in self.tools.values():
+            haystack = f"{definition.name} {definition.description}".lower()
+            score = sum(haystack.count(w) for w in words)
+            if any(w in definition.name.lower() for w in words):
+                score += 3  # name match is a much stronger signal than a description hit
+            if score > 0:
+                scored.append((score, definition.name))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [
+            {"name": name, "description": self.tools[name].description}
+            for _, name in scored[:max(1, limit)]
+        ]
+
     def unregister(self, name: str) -> bool:
         """Alias for remove."""
         return self.remove(name)

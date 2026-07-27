@@ -16,10 +16,11 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from dabba.utils.paths import get_dabba_config_dir
+from dabba.platform.services import IdentityService
 
 DB_PATH = get_dabba_config_dir() / "conversations.db"
 
@@ -72,9 +73,24 @@ class ConversationUpsert(BaseModel):
 
 def create_conversations_router() -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["conversations"])
+    identity = IdentityService()
+
+    def authenticated_user(authorization: Optional[str]) -> Dict[str, Any]:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="Authentication required")
+        user = identity.authenticate(authorization.split(" ", 1)[1].strip())
+        if not user:
+            raise HTTPException(status_code=401, detail="Session is invalid or expired")
+        return user
 
     @router.get("/conversations")
-    async def list_conversations(user_id: str):
+    async def list_conversations(
+        user_id: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = authenticated_user(authorization)
+        if user_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Cannot read another user's conversations")
         conn = _get_db()
         try:
             rows = conn.execute(
@@ -86,7 +102,14 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.put("/conversations/{conversation_id}")
-    async def upsert_conversation(conversation_id: str, body: ConversationUpsert):
+    async def upsert_conversation(
+        conversation_id: str,
+        body: ConversationUpsert,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = authenticated_user(authorization)
+        if body.userId != user["id"]:
+            raise HTTPException(status_code=403, detail="Cannot write another user's conversations")
         if conversation_id != body.id:
             raise HTTPException(status_code=400, detail="URL id and body id must match")
 
@@ -117,7 +140,14 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.delete("/conversations/{conversation_id}")
-    async def delete_conversation(conversation_id: str, user_id: str):
+    async def delete_conversation(
+        conversation_id: str,
+        user_id: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = authenticated_user(authorization)
+        if user_id != user["id"]:
+            raise HTTPException(status_code=403, detail="Cannot delete another user's conversations")
         conn = _get_db()
         try:
             cur = conn.execute(

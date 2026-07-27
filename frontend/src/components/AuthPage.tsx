@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { Sparkles, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import logo from '../icon.svg'
 
@@ -47,6 +47,8 @@ export function AuthPage() {
               <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Name</label>
               <input
                 autoFocus
+                required
+                autoComplete="name"
                 value={name}
                 onChange={e => setName(e.target.value)}
                 placeholder="Your name"
@@ -59,6 +61,8 @@ export function AuthPage() {
             <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Email</label>
             <input
               type="email"
+              required
+              autoComplete="email"
               autoFocus={mode === 'login'}
               value={email}
               onChange={e => setEmail(e.target.value)}
@@ -72,9 +76,12 @@ export function AuthPage() {
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
+                required
+                minLength={mode === 'signup' ? 10 : undefined}
+                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
+                placeholder={mode === 'signup' ? 'At least 10 characters' : '••••••••••'}
                 className="w-full px-3.5 pr-10 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors"
               />
               <button
@@ -111,7 +118,7 @@ export function AuthPage() {
         </form>
 
         <p className="text-center text-[10px] text-text-tertiary dark:text-text-dark-tertiary mt-4">
-          Your profile is stored only in this browser — there's no server-side account system.
+          Accounts and conversations are protected by your Dabba server session.
         </p>
       </div>
     </div>

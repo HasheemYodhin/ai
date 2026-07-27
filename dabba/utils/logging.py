@@ -58,7 +58,10 @@ def setup_logger(
     else:
         formatter = logging.Formatter(fmt="%(message)s")
 
-    console_handler = logging.StreamHandler(sys.stdout)
+    # stdout is a protocol channel for stdio MCP servers.  Sending ordinary
+    # application logs there corrupts JSON-RPC messages, so diagnostics belong
+    # on stderr (also the conventional destination for CLI logs).
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
 

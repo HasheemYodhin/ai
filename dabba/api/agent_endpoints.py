@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,8 +21,31 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from dabba.utils.memory_manager import get_memory_manager
+from dabba.tools.web_tools import fetch_url, search_web
 
 _memory_manager = get_memory_manager()
+
+# Minimum interval between request.is_disconnected() polls, in seconds.
+_DISCONNECT_POLL_INTERVAL_S = 1.0
+
+
+async def _client_disconnected(request: Request, last_checked: List[float]) -> bool:
+    """
+    Poll for client disconnect at most once per _DISCONNECT_POLL_INTERVAL_S.
+
+    request.is_disconnected() reads the ASGI receive channel and caches a
+    positive result forever once it returns True — a single spurious read
+    (a known race under some proxies/uvicorn setups, especially likely
+    during the long gaps between chunks while a tool call runs) would
+    otherwise permanently mark a live request as disconnected. Throttling
+    how often we call it cuts down how many chances that one bad read gets
+    to fire during a long, many-step agent run.
+    """
+    now = time.monotonic()
+    if now - last_checked[0] < _DISCONNECT_POLL_INTERVAL_S:
+        return False
+    last_checked[0] = now
+    return await request.is_disconnected()
 
 
 class AgentRequest(BaseModel):
@@ -34,6 +58,13 @@ class AgentRequest(BaseModel):
     selection: Optional[str] = None       # selected code
     reset: bool = False                   # clear conversation first
     permission_mode: str = "ask"          # "ask" pauses for approval, "auto" skips it
+    research: bool = False                 # collect web evidence before the agent answers
+    conversation_id: Optional[str] = None  # isolates simultaneous web-chat agent sessions
+    require_plan_approval: bool = False    # pause on a proposed multi-step plan until the user approves it
+    use_tool_search: Optional[bool] = None         # None = leave the agent loop's existing default alone
+    max_steps: Optional[int] = None                # None = leave the agent loop's existing default alone
+    context_compaction_threshold: Optional[float] = None
+    context_compaction_keep_recent: Optional[int] = None
 
 
 class ApprovalRequest(BaseModel):
@@ -60,8 +91,18 @@ class AddMcpServerRequest(BaseModel):
 # Tools that pause for approval in "ask" mode — must match the real registered
 # tool names in dabba/tools/*.py (shell_exec, file_write, file_edit, and the
 # markdown_to_pdf/docx artifact tools, which write files just like file_write).
-APPROVAL_REQUIRED_TOOLS = {"shell_exec", "file_write", "file_edit", "markdown_to_pdf", "markdown_to_docx"}
+APPROVAL_REQUIRED_TOOLS = {
+    "shell_exec",
+    "file_write",
+    "file_edit",
+    "transactional_edit",
+    "markdown_to_pdf",
+    "markdown_to_docx",
+}
 APPROVAL_TIMEOUT_SECONDS = 180
+RESEARCH_RESULT_COUNT = 8
+RESEARCH_PAGE_COUNT = 3
+RESEARCH_SOURCE_CHARS = 4_000
 
 
 def _requires_approval(tool_name: str) -> bool:
@@ -81,6 +122,7 @@ _pending_approvals: Dict[str, "asyncio.Future[bool]"] = {}
 
 # One shared proxy per server process — keeps conversation context between requests
 _agent_proxy = None
+_conversation_proxies: Dict[str, Any] = {}
 
 # Track last-seen context to avoid repeating workspace/file tags on every turn.
 # The LLM interprets a repeated "[Workspace: /foo]" tag as "user switched to /foo"
@@ -92,8 +134,17 @@ _last_context = {
 }
 
 
-def _get_agent_proxy():
+def _get_agent_proxy(conversation_id: Optional[str] = None):
     global _agent_proxy
+    if conversation_id:
+        proxy = _conversation_proxies.get(conversation_id)
+        if proxy is None:
+            from dabba.cli.agent_proxy import AgentProxy
+            proxy = AgentProxy()
+            proxy.permissions.set_mode("allow")
+            proxy.agent_config.require_tool_approval = False
+            _conversation_proxies[conversation_id] = proxy
+        return proxy
     if _agent_proxy is None:
         from dabba.cli.agent_proxy import AgentProxy
         _agent_proxy = AgentProxy()
@@ -244,6 +295,120 @@ def _build_prompt(req: AgentRequest) -> str:
     return "\n".join(parts)
 
 
+async def _collect_research_evidence(query: str) -> List[Dict[str, str]]:
+    """Search the web and enrich the most relevant results with page content."""
+    results = await asyncio.to_thread(search_web, query, RESEARCH_RESULT_COUNT)
+    evidence: List[Dict[str, str]] = []
+
+    for result in results[:RESEARCH_PAGE_COUNT]:
+        title = str(result.get("title") or "Untitled source")
+        url = str(result.get("url") or "")
+        snippet = str(result.get("snippet") or "")
+        content = ""
+        if url.startswith(("http://", "https://")):
+            try:
+                page = await asyncio.to_thread(fetch_url, url, timeout=10)
+                content = str(page.get("text") or page.get("content") or "")
+            except Exception:
+                # A search result can still be cited even when a site blocks fetching.
+                content = ""
+        evidence.append({
+            "title": title,
+            "url": url,
+            "snippet": snippet,
+            "content": content[:RESEARCH_SOURCE_CHARS],
+        })
+
+    if not evidence:
+        raise RuntimeError("No sources were returned for this research query.")
+    return evidence
+
+
+def _research_prompt(req: AgentRequest, evidence: List[Dict[str, str]]) -> str:
+    sources = []
+    for index, source in enumerate(evidence, 1):
+        excerpt = source["content"] or source["snippet"] or "No extract was available."
+        sources.append(
+            f"[{index}] {source['title']}\nURL: {source['url']}\nEvidence: {excerpt}"
+        )
+    return (
+        _build_prompt(req)
+        + "\n\nYou are in Research mode. Use only the evidence below for factual claims. "
+        "Compare conflicting claims, state uncertainty, and include inline citations like [1]. "
+        "End with a short Sources list that maps every citation number to its URL.\n\n"
+        + "\n\n".join(sources)
+    )
+
+
+async def _research_event_stream(req: AgentRequest, request: Request, proxy):
+    """Emit research activity, then let the agent synthesize the collected evidence."""
+    query = req.message.strip()
+    yield {
+        "type": "tool_call",
+        "content": {"name": "web_search", "arguments": {"query": query}, "call_id": "research-search"},
+    }
+    try:
+        evidence = await _collect_research_evidence(query)
+    except Exception as exc:
+        yield {
+            "type": "tool_result",
+            "content": {"tool": "web_search", "success": False, "output": str(exc)},
+        }
+        yield {
+            "type": "error",
+            "content": "Research could not collect web sources. Check the server network connection and try again.",
+        }
+        return
+
+    yield {
+        "type": "tool_result",
+        "content": {
+            "tool": "web_search",
+            "success": True,
+            "output": f"Collected {len(evidence)} sources: " + ", ".join(source["title"] for source in evidence),
+        },
+    }
+    for index, source in enumerate(evidence, 1):
+        yield {
+            "type": "tool_call",
+            "content": {"name": "web_fetch", "arguments": {"url": source["url"]}, "call_id": f"research-source-{index}"},
+        }
+        yield {
+            "type": "tool_result",
+            "content": {
+                "tool": "web_fetch",
+                "success": bool(source["content"]),
+                "output": f"[{index}] {source['title']}\n{source['url']}",
+            },
+        }
+
+    prompt = _research_prompt(req, evidence)
+    loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+    gen = loop_agent.stream_chat(prompt)
+    last_disconnect_check = [0.0]
+    client_gone = False
+    try:
+        while True:
+            try:
+                chunk = await gen.__anext__()
+            except StopAsyncIteration:
+                break
+            if not client_gone and await _client_disconnected(request, last_disconnect_check):
+                # Client is gone, but keep draining the agent loop so any
+                # in-flight tool call finishes and the session still gets
+                # saved server-side — just stop forwarding chunks nobody
+                # is listening for.
+                client_gone = True
+            if not client_gone:
+                yield chunk
+        if not client_gone:
+            source_lines = [f"[{index}] {source['title']} - {source['url']}" for index, source in enumerate(evidence, 1)]
+            yield {"type": "text", "content": "\n\nSources\n" + "\n".join(source_lines)}
+    finally:
+        if not req.conversation_id:
+            proxy.save_session(req.workspace)
+
+
 # Code-action commands rewrite the message into a real prompt and fall through
 # to the normal agent/LLM stream, instead of returning a canned response.
 _CODE_ACTION_PROMPTS = {
@@ -259,7 +424,7 @@ def create_agent_router() -> APIRouter:
 
     @router.post("/v1/agent")
     async def agent_stream(req: AgentRequest, request: Request):
-        proxy = _get_agent_proxy()
+        proxy = _get_agent_proxy(req.conversation_id)
 
         if req.reset:
             proxy.reset()
@@ -269,6 +434,33 @@ def create_agent_router() -> APIRouter:
             proxy.cli_config.default_model = req.model
         if req.effort:
             proxy.cli_config.effort = req.effort
+        # AgentLoop reads this when building nested DABBA.md/AGENTS.md context.
+        # Keep it current before either research or ordinary generation starts.
+        proxy.agent_config.active_file = req.active_file
+
+        if req.research:
+            async def research_event_gen():
+                steps = 0
+                try:
+                    async for chunk in _research_event_stream(req, request, proxy):
+                        if chunk.get("type") == "tool_call":
+                            steps += 1
+                        yield f"data: {json.dumps(chunk)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': {'steps': steps}})}\n\n"
+                except Exception as exc:
+                    if not req.conversation_id:
+                        proxy.save_session(req.workspace)
+                    yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
+            return StreamingResponse(
+                research_event_gen(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
         msg_stripped = req.message.strip()
         first_word = msg_stripped.split()[0].lower() if msg_stripped else ""
@@ -334,7 +526,7 @@ def create_agent_router() -> APIRouter:
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
                     elif cmd == '/plan':
                         goal = " ".join(args) or req.message
-                        loop_agent = proxy._ensure_agent_loop(req.workspace)
+                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                         tool_dicts = [
                             {"name": t.name, "description": t.description, "parameters": t.parameters_to_json_schema()}
                             for t in proxy._get_registry().list_tools()
@@ -346,7 +538,7 @@ def create_agent_router() -> APIRouter:
                             steps = [f"Planning failed: {exc}"]
                         yield f"data: {json.dumps({'type': 'plan', 'content': steps})}\n\n"
                     elif cmd == '/compact':
-                        loop_agent = proxy._ensure_agent_loop(req.workspace)
+                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                         cm = loop_agent.context_manager
                         before = cm.entry_count
                         before_tokens = cm.total_tokens
@@ -462,7 +654,7 @@ def create_agent_router() -> APIRouter:
                                 msg = f"git command failed: {exc}"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
                     elif cmd == '/memory':
-                        loop_agent = proxy._ensure_agent_loop(req.workspace)
+                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                         history_len = loop_agent.context_manager.entry_count
                         msg = (
                             "🧠 **Session Memory:**\n"
@@ -491,7 +683,7 @@ def create_agent_router() -> APIRouter:
                                         lines.append(f"   {r['snippet']}")
                                 msg = "\n".join(lines)
                                 # Inject results into agent context for follow-up questions
-                                loop_agent = proxy._ensure_agent_loop(req.workspace)
+                                loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                                 loop_agent.context_manager.add_entry(
                                     role="assistant",
                                     content=f"[Web search results for '{query}']\n{msg}",
@@ -516,7 +708,7 @@ def create_agent_router() -> APIRouter:
                                 if len(str(content)) > 8000:
                                     msg += f"\n\n*(truncated — {len(str(content))} total chars)*"
                                 # Inject URL content into agent context
-                                loop_agent = proxy._ensure_agent_loop(req.workspace)
+                                loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                                 loop_agent.context_manager.add_entry(
                                     role="assistant",
                                     content=f"[URL content fetched from {url}]\n{truncated}",
@@ -648,23 +840,29 @@ def create_agent_router() -> APIRouter:
                         prompt = _build_prompt(req)
                         async def route_to_agent():
                             steps = 0
-                            loop_agent = proxy._ensure_agent_loop(req.workspace)
+                            loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
                             gen = loop_agent.stream_chat(prompt)
+                            last_disconnect_check = [0.0]
+                            client_gone = False
                             try:
                                 while True:
                                     try:
                                         chunk = await gen.__anext__()
                                     except StopAsyncIteration:
                                         break
-                                    if await request.is_disconnected():
-                                        await gen.aclose()
-                                        break
-                                    yield f"data: {json.dumps(chunk)}\n\n"
-                                proxy.save_session(req.workspace)
-                                yield f"data: {json.dumps({'type': 'done', 'content': {'steps': steps}})}\n\n"
+                                    if not client_gone and await _client_disconnected(request, last_disconnect_check):
+                                        client_gone = True
+                                    if not client_gone:
+                                        yield f"data: {json.dumps(chunk)}\n\n"
+                                if not req.conversation_id:
+                                    proxy.save_session(req.workspace)
+                                if not client_gone:
+                                    yield f"data: {json.dumps({'type': 'done', 'content': {'steps': steps}})}\n\n"
                             except Exception as exc:
-                                proxy.save_session(req.workspace)
-                                yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+                                if not req.conversation_id:
+                                    proxy.save_session(req.workspace)
+                                if not client_gone:
+                                    yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
                         async for chunk in route_to_agent():
                             yield chunk
                         return
@@ -690,18 +888,56 @@ def create_agent_router() -> APIRouter:
 
         async def event_gen():
             steps = 0
-            loop_agent = proxy._ensure_agent_loop(req.workspace)
+            loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+            loop_agent.config.require_plan_approval = req.require_plan_approval
+            if req.use_tool_search is not None:
+                loop_agent.config.use_tool_search = req.use_tool_search
+            if req.max_steps is not None:
+                loop_agent.config.max_steps = req.max_steps
+            if req.context_compaction_threshold is not None:
+                loop_agent.context_manager.compaction_threshold = req.context_compaction_threshold
+            if req.context_compaction_keep_recent is not None:
+                loop_agent.context_manager.compaction_keep_recent = req.context_compaction_keep_recent
             gen = loop_agent.stream_chat(prompt)
+            last_disconnect_check = [0.0]
+            client_gone = False
+            to_send = None  # value fed back into gen.asend(); only plan approval uses this
             try:
+                # Flush SSE before a slow or cold model starts so clients do
+                # not mistake model startup for an unreachable local server.
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Contacting model...'})}\n\n"
                 while True:
                     try:
-                        chunk = await gen.__anext__()
+                        chunk = await gen.asend(to_send)
                     except StopAsyncIteration:
                         break
+                    to_send = None
 
-                    if await request.is_disconnected():
-                        await gen.aclose()
-                        break
+                    if chunk.get("type", "") == "plan_approval_required":
+                        content = chunk.get("content", {}) or {}
+                        plan_id = content.get("plan_id", "")
+                        if not client_gone:
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                        if plan_id:
+                            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                            _pending_approvals[plan_id] = fut
+                            try:
+                                approved = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_SECONDS)
+                            except asyncio.TimeoutError:
+                                approved = False
+                            finally:
+                                _pending_approvals.pop(plan_id, None)
+                            to_send = approved
+                        continue
+
+                    if not client_gone and await _client_disconnected(request, last_disconnect_check):
+                        # Client is gone, but keep draining the agent loop so
+                        # any in-flight tool call finishes and the session
+                        # still gets saved server-side — just stop forwarding
+                        # SSE lines nobody is listening for. A pending
+                        # approval request will simply time out below and be
+                        # denied, which is the safe default with no client.
+                        client_gone = True
 
                     ctype = chunk.get("type", "")
                     if ctype == "tool_call":
@@ -710,7 +946,8 @@ def create_agent_router() -> APIRouter:
                         tool_name = content.get("name", "")
                         call_id = content.get("call_id", "")
 
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                        if not client_gone:
+                            yield f"data: {json.dumps(chunk)}\n\n"
 
                         if req.permission_mode == "ask" and _requires_approval(tool_name) and call_id:
                             # Genuinely pause here — the underlying async generator has not
@@ -719,6 +956,8 @@ def create_agent_router() -> APIRouter:
                             fut: asyncio.Future = asyncio.get_event_loop().create_future()
                             _pending_approvals[call_id] = fut
                             try:
+                                if not client_gone:
+                                    yield f"data: {json.dumps({'type': 'approval_required', 'content': {'call_id': call_id, 'name': tool_name, 'arguments': content.get('arguments', {})}})}\n\n"
                                 approved = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_SECONDS)
                             except asyncio.TimeoutError:
                                 approved = False
@@ -726,19 +965,25 @@ def create_agent_router() -> APIRouter:
                                 _pending_approvals.pop(call_id, None)
 
                             if not approved:
-                                yield f"data: {json.dumps({'type': 'tool_denied', 'content': {'call_id': call_id, 'name': tool_name}})}\n\n"
-                                yield f"data: {json.dumps({'type': 'text', 'content': f'Tool call `{tool_name}` was denied — stopping this turn.'})}\n\n"
+                                if not client_gone:
+                                    yield f"data: {json.dumps({'type': 'tool_denied', 'content': {'call_id': call_id, 'name': tool_name}})}\n\n"
+                                    yield f"data: {json.dumps({'type': 'text', 'content': f'Tool call `{tool_name}` was denied — stopping this turn.'})}\n\n"
                                 await gen.aclose()
                                 break
                         continue  # tool_call line already yielded above
 
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    if not client_gone:
+                        yield f"data: {json.dumps(chunk)}\n\n"
 
-                proxy.save_session(req.workspace)
-                yield f"data: {json.dumps({'type': 'done', 'content': {'steps': steps}})}\n\n"
+                if not req.conversation_id:
+                    proxy.save_session(req.workspace)
+                if not client_gone:
+                    yield f"data: {json.dumps({'type': 'done', 'content': {'steps': steps}})}\n\n"
             except Exception as exc:
-                proxy.save_session(req.workspace)
-                yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+                if not req.conversation_id:
+                    proxy.save_session(req.workspace)
+                if not client_gone:
+                    yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
 
         return StreamingResponse(
             event_gen(),
@@ -751,10 +996,18 @@ def create_agent_router() -> APIRouter:
         )
 
     @router.post("/v1/agent/reset")
-    async def agent_reset():
+    async def agent_reset(workspace: Optional[str] = None):
         proxy = _get_agent_proxy()
-        proxy.reset()
+        proxy.reset(workspace)
         return {"status": "ok"}
+
+    @router.delete("/v1/agent/conversations/{conversation_id}")
+    async def release_agent_conversation(conversation_id: str):
+        """Release the isolated agent and connector processes owned by a deleted web chat."""
+        proxy = _conversation_proxies.pop(conversation_id, None)
+        if proxy is not None:
+            await asyncio.to_thread(proxy.mcp_manager.close)
+        return {"released": proxy is not None}
 
     @router.post("/v1/agent/approve")
     async def agent_approve(req: ApprovalRequest):
@@ -770,6 +1023,18 @@ def create_agent_router() -> APIRouter:
             fut.set_result(req.approved)
         return {"status": "ok"}
 
+    @router.get("/v1/agent/processes")
+    async def agent_processes():
+        """
+        Background processes started via the process_start tool, across any
+        conversation this server process has served — polled by the frontend
+        to notify on completion, generalizing Cowork's run-notification
+        pattern to any long-running tool call in a normal chat turn.
+        """
+        from dabba.tools.process_tools import list_processes
+
+        return {"processes": list_processes()}
+
     @router.get("/v1/agent/models")
     async def agent_models():
         """List all available models grouped by provider — for the extension model picker."""
@@ -784,7 +1049,18 @@ def create_agent_router() -> APIRouter:
                 "provider": m.provider,
                 "tier": m.tier,
                 "description": m.description,
-                "has_key": bool(keys.get(m.provider)) or not m.requires_key,
+                "has_key": (
+                    bool(keys.get(m.id))
+                    or bool(keys.get(m.id.lower()))
+                    or (
+                        m.provider not in ("nvidia", "anthropic", "openai")
+                        and (
+                            bool(keys.get(m.provider))
+                            or bool(keys.get(m.provider.lower()))
+                        )
+                    )
+                    or not m.requires_key
+                ),
             })
         return {
             "models": models,
@@ -795,53 +1071,71 @@ def create_agent_router() -> APIRouter:
     @router.get("/v1/agent/keys")
     async def list_api_keys():
         """
-        Which providers have a key configured — same status the model picker's
-        "has_key" flag is derived from. Never returns the key values
+        Which providers/models have a key configured. Never returns the key values
         themselves, only whether one is set, for the web UI's key-management
         settings page.
         """
         proxy = _get_agent_proxy()
         keys = getattr(proxy.cli_config, "api_keys", {}) or {}
-        return {
-            "providers": [
-                {"provider": p, "hasKey": bool(keys.get(p))}
-                for p in sorted(VALID_KEY_PROVIDERS)
-            ]
-        }
+        providers_status = [
+            {"provider": p, "hasKey": bool(keys.get(p) or keys.get(p.lower()))}
+            for p in sorted(VALID_KEY_PROVIDERS)
+        ]
+        # Include any model-specific keys configured (keys that are not provider names)
+        for k in sorted(keys.keys()):
+            if k.lower() not in VALID_KEY_PROVIDERS:
+                providers_status.append({"provider": k, "hasKey": True})
+        return {"providers": providers_status}
 
     @router.post("/v1/agent/keys")
     async def set_api_key(req: SetApiKeyRequest):
         """
-        Sets a provider API key — same effect as the CLI's `/keys set <provider> <key>`
+        Sets a provider/model API key — same effect as the CLI's `/keys set <provider> <key>`
         (see cli/session.py's _cmd_keys). Persists to cli_config.yaml and takes
         effect immediately: providers read cli_config.api_keys fresh on every
         request, no server restart needed.
         """
-        provider = req.provider.strip().lower()
-        if provider not in VALID_KEY_PROVIDERS:
+        provider = req.provider.strip()
+        provider_lower = provider.lower()
+
+        proxy = _get_agent_proxy()
+        registry = proxy._get_provider_registry()
+        valid_model_ids = {m.id for m in registry.list_all_models()}
+        valid_model_ids_lower = {m.id.lower() for m in registry.list_all_models()}
+
+        is_valid = (
+            provider_lower in VALID_KEY_PROVIDERS
+            or provider in valid_model_ids
+            or provider_lower in valid_model_ids_lower
+        )
+        if not is_valid:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unknown provider '{provider}'. Valid: {', '.join(sorted(VALID_KEY_PROVIDERS))}",
+                detail=f"Unknown provider or model ID '{provider}'",
             )
+
         key = req.key.strip()
         if not key:
             raise HTTPException(status_code=400, detail="key cannot be empty")
 
-        proxy = _get_agent_proxy()
         api_keys = dict(getattr(proxy.cli_config, "api_keys", None) or {})
         api_keys[provider] = key
         proxy.cli_config.api_keys = api_keys
         proxy.cli_config.save()
         return {"provider": provider, "hasKey": True}
 
-    @router.delete("/v1/agent/keys/{provider}")
+    @router.delete("/v1/agent/keys/{provider:path}")
     async def delete_api_key(provider: str):
-        provider = provider.strip().lower()
+        provider = provider.strip()
         proxy = _get_agent_proxy()
         api_keys = dict(getattr(proxy.cli_config, "api_keys", {}) or {})
-        if provider not in api_keys:
+        found_key = None
+        for k in list(api_keys.keys()):
+            if k == provider or k.lower() == provider.lower():
+                del api_keys[k]
+                found_key = k
+        if not found_key:
             raise HTTPException(status_code=404, detail=f"No key set for '{provider}'")
-        del api_keys[provider]
         proxy.cli_config.api_keys = api_keys
         proxy.cli_config.save()
         return {"provider": provider, "hasKey": False}
@@ -855,16 +1149,49 @@ def create_agent_router() -> APIRouter:
 
         configured = load_mcp_config()
         live = proxy.mcp_manager.status()
-        servers = [
-            {
+        servers = []
+        try:
+            from dabba.platform.services import ConnectorRuntime
+            connector_runtime = ConnectorRuntime()
+        except Exception:
+            connector_runtime = None
+        for name, cfg in configured.items():
+            connected = name in live["servers"]
+            tools = live["tools_by_server"].get(name, [])
+            authenticated = connected and bool(tools)
+            read_only = True
+            health_message = None if tools else "No tools were discovered from the connector."
+            if name.lower() == "linkedin":
+                # The built-in LinkedIn server exposes public/simulation tools
+                # even without an account token. Tool discovery therefore does
+                # not prove that a LinkedIn account is authenticated.
+                authenticated = authenticated and bool(
+                    cfg.env.get("LINKEDIN_ACCESS_TOKEN", "").strip()
+                )
+                read_only = not authenticated
+                if connected and not authenticated:
+                    health_message = "LinkedIn is running in public/simulation mode; add LINKEDIN_ACCESS_TOKEN to connect an account."
+            verified = None
+            if connector_runtime:
+                verified = connector_runtime.record_health(
+                    name,
+                    process_running=connected,
+                    authenticated=authenticated,
+                    tools=tools,
+                    read_only=read_only,
+                    message=health_message,
+                )
+            servers.append({
                 "name": name,
                 "command": cfg.command,
                 "args": cfg.args,
-                "connected": name in live["servers"],
-                "tools": live["tools_by_server"].get(name, []),
-            }
-            for name, cfg in configured.items()
-        ]
+                "connected": bool(verified and verified["status"] == "connected"),
+                "processRunning": connected,
+                "authenticated": bool(verified and verified["authenticated"]),
+                "verifiedStatus": verified["status"] if verified else "unknown",
+                "message": verified["message"] if verified else health_message,
+                "tools": tools,
+            })
         return {"servers": servers}
 
     @router.post("/v1/mcp/reload")
@@ -915,10 +1242,8 @@ def create_agent_router() -> APIRouter:
     @router.delete("/v1/mcp/servers/{name}")
     async def delete_mcp_server(name: str):
         """
-        Removes a server from mcp_servers.json. If it was already connected
-        this process, the live session keeps running until restart — matches
-        the existing reload endpoint's documented limitation (connect() can
-        add sessions but McpClientManager has no live disconnect path).
+        Removes a server from mcp_servers.json, disconnects it immediately,
+        and unregisters its tools in real-time.
         """
         from dabba.agent.mcp_client import load_mcp_config, save_mcp_config
 
@@ -928,6 +1253,12 @@ def create_agent_router() -> APIRouter:
 
         del configs[name]
         save_mcp_config(configs)
-        return {"deleted": name}
+
+        from dabba.agent.mcp_client import register_mcp_tools
+        proxy = _get_agent_proxy()
+        summary = proxy.mcp_manager.connect(configs)
+        register_mcp_tools(proxy._get_registry(), proxy.mcp_manager)
+
+        return {"deleted": name, **summary}
 
     return router

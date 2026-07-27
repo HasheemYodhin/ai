@@ -183,6 +183,7 @@ class ChatCompletionChunk:
     created: int = field(default_factory=lambda: int(time.time()))
     model: str = "dabba"
     choices: List[Dict[str, Any]] = field(default_factory=list)
+    usage: Optional[Dict[str, int]] = None
 
     def to_sse(self) -> str:
         """Serialize to SSE format string."""
@@ -193,6 +194,8 @@ class ChatCompletionChunk:
             "model": self.model,
             "choices": self.choices,
         }
+        if self.usage is not None:
+            data["usage"] = self.usage
         import json
         return f"data: {json.dumps(data)}\n\n"
 

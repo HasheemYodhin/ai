@@ -17,6 +17,8 @@ logger = get_logger("dabba.agent.context_manager")
 
 
 TokenCounterFn = Callable[[str], int]
+# Given the message dicts to compress, return a natural-language summary.
+SummarizerFn = Callable[[List[Dict[str, Any]]], str]
 
 
 @dataclass
@@ -59,6 +61,8 @@ class ContextManager:
         max_history: Optional[int] = None,
         system_prompt: Optional[str] = None,
         token_limit: Optional[int] = None,
+        compaction_threshold: float = 0.75,
+        compaction_keep_recent: int = 6,
     ):
         self.max_context_length = max_context_length
         self.truncation_strategy = truncation_strategy
@@ -70,6 +74,30 @@ class ContextManager:
         self._truncation_count: int = 0
         self.max_history = max_history
         self.token_limit = token_limit
+        self.compaction_threshold = compaction_threshold
+        self.compaction_keep_recent = compaction_keep_recent
+        self._summarizer: Optional[SummarizerFn] = None
+
+    def set_summarizer(self, summarizer: Optional[SummarizerFn]) -> None:
+        """
+        Register a callable that turns a list of message dicts into a summary
+        string. Used by compact() and the 'summarize' truncation strategy to
+        produce a real, content-bearing summary instead of a placeholder.
+        """
+        self._summarizer = summarizer
+
+    def needs_compaction(self) -> bool:
+        """
+        True when the context has filled past compaction_threshold and there
+        are enough entries to be worth summarizing (more than the keep-recent
+        tail plus at least one older entry). Used by the agent loop to decide
+        whether to run a proactive summarization step before the next turn.
+        """
+        if self.compaction_threshold <= 0:
+            return False
+        if len(self._entries) <= self.compaction_keep_recent + 1:
+            return False
+        return self.usage_ratio >= self.compaction_threshold
 
     @staticmethod
     def _default_token_counter(text: str) -> int:
@@ -229,6 +257,15 @@ class ContextManager:
         self._total_tokens = self._system_token_count
         self._truncation_count = 0
 
+    def remove_entry(self, entry: ConversationEntry) -> None:
+        """Remove a specific entry when a turn fails before producing output."""
+        if not self._entries or self._entries[-1] is not entry:
+            return
+        self._entries.pop()
+        self._total_tokens = self._system_token_count + sum(
+            item.token_count for item in self._entries
+        )
+
     def reset(self) -> None:
         """Reset everything including the system prompt."""
         self._entries.clear()
@@ -306,50 +343,99 @@ class ContextManager:
 
     def _truncate_by_summarizing(self) -> None:
         """
-        Summarize older entries to reduce token usage.
+        Emergency summarize path (fires when the hard max is exceeded).
 
-        Replaces the oldest half of entries with a single "summary"
-        entry. The actual summarization should be done externally;
-        this method just marks entries for summarization.
+        Delegates to compact(): if a summarizer is registered it produces a
+        real content-bearing summary; otherwise it falls back to a
+        descriptive placeholder. Very short histories just drop the oldest.
         """
         if len(self._entries) < 4:
             self._truncate_by_dropping_oldest()
             return
+        self.compact()
 
-        mid = len(self._entries) // 2
-        old_entries = self._entries[:mid]
-        new_entries = self._entries[mid:]
+    def older_messages(self, keep_recent: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Return the role/content dicts of the entries that compact() would fold
+        into a summary — i.e. everything except the most recent `keep_recent`
+        (and any existing summary entry, which is kept as-is). Lets the agent
+        loop build the summarization prompt without reaching into internals.
+        """
+        keep = self.compaction_keep_recent if keep_recent is None else keep_recent
+        start = 1 if (self._entries and self._entries[0].metadata.get("type") == "summary") else 0
+        older = self._entries[start:-keep] if keep > 0 else self._entries[start:]
+        return [{"role": e.role, "content": e.content} for e in older]
+
+    def compact(
+        self,
+        summary_text: Optional[str] = None,
+        keep_recent: Optional[int] = None,
+    ) -> int:
+        """
+        Fold older entries into a single summary entry, keeping the most
+        recent `keep_recent` verbatim. A prior summary entry (if present at
+        the front) is merged into the new one so summaries don't stack up.
+
+        Args:
+            summary_text: The summary to use. If None, a registered summarizer
+                is invoked; if there's no summarizer, a placeholder is used.
+            keep_recent: Recent entries to keep verbatim (defaults to config).
+
+        Returns:
+            Number of entries that were compacted away (0 if nothing to do).
+        """
+        keep = self.compaction_keep_recent if keep_recent is None else keep_recent
+        has_prior_summary = bool(self._entries) and self._entries[0].metadata.get("type") == "summary"
+        start = 1 if has_prior_summary else 0
+
+        old_entries = self._entries[start:-keep] if keep > 0 else self._entries[start:]
+        recent_entries = self._entries[-keep:] if keep > 0 else []
+        if not old_entries:
+            return 0
 
         old_tokens = sum(e.token_count for e in old_entries)
-        summary_text = (
-            f"[Summary of {len(old_entries)} previous messages "
-            f"({old_tokens} tokens)]"
-        )
-        summary_tokens = self._token_counter(summary_text)
+        old_messages = [{"role": e.role, "content": e.content} for e in old_entries]
 
+        if summary_text is None:
+            if self._summarizer is not None:
+                try:
+                    summary_text = self._summarizer(old_messages)
+                except Exception as exc:  # never let summarization crash the turn
+                    logger.warning("Summarizer failed, using placeholder: %s", exc)
+                    summary_text = None
+            if not summary_text:
+                summary_text = (
+                    f"[Summary unavailable — {len(old_entries)} earlier messages "
+                    f"({old_tokens} tokens) were dropped to free context.]"
+                )
+
+        # Prepend the prior summary's text so the running summary stays cumulative.
+        if has_prior_summary:
+            summary_text = f"{self._entries[0].content}\n\n{summary_text}"
+
+        summary_body = f"[Conversation summary so far:]\n{summary_text}"
+        summary_tokens = self._token_counter(summary_body)
         summary_entry = ConversationEntry(
             role="assistant",
-            content=summary_text,
+            content=summary_body,
             token_count=summary_tokens,
-            metadata={"type": "summary", "compressed_tokens": old_tokens - summary_tokens},
+            metadata={"type": "summary", "summarized_entries": len(old_entries)},
         )
 
-        self._entries = [summary_entry] + new_entries
+        self._entries = [summary_entry] + recent_entries
         self._total_tokens = (
             self._system_token_count
             + summary_tokens
-            + sum(e.token_count for e in new_entries)
+            + sum(e.token_count for e in recent_entries)
         )
 
         logger.info(
-            "Truncation (summarize): compressed %d entries (%d tokens) "
-            "into summary (%d tokens). Total now %d/%d",
-            len(old_entries),
-            old_tokens,
-            summary_tokens,
-            self._total_tokens,
-            self.max_context_length,
+            "Compaction: folded %d entries (%d tokens) into a summary "
+            "(%d tokens). Total now %d/%d",
+            len(old_entries), old_tokens, summary_tokens,
+            self._total_tokens, self.max_context_length,
         )
+        return len(old_entries)
 
     def serialize(self) -> Dict[str, Any]:
         """

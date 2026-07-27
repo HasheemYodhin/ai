@@ -404,24 +404,38 @@ class InteractiveSession:
 
     def _cmd_keys(self, args: List[str]) -> None:
         """Manage API keys — show, set, or delete."""
+        keys = getattr(self.config, "api_keys", {}) or {}
         if not args or args[0] in ("show", "list"):
-            keys = getattr(self.config, "api_keys", {}) or {}
             providers = ["anthropic", "openai", "google", "nvidia", "huggingface"]
             rows = []
             for p in providers:
-                status = "✅ set" if keys.get(p) else "⬜ not set"
+                status = "✅ set" if (keys.get(p) or keys.get(p.lower())) else "⬜ not set"
                 rows.append([p, status])
-            self.output.table(["Provider", "Key Status"], rows)
-            self.output.info("Usage: /keys set <provider> <key>  or  /keys delete <provider>")
+            for k in sorted(keys.keys()):
+                if k.lower() not in providers:
+                    rows.append([k, "✅ set (model-specific)"])
+            self.output.table(["Provider / Model ID", "Key Status"], rows)
+            self.output.info("Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>")
             return
 
         if args[0] == "set" and len(args) >= 3:
-            provider = args[1].lower()
+            provider = args[1]
             key_value = args[2]
-            valid = {"anthropic", "openai", "google", "nvidia", "huggingface"}
-            if provider not in valid:
-                self.output.error(f"Unknown provider: {provider}. Valid: {', '.join(sorted(valid))}")
+            
+            registry = self.agent._get_registry()
+            valid_model_ids = {m.id for m in registry.list_all_models()}
+            valid_model_ids_lower = {m.id.lower() for m in registry.list_all_models()}
+            valid_providers = {"anthropic", "openai", "google", "nvidia", "huggingface"}
+            
+            is_valid = (
+                provider.lower() in valid_providers
+                or provider in valid_model_ids
+                or provider.lower() in valid_model_ids_lower
+            )
+            if not is_valid:
+                self.output.error(f"Unknown provider or model ID: {provider}")
                 return
+                
             api_keys = getattr(self.config, "api_keys", {})
             if api_keys is None:
                 api_keys = {}
@@ -432,18 +446,22 @@ class InteractiveSession:
             return
 
         if args[0] == "delete" and len(args) >= 2:
-            provider = args[1].lower()
+            provider = args[1]
             api_keys = getattr(self.config, "api_keys", {}) or {}
-            if provider in api_keys:
-                del api_keys[provider]
+            found_key = None
+            for k in list(api_keys.keys()):
+                if k == provider or k.lower() == provider.lower():
+                    del api_keys[k]
+                    found_key = k
+            if found_key:
                 self.config.api_keys = api_keys
                 self.config.save()
-                self.output.info(f"API key removed for {provider}")
+                self.output.info(f"API key removed for {found_key}")
             else:
                 self.output.error(f"No key set for {provider}")
             return
 
-        self.output.info("Usage: /keys set <provider> <key>  or  /keys delete <provider>")
+        self.output.info("Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>")
 
     def _cmd_model(self, args: List[str]) -> None:
         """Set or show the active model."""
@@ -647,6 +665,14 @@ class InteractiveSession:
         """
         Save conversation history to a JSONL file.
 
+        A full checkpoint, not just the display transcript: appends one
+        trailing line holding the live AgentLoop's serialized context
+        (system prompt, entries, truncation state — see
+        ContextManager.serialize()) and the current permission grants, so
+        /load resumes the actual agent state rather than just replaying
+        text. Older history files without that trailing line still load
+        fine — checkpoint restoration is skipped, same as before this.
+
         Args:
             path: File path to save to.
             quiet: If True, suppress output messages.
@@ -659,6 +685,21 @@ class InteractiveSession:
                 for entry in self.history:
                     f.write(json.dumps(entry) + "\n")
 
+                context = self.agent.checkpoint_context()
+                if context is not None:
+                    checkpoint = {
+                        "__checkpoint__": True,
+                        "context_manager": context,
+                        "permissions": {
+                            "mode": self.permissions.mode,
+                            "session_allowed": sorted(self.permissions._session_allowed),
+                            "session_denied": sorted(self.permissions._session_denied),
+                        },
+                        "workspace_root": getattr(self.agent.agent_config, "workspace_root", None),
+                        "active_file": getattr(self.agent.agent_config, "active_file", None),
+                    }
+                    f.write(json.dumps(checkpoint) + "\n")
+
             if not quiet:
                 self.output.info(f"History saved to {path} ({len(self.history)} entries).")
         except OSError as exc:
@@ -667,6 +708,10 @@ class InteractiveSession:
     def _load_history(self, path: str) -> None:
         """
         Load conversation history from a JSONL file.
+
+        Restores the full checkpoint when present (agent context, permission
+        grants, workspace) — see _save_history — falling back to just the
+        display transcript for older files that don't have one.
 
         Args:
             path: Path to the JSONL file.
@@ -678,11 +723,17 @@ class InteractiveSession:
 
         try:
             loaded = []
+            checkpoint = None
             with open(path_obj, "r") as f:
                 for line in f:
                     line = line.strip()
-                    if line:
-                        loaded.append(json.loads(line))
+                    if not line:
+                        continue
+                    entry = json.loads(line)
+                    if isinstance(entry, dict) and entry.get("__checkpoint__"):
+                        checkpoint = entry
+                    else:
+                        loaded.append(entry)
 
             if not loaded:
                 self.output.warning("History file is empty.")
@@ -696,6 +747,23 @@ class InteractiveSession:
                 f"Loaded {len(loaded)} entries from {path} "
                 f"({user_count} user, {assistant_count} assistant)."
             )
+
+            if checkpoint:
+                workspace = checkpoint.get("workspace_root")
+                if checkpoint.get("context_manager"):
+                    self.agent.restore_context(checkpoint["context_manager"], workspace=workspace)
+                perms = checkpoint.get("permissions") or {}
+                if perms.get("mode"):
+                    self.permissions.set_mode(perms["mode"])
+                for tool_name in perms.get("session_allowed", []):
+                    self.permissions.grant_session(tool_name)
+                for tool_name in perms.get("session_denied", []):
+                    self.permissions.deny_session(tool_name)
+                if workspace:
+                    self.agent.agent_config.workspace_root = workspace
+                if checkpoint.get("active_file"):
+                    self.agent.agent_config.active_file = checkpoint["active_file"]
+                self.output.info("Restored full agent context and permission grants from checkpoint.")
         except (json.JSONDecodeError, OSError) as exc:
             self.output.error(f"Failed to load history: {exc}")
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import queue
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -151,10 +152,14 @@ class McpClientManager:
     def __init__(self) -> None:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
-        self._queue: Optional[asyncio.Queue] = None  # created on, and only touched from, the bg loop
+        # A regular Queue is intentional here.  Some restricted runtimes do not
+        # reliably wake an asyncio selector through call_soon_threadsafe(), which
+        # previously left every MCP connection stuck during supervisor startup.
+        self._queue: "queue.Queue[tuple[str, Any, concurrent.futures.Future[Any]]]" = queue.Queue()
         self._supervisor_started = False
         self._sessions: Dict[str, Any] = {}  # server name -> ClientSession
         self._connected_tools: Dict[str, Dict[str, Any]] = {}  # namespaced name -> info
+        self._server_configs: Dict[str, McpServerConfig] = {}  # server name -> McpServerConfig
         self._lock = threading.Lock()
 
     # -- background loop + supervisor task --------------------------------
@@ -184,7 +189,8 @@ class McpClientManager:
                 asyncio.set_event_loop(loop)
                 loop_box["loop"] = loop
                 ready.set()
-                loop.run_forever()
+                loop.run_until_complete(self._supervisor_loop())
+                loop.close()
 
             self._thread = threading.Thread(target=_run, name="dabba-mcp-loop", daemon=True)
             self._thread.start()
@@ -195,19 +201,8 @@ class McpClientManager:
     def _ensure_supervisor(self) -> asyncio.AbstractEventLoop:
         loop = self._ensure_loop()
         with self._lock:
-            if self._supervisor_started:
-                return loop
             self._supervisor_started = True
-            init_done: "concurrent.futures.Future[None]" = concurrent.futures.Future()
-
-            async def _start() -> None:
-                self._queue = asyncio.Queue()
-                init_done.set_result(None)
-                await self._supervisor_loop()
-
-            asyncio.run_coroutine_threadsafe(_start(), loop)
-            init_done.result(timeout=5)
-            return loop
+        return loop
 
     async def _supervisor_loop(self) -> None:
         """The one task every MCP context manager is entered and exited from."""
@@ -216,12 +211,43 @@ class McpClientManager:
         exit_stack = AsyncExitStack()
         try:
             while True:
-                kind, payload, result_future = await self._queue.get()
+                try:
+                    kind, payload, result_future = self._queue.get_nowait()
+                except queue.Empty:
+                    # Polling keeps all MCP async work on this single owning
+                    # task without depending on cross-thread selector wakeups.
+                    await asyncio.sleep(0.01)
+                    continue
                 if kind == "shutdown":
                     result_future.set_result(None)
                     break
                 try:
                     if kind == "connect":
+                        # payload is Dict[str, McpServerConfig]
+                        # Reconcile: if there is any server in self._sessions that is not in configs,
+                        # or if its config (command, args, env) changed, we reload everything.
+                        changed = False
+                        for name in list(self._sessions.keys()):
+                            if name not in payload:
+                                changed = True
+                                break
+                            cfg = payload[name]
+                            old_cfg = self._server_configs.get(name)
+                            if (not old_cfg or
+                                    old_cfg.command != cfg.command or
+                                    old_cfg.args != cfg.args or
+                                    old_cfg.env != cfg.env):
+                                changed = True
+                                break
+
+                        if changed:
+                            logger.info("MCP configuration changed. Reconnecting all servers...")
+                            await exit_stack.aclose()
+                            exit_stack = AsyncExitStack()
+                            self._sessions.clear()
+                            self._connected_tools.clear()
+                            self._server_configs.clear()
+
                         result = await self._do_connect(exit_stack, payload)
                     elif kind == "call":
                         result = await self._do_call(payload)
@@ -234,13 +260,9 @@ class McpClientManager:
             await exit_stack.aclose()
 
     def _submit(self, kind: str, payload: Any) -> "concurrent.futures.Future[Any]":
-        loop = self._ensure_supervisor()
+        self._ensure_supervisor()
         result_future: "concurrent.futures.Future[Any]" = concurrent.futures.Future()
-
-        def _enqueue() -> None:
-            self._queue.put_nowait((kind, payload, result_future))
-
-        loop.call_soon_threadsafe(_enqueue)
+        self._queue.put((kind, payload, result_future))
         return result_future
 
     # -- connecting --------------------------------------------------------
@@ -287,6 +309,7 @@ class McpClientManager:
                 tools_result = await session.list_tools()
 
                 self._sessions[name] = session
+                self._server_configs[name] = cfg
                 for tool in tools_result.tools:
                     namespaced = f"mcp__{name}__{tool.name}"
                     self._connected_tools[namespaced] = {
@@ -374,7 +397,11 @@ class McpClientManager:
                 fut.result(timeout=10)
             except Exception as exc:
                 logger.warning("Error closing MCP connections: %s", exc)
-        self._loop.call_soon_threadsafe(self._loop.stop)
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+        self._loop = None
+        self._thread = None
+        self._supervisor_started = False
 
 
 def register_mcp_tools(registry, manager: McpClientManager) -> int:
@@ -388,10 +415,21 @@ def register_mcp_tools(registry, manager: McpClientManager) -> int:
     Returns:
         Number of tools registered.
     """
+    # Identify existing MCP tools in the registry
+    mcp_tools_in_registry = [name for name, t in registry.tools.items() if t.category == "mcp"]
+
+    # Get active MCP tools from manager
+    active_mcp_tools = manager.list_tools()
+
+    # Unregister any that are no longer active (deleted or modified)
+    for name in mcp_tools_in_registry:
+        if name not in active_mcp_tools:
+            registry.unregister(name)
+
     count = 0
-    for namespaced_name, info in manager.list_tools().items():
+    for namespaced_name, info in active_mcp_tools.items():
         if namespaced_name in registry.tools:
-            continue  # already registered from a prior _get_registry() call
+            continue
 
         def _make_handler(bound_name: str):
             def _handler(**kwargs: Any) -> Any:

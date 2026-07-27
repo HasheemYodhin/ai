@@ -1,10 +1,11 @@
 import { lazy, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { Bot, User, AlertCircle, Copy, Check, Pencil, RotateCcw, Globe, Loader2, ImageDown, Volume2, VolumeX } from 'lucide-react'
+import { User, AlertCircle, Copy, Check, Pencil, RotateCcw, Globe, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
 import { RegenerateMenu } from './RegenerateMenu'
 import { DownloadMenu } from './DownloadMenu'
+import logo from '../icon.svg'
 
 const MarkdownRenderer = lazy(() =>
   import('./MarkdownRenderer').then(mod => ({ default: mod.MarkdownRenderer }))
@@ -15,6 +16,12 @@ interface MessageBubbleProps {
   isStreaming?: boolean
   onEdit?: (id: string, content: string) => void
   onRegenerate?: (id: string, overrides?: { model?: string; effort?: string }) => void
+}
+
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: MessageBubbleProps) {
@@ -32,6 +39,11 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   // instance persists across re-renders because the parent list keys on
   // message.id, so the ref only resets when the message itself is new.
   const hasAutoPlayedRef = useRef(false)
+  const isActing = !isUser && !isError && (
+    !!isStreaming
+    || !!message.isGeneratingImage
+    || (!!message.agentActivity && !message.agentActivity.done)
+  )
 
   useEffect(() => {
     if (isEditing) {
@@ -129,17 +141,26 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
     >
       {!isUser && (
         <div className="flex-shrink-0 mt-1">
-          <div className={cn(
-            'w-8 h-8 rounded-lg flex items-center justify-center border',
-            isError
-              ? 'bg-red-500/10 border-red-500/20 text-red-500'
-              : 'bg-accent/10 border-accent/20 text-accent'
-          )}>
-            {isError ? (
-              <AlertCircle className="w-4 h-4" />
-            ) : (
-              <Bot className="w-4 h-4" />
-            )}
+          <div className="relative w-8 h-8" aria-label="Dabba">
+            <div className={cn(
+              'relative z-10 w-8 h-8 rounded-lg flex items-center justify-center border transition-colors',
+              isError
+                ? 'bg-red-500/10 border-red-500/20 text-red-500'
+                : 'bg-accent/10 border-accent/20 text-accent'
+            )}>
+              {isError ? (
+                <AlertCircle className="w-4 h-4" />
+              ) : (
+                <img
+                  src={logo}
+                  alt="Dabba"
+                  className={cn(
+                    'w-5 h-5 object-contain',
+                    isActing && 'animate-spin'
+                  )}
+                />
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -198,6 +219,68 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                     ))}
                   </div>
                 )}
+                {message.documentAttachments && message.documentAttachments.length > 0 && (
+                  <div className={cn(
+                    'grid gap-2',
+                    message.content && 'mb-2',
+                    message.documentAttachments.length > 1
+                      ? 'sm:grid-cols-2'
+                      : 'grid-cols-1'
+                  )}>
+                    {message.documentAttachments.map((attachment, index) => {
+                      const isPdf = attachment.type === 'application/pdf'
+                        || attachment.name.toLowerCase().endsWith('.pdf')
+                      const extension = attachment.name.split('.').pop()?.toUpperCase() || 'FILE'
+
+                      return (
+                        <div
+                          key={`${attachment.name}-${index}`}
+                          className="w-[250px] max-w-full overflow-hidden rounded-xl border border-white/30 bg-white/95 text-left text-slate-900 shadow-sm"
+                        >
+                          {isPdf && attachment.dataUrl ? (
+                            <div className="relative h-32 overflow-hidden bg-slate-100">
+                              <object
+                                data={`${attachment.dataUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0`}
+                                type="application/pdf"
+                                aria-label={`Preview of ${attachment.name}`}
+                                className="h-full w-full pointer-events-none"
+                              >
+                                <div className="flex h-full items-center justify-center">
+                                  <FileText className="h-12 w-12 text-red-500" />
+                                </div>
+                              </object>
+                              <span className="absolute left-2 top-2 rounded-md bg-red-600 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white shadow-sm">
+                                PDF
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="flex h-24 items-center justify-center bg-slate-100">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                                <FileText className="h-6 w-6" />
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2.5 px-3 py-2.5">
+                            <div className={cn(
+                              'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[9px] font-bold text-white',
+                              isPdf ? 'bg-red-600' : 'bg-blue-600'
+                            )}>
+                              {isPdf ? 'PDF' : extension.slice(0, 4)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold" title={attachment.name}>
+                                {attachment.name}
+                              </p>
+                              <p className="mt-0.5 text-[10px] text-slate-500">
+                                {formatFileSize(attachment.size)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
                 {message.content && (
                   <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
                     {message.content}
@@ -212,25 +295,33 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
             ) : (
               <div className="text-[15px] leading-relaxed text-text-primary dark:text-text-dark-primary">
                 {message.agentActivity && message.agentActivity.steps.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-2">
+                  <div className="flex flex-col gap-1 mb-2">
                     {message.agentActivity.steps.map((step, i) => (
-                      <span
+                      <div
                         key={i}
                         title={step.detail}
                         className={cn(
-                          'inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary',
+                          'flex items-center gap-1.5 text-xs',
                           step.success === false ? 'text-red-500' : 'text-text-secondary dark:text-text-dark-secondary'
                         )}
                       >
-                        <Globe className="w-3 h-3 text-accent flex-shrink-0" />
+                        <img
+                          src={logo}
+                          alt="Dabba"
+                          className={cn(
+                            'w-3.5 h-3.5 object-contain flex-shrink-0',
+                            step.success === undefined && !message.agentActivity?.done && 'animate-spin'
+                          )}
+                        />
                         <span className="font-mono text-[10px] text-accent">{step.tool}</span>
                         {step.detail && <span className="truncate max-w-[160px]">{step.detail}</span>}
-                      </span>
+                      </div>
                     ))}
                     {!message.agentActivity.done && (
-                      <span className="inline-flex items-center gap-1 text-xs px-2 py-1 text-accent">
-                        <Loader2 className="w-3 h-3 animate-spin" /> {message.agentActivity.label}…
-                      </span>
+                      <div className="flex items-center gap-1.5 text-xs text-accent">
+                        <img src={logo} alt="Dabba" className="w-3.5 h-3.5 object-contain flex-shrink-0 animate-spin" />
+                        <span>{message.agentActivity.label}…</span>
+                      </div>
                     )}
                   </div>
                 )}
@@ -271,6 +362,52 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                     <span />
                   </div>
                 ) : null}
+
+                {message.generatedFiles && message.generatedFiles.length > 0 && (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {message.generatedFiles.map((file, index) => {
+                      const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+                      const isPdf = file.type === 'application/pdf'
+                      const isExcel = file.type.includes('spreadsheet')
+                      const isPowerPoint = file.type.includes('presentation')
+                      const Icon = isExcel
+                        ? FileSpreadsheet
+                        : isPowerPoint
+                          ? Presentation
+                          : FileText
+                      const accentClass = isPdf
+                        ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                        : isExcel
+                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                          : isPowerPoint
+                            ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+
+                      return (
+                        <a
+                          key={`${file.name}-${index}`}
+                          href={file.dataUrl}
+                          download={file.name}
+                          className="group/file flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-accent/40 hover:bg-surface-tertiary dark:border-border-dark dark:bg-surface-dark-tertiary dark:hover:bg-surface-dark-secondary"
+                          title={`Download ${file.name}`}
+                        >
+                          <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl', accentClass)}>
+                            <Icon className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
+                              {file.name}
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-text-tertiary dark:text-text-dark-tertiary">
+                              {extension} · {formatFileSize(file.size)}
+                            </p>
+                          </div>
+                          <Download className="h-4 w-4 flex-shrink-0 text-text-tertiary transition-colors group-hover/file:text-accent" />
+                        </a>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

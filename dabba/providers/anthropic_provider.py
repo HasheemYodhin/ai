@@ -18,6 +18,7 @@ class AnthropicProvider(BaseProvider):
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, thinking=False, **kwargs) -> str:
         import anthropic as sdk
+        usage_out = kwargs.pop("usage_out", None)
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError("Anthropic API key not set. Run: /keys set anthropic <key>")
@@ -72,6 +73,20 @@ class AnthropicProvider(BaseProvider):
         # blocks as dabba's own <tool_call> tag text.
         parts = [b.text for b in resp.content if hasattr(b, "text")]
         text = "\n".join(parts).strip()
+
+        # Anthropic reports input/output separately, not a combined total —
+        # see base.py's BaseProvider docstring for why usage_out is an
+        # explicit per-call param rather than an instance attribute.
+        usage = getattr(resp, "usage", None)
+        if usage is not None and usage_out is not None:
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+            usage_out.update({
+                "prompt_tokens": input_tokens,
+                "completion_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            })
+
         tag_text = anthropic_tool_use_to_tags(resp.content)
         return (text + "\n" + tag_text).strip() if tag_text else text
 

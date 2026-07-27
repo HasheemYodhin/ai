@@ -4,12 +4,14 @@ import { cn, truncate } from '@/lib/utils'
 import {
   Trash2, MessageSquare, AlertTriangle, Pin, PinOff, Pencil,
   FolderMinus, MoreHorizontal,
+  Loader2,
 } from 'lucide-react'
 
 interface ConversationListProps {
   conversations: Conversation[]
   projects: Project[]
   currentId: string | null
+  runningConversationIds: string[]
   /** Controlled from the sidebar — its search box sits right under "New Chat" now, not in this list. */
   search: string
   onSelect: (id: string) => void
@@ -23,6 +25,7 @@ export function ConversationList({
   conversations,
   projects,
   currentId,
+  runningConversationIds,
   search,
   onSelect,
   onDelete,
@@ -104,6 +107,7 @@ export function ConversationList({
           <div className="space-y-0.5">
             {filtered.map((conv) => {
               const project = conv.projectId ? projects.find(p => p.id === conv.projectId) : undefined
+              const isRunning = runningConversationIds.includes(conv.id)
               return (
                 <div
                   key={conv.id}
@@ -140,6 +144,10 @@ export function ConversationList({
                         </p>
                       )}
                     </div>
+
+                    {isRunning && (
+                      <Loader2 className="h-3.5 w-3.5 flex-shrink-0 animate-spin text-accent" aria-label="Response running" />
+                    )}
 
                     <div className="relative flex-shrink-0 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 group-focus-within:opacity-100">
                       <button

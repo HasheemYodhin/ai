@@ -1,33 +1,27 @@
-version: "3.8"
-
 services:
   dabba:
     build:
-      context: .
+      context: ..
       dockerfile: Dockerfile
     image: dabba:latest
     container_name: dabba-server
     ports:
-      - "8000:8000"
+      - "8080:8080"
     environment:
       - DABBA_API_KEY=${DABBA_API_KEY:-}
-      - DABBA_MODEL=${DABBA_MODEL:-dabba-small}
+      - DABBA_DATA_DIR=/data
+      - DABBA_MODEL_PATH=${DABBA_MODEL_PATH:-rule_based}
       - DABBA_MAX_TOKENS=${DABBA_MAX_TOKENS:-2048}
       - DABBA_DEVICE=${DABBA_DEVICE:-auto}
       - DABBA_LOG_LEVEL=${DABBA_LOG_LEVEL:-info}
+      - DABBA_MODEL_FALLBACKS=${DABBA_MODEL_FALLBACKS:-{}}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     volumes:
       - dabba-models:/app/models
-      - dabba-data:/app/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - dabba-data:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/ready"]
       interval: 30s
       timeout: 10s
       retries: 3

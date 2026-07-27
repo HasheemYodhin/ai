@@ -1,36 +1,18 @@
 import { useState, useCallback, useEffect } from 'react'
-import { v4 as uuidv4 } from 'uuid'
+import { apiClient } from '@/api/client'
 import type { Skill } from '@/types'
-
-const STORAGE_KEY = 'dabba-skills'
-
-function loadSkills(): Skill[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveSkills(skills: Skill[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(skills))
-  } catch {
-    // localStorage full — silently fail, same convention as useHistory/useProjects
-  }
-}
 
 export interface SkillInput {
   name: string
   description?: string
   instructions: string
+  script?: string
 }
 
 interface UseSkillsReturn {
   skills: Skill[]
-  createSkill: (input: SkillInput) => string
-  deleteSkill: (id: string) => void
+  createSkill: (input: SkillInput) => Promise<string>
+  deleteSkill: (id: string) => Promise<void>
 }
 
 /**
@@ -38,29 +20,36 @@ interface UseSkillsReturn {
  * applies it as a system-prompt override for that one message, actually
  * changing model behavior (not a cosmetic label like the other providers'
  * "custom GPT" marketing implies — this is the real mechanism underneath).
+ *
+ * Server-persisted (via /v1/platform/skills), not localStorage — so skills
+ * survive across devices/browsers and can be auto-matched server-side
+ * (apiClient.matchSkill) instead of only being reachable through manual
+ * "+" menu selection.
  */
 export function useSkills(): UseSkillsReturn {
-  const [skills, setSkills] = useState<Skill[]>(loadSkills)
+  const [skills, setSkills] = useState<Skill[]>([])
 
-  useEffect(() => {
-    saveSkills(skills)
-  }, [skills])
+  const refresh = useCallback(async () => {
+    try { setSkills(await apiClient.listSkills()) }
+    catch { /* best-effort — the "+" menu just shows no skills until this succeeds */ }
+  }, [])
+  useEffect(() => { void refresh() }, [refresh])
 
-  const createSkill = useCallback((input: SkillInput): string => {
-    const id = uuidv4()
-    setSkills(prev => [{
-      id,
+  const createSkill = useCallback(async (input: SkillInput): Promise<string> => {
+    const created = await apiClient.createSkillPackage({
       name: input.name.trim() || 'Untitled skill',
-      description: input.description?.trim() || undefined,
       instructions: input.instructions.trim(),
-      createdAt: Date.now(),
-    }, ...prev])
-    return id
+      description: input.description?.trim() || undefined,
+      script: input.script?.trim() || undefined,
+    })
+    setSkills(prev => [created, ...prev])
+    return created.id
   }, [])
 
-  const deleteSkill = useCallback((id: string) => {
+  const deleteSkill = useCallback(async (id: string) => {
     setSkills(prev => prev.filter(s => s.id !== id))
-  }, [])
+    await apiClient.deleteSkillPackage(id).catch(() => void refresh())
+  }, [refresh])
 
   return { skills, createSkill, deleteSkill }
 }

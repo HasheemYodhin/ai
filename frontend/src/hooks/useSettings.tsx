@@ -25,15 +25,37 @@ export interface AppSettings {
   systemPrompt: string
   /** Remembered params keyed by model id — restored when you switch back. */
   modelDefaults: Record<string, ModelParams>
+
+  // Permissions & safety
+  /** Default tool-approval mode sent with every agent turn: "ask" pauses for approval, "allow" runs everything, "deny" blocks dangerous tools outright. */
+  defaultPermissionMode: 'ask' | 'allow' | 'deny'
+
+  // Notifications
+  /** Opt-in for OS-level desktop notifications on Cowork run completion / background process completion. In-app toasts always show regardless. */
+  desktopNotifications: boolean
+
+  // Agent behavior
+  /** Propose-then-approve a multi-step plan by default, instead of only when the chat "Plan mode" chip is toggled on for that turn. */
+  planModeDefault: boolean
+  /** Defer full tool schemas until the model searches for them — cuts prompt size on a large tool registry. */
+  useToolSearch: boolean
+  /** Max LLM round-trips per turn before the agent stops itself. Null = leave the backend's own default alone. */
+  maxSteps: number | null
+  /** Fraction of the context window that triggers proactive LLM-based summarization of older turns. */
+  contextCompactionThreshold: number
+  /** Most recent conversation entries always kept verbatim, never folded into a summary. */
+  contextCompactionKeepRecent: number
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  baseUrl: 'http://localhost:8080',
+  // Relative URLs work through Vite's development proxy and when the built
+  // frontend is served by Dabba, including LAN hosts and reverse proxies.
+  baseUrl: '',
   apiKey: '',
   model: 'dabba-10m',
   effort: 'medium',
   temperature: 0.7,
-  maxTokens: 256,
+  maxTokens: 8192,
   topP: 0.9,
   presencePenalty: 0,
   frequencyPenalty: 0,
@@ -42,6 +64,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   typingSpeed: 10,
   systemPrompt: 'You are Dabba, a production-grade custom transformer assistant.',
   modelDefaults: {},
+  defaultPermissionMode: 'ask',
+  desktopNotifications: false,
+  planModeDefault: false,
+  useToolSearch: false,
+  maxSteps: null,
+  contextCompactionThreshold: 0.75,
+  contextCompactionKeepRecent: 6,
 }
 
 interface SettingsContextType {
@@ -61,7 +90,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     try {
       const stored = localStorage.getItem('dabba-settings')
       if (stored) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) }
+        const parsed = JSON.parse(stored) as Partial<AppSettings>
+        // Migrate the old hardcoded default. Explicit non-default API URLs are preserved.
+        if (parsed.baseUrl === 'http://localhost:8080') parsed.baseUrl = ''
+        return { ...DEFAULT_SETTINGS, ...parsed }
       }
     } catch {
       // ignore

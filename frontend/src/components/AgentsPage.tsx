@@ -116,6 +116,7 @@ export function AgentsPage() {
 
       {keyPromptModel && (
         <ApiKeyPromptModal
+          target={keyPromptModel.id}
           provider={keyPromptModel.provider}
           modelName={keyPromptModel.name}
           onClose={() => setKeyPromptModel(null)}

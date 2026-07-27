@@ -11,7 +11,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry
@@ -150,10 +150,7 @@ def search_web(
     timeout: int = 15,
 ) -> List[Dict[str, str]]:
     """
-    Search the web using a search engine.
-
-    Uses a configurable search backend. Falls back to scraping
-    if no API key is configured. Returns a list of search results.
+    Search the web using Google.
 
     Args:
         query: Search query string.
@@ -162,15 +159,18 @@ def search_web(
 
     Returns:
         List of dicts with keys: title, url, snippet.
-
-    Raises:
-        WebToolError: If the search fails.
     """
     _check_dependencies()
     num_results = min(num_results, 20)
 
-    search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
+    search_url = f"https://www.google.com/search?q={requests.utils.quote(query)}&num={num_results}"
     session = _create_session()
+    # Use a standard desktop browser user agent for Google to prevent CAPTCHAs and get clean HTML structure
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
 
     try:
         response = session.get(search_url, timeout=timeout)
@@ -179,61 +179,68 @@ def search_web(
         results: List[Dict[str, str]] = []
 
         if HAS_BEAUTIFULSOUP:
+            from urllib.parse import urlparse, parse_qs
             soup = BeautifulSoup(response.text, "html.parser")
-            for i, result_div in enumerate(
-                soup.select(".result, .web-result, .results_links")
-            ):
+            
+            # Find all h3 tags, which Google uses for search result titles
+            h3s = soup.find_all("h3")
+            for h3 in h3s:
                 if len(results) >= num_results:
                     break
-
-                title_el = result_div.select_one(
-                    ".result__title a, .result__a, h2 a"
-                )
-                snippet_el = result_div.select_one(
-                    ".result__snippet, .result__snippet a"
-                )
-
-                title = title_el.get_text(strip=True) if title_el else ""
-                href = title_el.get("href", "") if title_el else ""
-                snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-
-                if title and href:
-                    results.append({
-                        "title": title,
-                        "url": href,
-                        "snippet": snippet,
-                    })
-
-        if not results:
-            from urllib.parse import parse_qs, urlparse as up
-            for link in soup.select("a"):
-                href = link.get("href", "")
-                if "://" in href and not href.startswith("http"):
-                    parsed_href = up(href)
-                    qs = parse_qs(parsed_href.query)
-                    actual_url = qs.get("uddg", [None])[0] or href
-                    title = link.get_text(strip=True)
-                    if title and actual_url:
-                        results.append({
-                            "title": title,
-                            "url": actual_url,
-                            "snippet": "",
-                        })
-                    if len(results) >= num_results:
-                        break
+                
+                a_tag = h3.find_parent("a") or h3.find("a")
+                if not a_tag:
+                    continue
+                
+                href = a_tag.get("href", "")
+                if not href:
+                    continue
+                
+                # Google URLs sometimes need parsing if they go through /url redirect
+                if href.startswith("/url?"):
+                    parsed = urlparse(href)
+                    href = parse_qs(parsed.query).get("q", [None])[0] or href
+                
+                # Only include web search results, skip internal Google links/features
+                if not href.startswith("http"):
+                    continue
+                
+                title = h3.get_text(strip=True)
+                
+                # Retrieve snippet text
+                snippet = ""
+                parent_container = h3.find_parent("div", class_="g") or h3.find_parent("div")
+                if parent_container:
+                    snippet_el = parent_container.select_one(".VwiC3b, .yDopNe, .st")
+                    if snippet_el:
+                        snippet = snippet_el.get_text(strip=True)
+                    else:
+                        text_parts = [t for t in parent_container.stripped_strings if t != title]
+                        snippet = " ".join(text_parts)[:200]
+                
+                results.append({
+                    "title": title,
+                    "url": href,
+                    "snippet": snippet,
+                })
 
         if not results:
             results.append({
                 "title": f"Search results for: {query}",
-                "url": f"https://duckduckgo.com/?q={requests.utils.quote(query)}",
-                "snippet": "Open the link to view search results.",
+                "url": f"https://www.google.com/search?q={requests.utils.quote(query)}",
+                "snippet": "Open the link to view Google search results.",
             })
 
-        logger.info("Web search '%s': %d results", query, len(results))
+        logger.info("Google web search '%s': %d results", query, len(results))
         return results
 
     except Exception as exc:
-        raise WebToolError(f"Web search failed: {exc}")
+        logger.warning("Google search failed or was blocked: %s. Returning fallback search URL.", exc)
+        return [{
+            "title": f"Search results for: {query}",
+            "url": f"https://www.google.com/search?q={requests.utils.quote(query)}",
+            "snippet": f"Google search is currently offline or unreachable. Click the link to search directly.",
+        }]
 
 
 def extract_links(url: str, timeout: int = 15) -> List[Dict[str, str]]:

@@ -1,18 +1,18 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
-import { Send, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2 } from 'lucide-react'
+import { Send, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
 import { captureScreenshot } from '@/lib/screenshot'
 import { startRecording, type VoiceRecorder } from '@/lib/voice'
 import { apiClient } from '@/api/client'
-import { PlusMenu, type ActiveMode } from './PlusMenu'
+import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
 import { useSkills } from '@/hooks/useSkills'
-import type { UploadedFile, Project } from '@/types'
+import type { UploadedFile, Project, ExtractedDocument, DocumentAttachment } from '@/types'
 
 interface InputAreaProps {
-  onSend: (content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean }) => void
-  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean }) => void
+  onSend: (content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => void
+  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => void
   onGenerateImage: (prompt: string) => void
   onStop: () => void
   isLoading: boolean
@@ -47,8 +47,13 @@ export function InputArea({
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
   const [mode, setMode] = useState<ActiveMode>({ kind: 'chat' })
+  // When on, a multi-step agent turn must be approved before it executes
+  // instead of running immediately (see AgentConfig.require_plan_approval).
+  // Only meaningful in agent mode; harmless to leave set when switching modes.
+  const [planModeEnabled, setPlanModeEnabled] = useState(false)
   const [isQuickRecording, setIsQuickRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [isExtractingDocuments, setIsExtractingDocuments] = useState(false)
   const [voiceModalOpen, setVoiceModalOpen] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -172,29 +177,47 @@ export function InputArea({
     e.target.value = ''
   }, [handleFiles])
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const trimmed = value.trim()
-    if ((!trimmed && files.length === 0) || isLoading || disabled) return
+    if ((!trimmed && files.length === 0) || isLoading || isExtractingDocuments || disabled) return
 
     if (mode.kind === 'agent') {
-      onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, viaVoice: pendingViaVoice })
+      onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, viaVoice: pendingViaVoice, planMode: planModeEnabled })
     } else if (mode.kind === 'image') {
       onGenerateImage(trimmed)
     } else {
       const imageFiles = files.filter(f => f.type.startsWith('image/') && f.dataUrl)
       const images = imageFiles.map(f => f.dataUrl as string)
 
-      // Non-image attachments (pdf, txt, …) aren't read yet — note them by name.
       const otherFiles = files.filter(f => !f.type.startsWith('image/'))
-      const note = otherFiles.length > 0
-        ? `\n\n[Attached: ${otherFiles.map(f => f.name).join(', ')}]`
-        : ''
-
+      let documents: ExtractedDocument[] | undefined
+      if (otherFiles.length > 0) {
+        setIsExtractingDocuments(true)
+        setFileError(null)
+        try {
+          documents = await apiClient.extractDocuments(otherFiles)
+        } catch (err) {
+          setFileError((err as Error).message || 'Could not read the attached document')
+          setIsExtractingDocuments(false)
+          return
+        }
+        setIsExtractingDocuments(false)
+      }
       const systemPromptOverride = mode.kind === 'skill'
         ? skills.find(s => s.id === mode.skillId)?.instructions
         : undefined
 
-      onSend(trimmed + note, images.length ? images : undefined, { systemPromptOverride, viaVoice: pendingViaVoice })
+      onSend(trimmed, images.length ? images : undefined, {
+        systemPromptOverride,
+        viaVoice: pendingViaVoice,
+        documents,
+        attachments: otherFiles.map(file => ({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          dataUrl: file.dataUrl,
+        })),
+      })
     }
 
     setValue('')
@@ -203,12 +226,12 @@ export function InputArea({
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-  }, [value, files, isLoading, disabled, mode, onSend, onRunAgentMode, onGenerateImage, skills])
+  }, [value, files, isLoading, isExtractingDocuments, disabled, mode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }, [handleSend])
 
@@ -221,10 +244,13 @@ export function InputArea({
   const isNearLimit = charCount > maxChars * 0.9
   const isOverLimit = charCount > maxChars
 
+  const connectorName = mode.kind === 'agent' && mode.label.startsWith('Connector: ')
+    ? mode.label.slice('Connector: '.length).trim()
+    : null
   const modeChip = mode.kind === 'image'
     ? { icon: Wand2, label: 'Create an image', placeholder: 'Describe the image to generate…' }
     : mode.kind === 'agent'
-      ? { icon: Bot, label: mode.label, placeholder: `${mode.label}…` }
+      ? { icon: Bot, label: mode.label, placeholder: connectorName ? `Ask ${connectorName}…` : `${mode.label}…` }
       : mode.kind === 'skill'
         ? { icon: Sparkles, label: mode.name, placeholder }
         : null
@@ -236,12 +262,30 @@ export function InputArea({
         {modeChip && (
           <div className="flex items-center gap-1.5 mb-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium">
-              <modeChip.icon className="w-3.5 h-3.5" />
+              {connectorName
+                ? <ConnectorMenuIcon name={connectorName} compact />
+                : <modeChip.icon className="w-3.5 h-3.5" />}
               {modeChip.label}
               <button onClick={() => setMode({ kind: 'chat' })} className="ml-0.5 hover:text-accent-hover">
                 <X className="w-3 h-3" />
               </button>
             </span>
+            {mode.kind === 'agent' && (
+              <button
+                type="button"
+                onClick={() => setPlanModeEnabled(v => !v)}
+                title="Propose a plan and wait for your approval before it runs"
+                className={cn(
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
+                  planModeEnabled
+                    ? 'bg-accent text-white'
+                    : 'bg-surface-tertiary text-text-tertiary hover:text-text-secondary dark:bg-surface-dark-tertiary dark:hover:text-text-dark-secondary'
+                )}
+              >
+                <ListChecks className="w-3.5 h-3.5" />
+                Plan mode
+              </button>
+            )}
           </div>
         )}
 
@@ -290,11 +334,12 @@ export function InputArea({
             ref={fileInputRef}
             type="file"
             multiple
+            accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.jsonl,.csv"
             className="hidden"
             onChange={handleFileInputChange}
           />
           <PlusMenu
-            disabled={isLoading || disabled}
+            disabled={isLoading || isExtractingDocuments || disabled}
             mode={mode}
             onModeChange={setMode}
             onAttachFiles={() => fileInputRef.current?.click()}
@@ -303,6 +348,12 @@ export function InputArea({
             currentProjectId={currentProjectId}
             onAddToProject={onAddToProject}
           />
+
+          {connectorName && (
+            <span className="self-center" title={`${connectorName} connector`}>
+              <ConnectorMenuIcon name={connectorName} compact />
+            </span>
+          )}
 
           <textarea
             ref={textareaRef}
@@ -325,7 +376,7 @@ export function InputArea({
             <button
               type="button"
               onClick={handleMicClick}
-              disabled={isLoading || disabled || isTranscribing}
+              disabled={isLoading || isExtractingDocuments || disabled || isTranscribing}
               title={isQuickRecording ? 'Stop and transcribe' : 'Voice input'}
               className={cn(
                 'flex items-center justify-center p-2 rounded-lg transition-colors disabled:opacity-40',
@@ -339,7 +390,7 @@ export function InputArea({
             <button
               type="button"
               onClick={() => setVoiceModalOpen(true)}
-              disabled={isLoading || disabled}
+              disabled={isLoading || isExtractingDocuments || disabled}
               title="Voice mode"
               className="flex items-center justify-center p-2 rounded-lg text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
             >
@@ -357,8 +408,8 @@ export function InputArea({
             ) : (
               <button
                 type="button"
-                onClick={handleSend}
-                disabled={(!value.trim() && files.length === 0) || disabled}
+                onClick={() => void handleSend()}
+                disabled={(!value.trim() && files.length === 0) || isExtractingDocuments || disabled}
                 className={cn(
                   'flex items-center gap-1.5 p-2 rounded-lg transition-colors',
                   (value.trim() || files.length > 0)
@@ -367,7 +418,9 @@ export function InputArea({
                 )}
                 title="Send message"
               >
-                <Send className="w-4 h-4" />
+                {isExtractingDocuments
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Send className="w-4 h-4" />}
               </button>
             )}
           </div>

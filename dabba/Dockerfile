@@ -1,53 +1,35 @@
-# Stage 1: Build dependencies
-FROM python:3.10-slim AS builder
+# Compatibility Dockerfile for commands that explicitly use dabba/Dockerfile.
+# Build with the repository root as context:
+#   docker build -f dabba/Dockerfile .
+FROM node:22-bookworm-slim AS frontend-builder
+WORKDIR /build/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
-WORKDIR /build
-
-# Install build dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    g++ \
-    make \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy only requirements first for layer caching
-COPY pyproject.toml setup.cfg setup.py README.md ./
-COPY dabba/ dabba/
-
-# Build the package
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir build && \
-    python -m build
-
-# Stage 2: Runtime
-FROM python:3.10-slim AS runtime
-
+FROM python:3.10-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    DABBA_DATA_DIR=/data \
+    DABBA_FRONTEND_DIR=/app/frontend \
+    DABBA_MODEL_PATH=rule_based
 WORKDIR /app
-
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
+      curl git nodejs npm \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy the built package
-COPY --from=builder /build/dist/ ./dist/
-
-# Install the package
-RUN pip install --no-cache-dir ./dist/*.whl
-
-# Create non-root user
-RUN groupadd -r dabba && useradd -r -g dabba -d /app -s /bin/false dabba && \
-    chown -R dabba:dabba /app
-
+COPY requirements-server.txt ./
+RUN pip install --no-cache-dir -r requirements-server.txt
+COPY dabba/ ./dabba/
+COPY bin/dabba /usr/local/bin/dabba
+COPY --from=frontend-builder /build/frontend/dist/ ./frontend/
+RUN groupadd --system dabba \
+    && useradd --system --gid dabba --home-dir /app dabba \
+    && mkdir -p /data \
+    && chown -R dabba:dabba /app /data /usr/local/bin/dabba
 USER dabba
-
-# Expose the API port
-EXPOSE 8000
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Default command
-ENTRYPOINT ["dabba"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
+EXPOSE 8080
+VOLUME ["/data"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl --fail http://127.0.0.1:8080/ready || exit 1
+CMD ["python3", "-m", "dabba.api.server", "--host", "0.0.0.0", "--port", "8080"]

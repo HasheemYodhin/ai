@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import re
+import difflib
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -166,6 +168,75 @@ def edit_file(path: str, old_string: str, new_string: str) -> Dict[str, object]:
     }
 
 
+def transactional_edit(root: str, edits: List[Dict[str, str]]) -> Dict[str, object]:
+    """
+    Apply exact replacements across multiple workspace files atomically.
+
+    Every path and old_string is validated before writing. If a write fails,
+    all already-written files are restored to their original bytes.
+    """
+    root_path = Path(root).expanduser().resolve()
+    if not root_path.is_dir():
+        raise ValueError(f"Workspace root does not exist: {root_path}")
+    if not edits:
+        raise ValueError("At least one edit is required")
+
+    originals: Dict[Path, bytes] = {}
+    replacements: Dict[Path, str] = {}
+    diffs: List[Dict[str, str]] = []
+    for edit in edits:
+        relative = edit.get("path", "")
+        old_string = edit.get("old_string", "")
+        new_string = edit.get("new_string", "")
+        path = (root_path / relative).resolve()
+        if path != root_path and root_path not in path.parents:
+            raise PermissionError(f"Edit path escapes workspace: {relative}")
+        if not path.is_file():
+            raise FileNotFoundError(f"File not found: {path}")
+        content = path.read_text(encoding="utf-8")
+        if not old_string:
+            raise ValueError(f"old_string cannot be empty for {relative}")
+        if old_string not in content:
+            raise ValueError(f"old_string not found in {relative}; no files were changed")
+        updated = content.replace(old_string, new_string, 1)
+        originals[path] = path.read_bytes()
+        replacements[path] = updated
+        patch = "\n".join(
+            difflib.unified_diff(
+                content.splitlines(),
+                updated.splitlines(),
+                fromfile=f"a/{relative}",
+                tofile=f"b/{relative}",
+                lineterm="",
+            )
+        )
+        diffs.append({"path": relative, "diff": patch})
+
+    written: List[Path] = []
+    try:
+        for path, updated in replacements.items():
+            fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(updated)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temp_name, path)
+            finally:
+                Path(temp_name).unlink(missing_ok=True)
+            written.append(path)
+    except Exception:
+        for path in written:
+            path.write_bytes(originals[path])
+        raise
+
+    return {
+        "status": "success",
+        "files_changed": len(written),
+        "diffs": diffs,
+    }
+
+
 def search_files(pattern: str, path: str = ".", regex: bool = False) -> List[Dict[str, object]]:
     """
     Search for files matching a pattern and containing matching content.
@@ -264,6 +335,40 @@ def register_file_tools(registry: ToolRegistry) -> None:
     Args:
         registry: The tool registry to register with.
     """
+    registry.register(
+        ToolDefinition(
+            name="transactional_edit",
+            description=(
+                "Atomically apply exact replacements across one or more files under a "
+                "workspace root. Validates every edit before writing, returns unified "
+                "diffs, and rolls back the whole batch if any write fails."
+            ),
+            parameters=[
+                ToolParameter(
+                    name="root",
+                    type="string",
+                    description="Absolute workspace root containing every edited file.",
+                ),
+                ToolParameter(
+                    name="edits",
+                    type="array",
+                    description="Edits with path, old_string, and new_string.",
+                    items=ToolParameter(
+                        name="edit",
+                        type="object",
+                        properties={
+                            "path": ToolParameter(name="path", type="string"),
+                            "old_string": ToolParameter(name="old_string", type="string"),
+                            "new_string": ToolParameter(name="new_string", type="string"),
+                        },
+                    ),
+                ),
+            ],
+            handler=transactional_edit,
+            handler_sync=True,
+            category="filesystem",
+        )
+    )
     registry.register(
         ToolDefinition(
             name="file_read",

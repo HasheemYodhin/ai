@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 import {
   Plus, PanelLeftClose, Settings, Sparkles, Search, Ghost, LogOut, MoreHorizontal,
   MessageSquare, Folder, Bot, Wrench, Plug, BookOpen, Telescope, FolderPlus,
-  ChevronDown, X, Pin,
+  ChevronDown, X, Pin, BriefcaseBusiness, CalendarClock, ListChecks, Webhook,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
@@ -18,6 +18,7 @@ interface SidebarProps {
   conversations: Conversation[]
   projects: Project[]
   currentId: string | null
+  runningConversationIds: string[]
   isOpen: boolean
   view: SidebarView
   onChangeView: (view: SidebarView) => void
@@ -38,6 +39,7 @@ export function Sidebar({
   conversations,
   projects,
   currentId,
+  runningConversationIds,
   isOpen,
   view,
   onChangeView,
@@ -214,11 +216,16 @@ export function Sidebar({
             {navItem('chat', <MessageSquare className="w-4 h-4 flex-shrink-0" />, 'Chats',
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary flex-shrink-0">{conversations.length}</span>)}
             {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects')}
+            {navItem('cowork', <BriefcaseBusiness className="w-4 h-4 flex-shrink-0" />, 'Cowork')}
+            {navItem('scheduled-skills', <CalendarClock className="w-4 h-4 flex-shrink-0" />, 'Scheduled skills')}
+            {navItem('tasks', <ListChecks className="w-4 h-4 flex-shrink-0" />, 'Task center')}
             {navItem('agents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Agents')}
             {navItem('tools', <Wrench className="w-4 h-4 flex-shrink-0" />, 'Tools')}
             {navItem('connectors', <Plug className="w-4 h-4 flex-shrink-0" />, 'Connectors',
               anyConnected && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 flex-shrink-0">{connectedCount} live</span>)}
             {navItem('skills', <BookOpen className="w-4 h-4 flex-shrink-0" />, 'Prompt library')}
+            {navItem('hooks', <Webhook className="w-4 h-4 flex-shrink-0" />, 'Hooks')}
+            {navItem('subagents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Subagent types')}
             <button
               onClick={onStartResearch}
               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
@@ -270,6 +277,7 @@ export function Sidebar({
             conversations={conversations}
             projects={projects}
             currentId={currentId}
+            runningConversationIds={runningConversationIds}
             search={search}
             onSelect={onSelect}
             onDelete={onDelete}

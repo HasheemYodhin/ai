@@ -40,6 +40,20 @@ class ModelInfo:
 class BaseProvider(ABC):
     name: str = ""
 
+    # Providers are process-wide singletons (see registry.py's _ANTHROPIC/
+    # _OPENAI/_NVIDIA/... instances) reused across concurrent requests, so
+    # real usage CANNOT be stored as an instance attribute set at the end of
+    # chat()/stream_chat() — two concurrent calls to the same provider would
+    # race and could report each other's numbers. Instead, chat()/stream_chat()
+    # accept an optional `usage_out: dict` kwarg (via **kwargs) — pass a
+    # fresh dict per call and it gets populated in place with
+    # {"prompt_tokens", "completion_tokens", "total_tokens"} once the real
+    # provider response is known. A dict is a plain shared-memory object, so
+    # this is race-free across asyncio.to_thread's thread boundary as long as
+    # the caller only reads it after the call returns — unlike contextvars,
+    # whose writes inside a to_thread-copied context never propagate back to
+    # the caller. Providers that don't populate it leave it empty; callers
+    # fall back to an estimate in that case.
     @abstractmethod
     def chat(
         self,

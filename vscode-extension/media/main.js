@@ -127,6 +127,7 @@
   function setConnectionState(state, label) {
     connectionBadge.className = 'connection-badge ' + state;
     connectionBadge.querySelector('.connection-label').textContent = label;
+    document.body.dataset.connection = state;
   }
 
   function startStatusTimer() {
@@ -172,7 +173,8 @@
     welcome.querySelector('.welcome-environment')?.remove();
     const env = el('button', 'welcome-environment');
     if (!startupEnvironment.backendReachable) {
-      env.classList.add('problem'); env.textContent = 'Backend offline — open settings';
+      env.classList.add('problem');
+      env.textContent = startupEnvironment.backendError || 'Backend offline — open settings';
       env.addEventListener('click', () => vscode.postMessage({ type: 'openSettings' }));
     } else if (!startupEnvironment.hasApiKey) {
       env.classList.add('warning'); env.textContent = 'No extension API key — configure access';
@@ -1075,6 +1077,8 @@
     document.getElementById('set-temperature').value = settings.temperature != null ? settings.temperature : 0.7;
     document.getElementById('set-autoReviewOnSave').checked = !!settings.autoReviewOnSave;
     document.getElementById('set-enableDiagnostics').checked = !!settings.enableDiagnostics;
+    document.getElementById('set-autoStartBackend').checked = settings.autoStartBackend !== false;
+    document.getElementById('set-backendPython').value = settings.backendPython || 'python3';
     document.getElementById('set-theme').value = settings.theme || 'auto';
     settingsKeyStatus.textContent = hasApiKey ? ('Current key: ' + maskedApiKey) : 'No API key stored';
     settingsKeyStatus.className = 'settings-hint';
@@ -1094,6 +1098,8 @@
         temperature: parseFloat(document.getElementById('set-temperature').value),
         autoReviewOnSave: document.getElementById('set-autoReviewOnSave').checked,
         enableDiagnostics: document.getElementById('set-enableDiagnostics').checked,
+        autoStartBackend: document.getElementById('set-autoStartBackend').checked,
+        backendPython: document.getElementById('set-backendPython').value.trim() || 'python3',
         theme: document.getElementById('set-theme').value,
       }
     });
@@ -1275,6 +1281,8 @@
         running=true; currentTools={}; statusBar.classList.remove('hidden'); statusPhase.textContent='Working'; statusText.textContent='Preparing request…';
         setConnectionState('working', 'Working'); startStatusTimer();
         sendBtn.disabled=true; composerSpinner.classList.remove('hidden'); regenRow.classList.add('hidden'); break;
+      case 'agentStatus':
+        statusPhase.textContent='Working'; statusText.textContent=m.content || 'Contacting model…'; setConnectionState('working','Working'); break;
       case 'agentText': statusPhase.textContent='Responding'; statusText.textContent='Receiving model output'; setConnectionState('connected','Connected'); addAgentText(m.content); break;
       case 'toolCall':
         addToolCall(m.callId, m.name, m.args, m.thought, m.isDangerous, m.isEdit); break;
