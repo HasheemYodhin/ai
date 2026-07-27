@@ -12,7 +12,7 @@ MODELS = [
 class DabbaProvider(BaseProvider):
     name = "dabba"
 
-    def __init__(self, endpoint: str = "http://localhost:8080"):
+    def __init__(self, endpoint: str = "http://127.0.0.1:8080"):
         self.endpoint = endpoint
 
     def chat(self, messages, model="dabba", max_tokens=512, temperature=0.7, **kwargs) -> str:

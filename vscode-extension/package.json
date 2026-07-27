@@ -2,7 +2,7 @@
   "name": "dabba-vscode",
   "displayName": "dabba AI",
   "description": "AI-powered code assistance with dabba - chat, explain, refactor, and review code",
-  "version": "0.3.3",
+  "version": "0.3.6",
   "publisher": "dabba",
   "license": "MIT",
   "engines": {
@@ -185,7 +185,7 @@
       "properties": {
         "dabba.apiEndpoint": {
           "type": "string",
-          "default": "http://localhost:8080",
+          "default": "http://127.0.0.1:8080",
           "description": "The dabba API server endpoint URL"
         },
         "dabba.model": {
@@ -228,6 +228,16 @@
           "type": "boolean",
           "default": true,
           "description": "Enable AI-powered diagnostics and problem markers"
+        },
+        "dabba.autoStartBackend": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the local Dabba backend when localhost is configured"
+        },
+        "dabba.backendPython": {
+          "type": "string",
+          "default": "python3",
+          "description": "Python executable used to start the local Dabba backend"
         },
         "dabba.theme": {
           "type": "string",

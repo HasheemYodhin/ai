@@ -75,6 +75,9 @@ Tool-use rules:
 - Use tools whenever current workspace state is needed; do not guess file
   contents, build results, or runtime behavior.
 - Tool calls must contain valid arguments matching the provided schema.
+- Emit no more than five tool calls in one response. Every text-form tool call
+  must be valid JSON wrapped in both <tool_call> and </tool_call>; never print
+  tool calls as a proposed script or as ordinary narrative text.
 - After a tool result, interpret it and decide the next step. Do not repeat an
   unchanged failing action without changing the approach.
 - When independent read-only checks are available, group them efficiently.
@@ -192,18 +195,7 @@ After receiving results, continue your response naturally."""
             List of parsed ToolCall instances. Empty if none found.
         """
         calls: List[ToolCall] = []
-        pattern = re.compile(
-            r"<tool_call>(.*?)</tool_call>",
-            re.DOTALL | re.IGNORECASE,
-        )
-        for match in pattern.finditer(text):
-            raw = match.group(1).strip()
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse tool call JSON: %s", raw[:200])
-                continue
-
+        for data, _, _ in self._decoded_tool_payloads(text):
             if isinstance(data, list):
                 for item in data:
                     call = self._dict_to_toolcall(item)
@@ -215,6 +207,54 @@ After receiving results, continue your response naturally."""
                     calls.append(call)
 
         return calls
+
+    @staticmethod
+    def _decoded_tool_payloads(text: str) -> List[Tuple[Any, int, int]]:
+        """Decode complete JSON after each opening tag, even if its close tag is missing."""
+        decoded: List[Tuple[Any, int, int]] = []
+        # strict=False: models routinely emit real newlines/tabs inside string
+        # values (e.g. multi-line source code in a file_write's "content"),
+        # which strict-mode JSON treats as invalid control characters and
+        # rejects outright — silently dropping the whole tool call and, with
+        # no tool_calls left to run, ending the turn as if the task were done.
+        decoder = json.JSONDecoder(strict=False)
+        consumed_until = 0
+        for marker in re.finditer(r"<tool_call>", text, re.IGNORECASE):
+            if marker.start() < consumed_until:
+                continue
+            json_start = marker.end()
+            while json_start < len(text) and text[json_start].isspace():
+                json_start += 1
+            next_marker = re.search(r"<tool_call>|</tool_call>", text[json_start:], re.IGNORECASE)
+            payload_limit = json_start + next_marker.start() if next_marker else len(text)
+            payload = text[json_start:payload_limit]
+            # Some open-weight models occasionally duplicate the opening brace
+            # before the arguments object:
+            # {"name":"file_read", {"arguments":{...}}
+            # Repair that deterministic typo so the tool can execute and the
+            # agent can continue instead of treating it as a final answer.
+            repaired_payload = re.sub(
+                r',\s*\{\s*("arguments"\s*:)', r', \1', payload, count=1
+            )
+            candidate = repaired_payload if repaired_payload != payload else text
+            candidate_start = 0 if candidate is not text else json_start
+            try:
+                data, json_end = decoder.raw_decode(candidate, candidate_start)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "Failed to parse tool call JSON after marker: %s",
+                    text[json_start:json_start + 200],
+                )
+                continue
+            span_end = payload_limit if candidate is not text else json_end
+            while span_end < len(text) and text[span_end].isspace():
+                span_end += 1
+            close = re.match(r"</tool_call>", text[span_end:], re.IGNORECASE)
+            if close:
+                span_end += close.end()
+            decoded.append((data, marker.start(), span_end))
+            consumed_until = span_end
+        return decoded
 
     @staticmethod
     def _dict_to_toolcall(data: Dict[str, Any]) -> Optional[ToolCall]:
@@ -305,7 +345,7 @@ After receiving results, continue your response naturally."""
         Returns:
             True if tool call blocks are found.
         """
-        return bool(re.search(r"<tool_call>.*?</tool_call>", text, re.DOTALL | re.IGNORECASE))
+        return bool(re.search(r"<tool_call>", text, re.IGNORECASE))
 
     @staticmethod
     def strip_tool_calls(text: str) -> str:
@@ -318,12 +358,16 @@ After receiving results, continue your response naturally."""
         Returns:
             Text with tool call blocks removed.
         """
-        return re.sub(
-            r"<tool_call>.*?</tool_call>",
-            "",
-            text,
-            flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
+        spans = McpHandler._decoded_tool_payloads(text)
+        if not spans:
+            return text.strip()
+        parts: List[str] = []
+        cursor = 0
+        for _, start, end in spans:
+            parts.append(text[cursor:start])
+            cursor = end
+        parts.append(text[cursor:])
+        return "".join(parts).strip()
 
 
     def handle_tool_call(self, tool_call, context=None):

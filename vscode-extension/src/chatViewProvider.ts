@@ -72,6 +72,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   // can't reliably get microphone permission via getUserMedia.
   private _recordingProcess?: ChildProcessWithoutNullStreams;
   private _recordingPath?: string;
+  private _backendProcess?: ChildProcessWithoutNullStreams;
+  private _backendStartup?: Promise<boolean>;
+  private _backendError = '';
+  private _backendContextSessionId?: string;
 
   // Files touched by the agent in the current run — shown as a live chip row
   private _changedFiles: Set<string> = new Set();
@@ -254,6 +258,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           this._postMessage({ type: 'sessionsInit', sessions: this._sessions, active: this._activeSessionId });
           this._replaySession(this._activeSessionId);
           await this._sendStartupStatus();
+          await this._resetAgent();
           break;
         case 'attachFile':
           await this._attachFile();
@@ -292,6 +297,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         case 'switchSession':
           this._activeSessionId = message.id;
           this._persistSessions();
+          await this._resetAgent();
           this._postMessage({ type: 'clearMessages', silent: true });
           this._replaySession(message.id);
           break;
@@ -366,6 +372,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const pending = Array.from(this._pendingApprovalCallIds);
     this._pendingApprovalCallIds.clear();
     await Promise.all(pending.map((callId) => this._sendApproval(callId, false)));
+    if (this._backendProcess?.exitCode === null) {
+      this._backendProcess.kill();
+    }
   }
 
   /** Clear the active session's stored transcript (used by /clear and the clear button). */
@@ -496,18 +505,110 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const settings = this.settings.getSettings();
     const hasApiKey = Boolean(await this.settings.getApiKey());
     const workspaceName = vscode.workspace.name || 'No workspace open';
+    const backendReachable = await this._ensureLocalBackend();
+    this._postMessage({
+      type: 'startupStatus',
+      backendReachable,
+      hasApiKey,
+      workspaceName,
+      backendError: backendReachable ? '' : this._backendError,
+    });
+  }
+
+  private async _isBackendHealthy(endpoint: string, timeoutMs = 1_500): Promise<boolean> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3_000);
-    let backendReachable = false;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(`${settings.apiEndpoint}/health`, { signal: controller.signal });
-      backendReachable = response.ok;
+      const response = await fetch(`${endpoint}/health`, { signal: controller.signal });
+      return response.ok;
     } catch {
-      backendReachable = false;
+      return false;
     } finally {
       clearTimeout(timer);
     }
-    this._postMessage({ type: 'startupStatus', backendReachable, hasApiKey, workspaceName });
+  }
+
+  private async _ensureLocalBackend(): Promise<boolean> {
+    const settings = this.settings.getSettings();
+    if (await this._isBackendHealthy(settings.apiEndpoint)) {
+      this._backendError = '';
+      return true;
+    }
+
+    let endpoint: URL;
+    try {
+      endpoint = new URL(settings.apiEndpoint);
+    } catch {
+      this._backendError = `Invalid API endpoint: ${settings.apiEndpoint}`;
+      return false;
+    }
+
+    const isLocal = endpoint.hostname === 'localhost' || endpoint.hostname === '127.0.0.1';
+    if (!isLocal || !settings.autoStartBackend) {
+      this._backendError = isLocal
+        ? 'Local backend is offline and automatic startup is disabled.'
+        : `Cannot reach ${settings.apiEndpoint}.`;
+      return false;
+    }
+
+    if (this._backendStartup) {
+      return this._backendStartup;
+    }
+
+    this._backendStartup = this._startLocalBackend(endpoint, settings.backendPython)
+      .finally(() => { this._backendStartup = undefined; });
+    return this._backendStartup;
+  }
+
+  private async _startLocalBackend(endpoint: URL, pythonCommand: string): Promise<boolean> {
+    const workspace = this._primaryWorkspaceFolder()?.uri.fsPath;
+    if (!workspace || !fs.existsSync(path.join(workspace, 'dabba', 'api', 'server.py'))) {
+      this._backendError = 'Open the Dabba project folder so the extension can start its backend.';
+      return false;
+    }
+
+    if (!this._backendProcess || this._backendProcess.exitCode !== null) {
+      const port = endpoint.port || '8080';
+      const env = {
+        ...process.env,
+        PYTHONUNBUFFERED: '1',
+        PYTHONPATH: [workspace, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
+      };
+      this._backendError = '';
+      try {
+        this._backendProcess = spawn(
+          pythonCommand || 'python3',
+          ['-m', 'dabba.api.server', '--host', '127.0.0.1', '--port', port],
+          { cwd: workspace, env },
+        );
+      } catch (err) {
+        this._backendError = `Could not start backend with ${pythonCommand}: ${err instanceof Error ? err.message : String(err)}`;
+        return false;
+      }
+
+      this._backendProcess.stderr.on('data', (chunk: Buffer) => {
+        this._backendError = chunk.toString().trim().slice(-800);
+      });
+      this._backendProcess.on('error', (err) => {
+        this._backendError = `Backend process failed: ${err.message}`;
+      });
+    }
+
+    for (let attempt = 0; attempt < 40; attempt++) {
+      if (await this._isBackendHealthy(endpoint.origin, 750)) {
+        this._backendError = '';
+        return true;
+      }
+      if (this._backendProcess.exitCode !== null) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    if (!this._backendError) {
+      this._backendError = 'Backend did not become healthy within 20 seconds.';
+    }
+    return false;
   }
 
   /** Push current settings + whether an API key is stored into the in-panel Settings screen. */
@@ -527,7 +628,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const config = vscode.workspace.getConfiguration('dabba');
     const targets: Array<keyof import('./settings').DabbaSettings> = [
       'apiEndpoint', 'model', 'effort', 'maxTokens', 'temperature',
-      'autoReviewOnSave', 'enableDiagnostics', 'theme',
+      'autoReviewOnSave', 'enableDiagnostics', 'autoStartBackend',
+      'backendPython', 'theme',
     ];
     for (const key of targets) {
       if (settings[key] !== undefined) {
@@ -791,7 +893,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   // How long to wait for the server to start responding at all before giving
   // up — separate from the stream's total duration, which can legitimately
   // run for minutes on a long agent turn.
-  private static readonly CONNECT_TIMEOUT_MS = 20_000;
+  private static readonly CONNECT_TIMEOUT_MS = 60_000;
 
   /** Called once a turn's stream completes successfully — shows every file
    * changed this turn as one batched multi-file diff (see DiffManager.showBatchDiff). */
@@ -814,7 +916,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     this._postMessage({ type: 'addMessage', role: 'user', content: text, attachments, mentions });
     this._postMessage({ type: 'agentStart' });
 
+    if (!await this._ensureLocalBackend()) {
+      this._postMessage({
+        type: 'agentError',
+        content: this._backendError || 'Dabba backend is unavailable.',
+        retryable: true,
+      });
+      this._postMessage({ type: 'agentEnd', elapsed: 0 });
+      return;
+    }
+
     let augmentedText = text;
+    if (this._backendContextSessionId !== this._activeSessionId) {
+      const history = this._activeSessionHistory();
+      if (history) {
+        augmentedText = `${history}\n\n${augmentedText}`;
+      }
+      this._backendContextSessionId = this._activeSessionId;
+    }
 
     // Inject pinned file contents — read fresh every turn (not cached from
     // whenever they were pinned), unlike one-shot @-mentions below.
@@ -907,6 +1026,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     }, ChatViewProvider.CONNECT_TIMEOUT_MS);
 
     let receivedAnyEvent = false;
+    let streamError: string | undefined;
 
     try {
       const apiKey = await this.settings.getApiKey();
@@ -975,9 +1095,24 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           try {
             const event = JSON.parse(data);
             receivedAnyEvent = true;
+            if (event?.type === 'error') {
+              streamError = String(event.content ?? 'Dabba server returned an error.');
+            }
             await this._handleAgentEvent(event, startTime);
           } catch { /* skip malformed */ }
         }
+      }
+      if (streamError) {
+        return {
+          kind: 'http',
+          message: streamError,
+        };
+      }
+      if (!receivedAnyEvent) {
+        return {
+          kind: 'midstream-drop',
+          message: 'Dabba closed the chat stream without sending a response. Retry the message.',
+        };
       }
       this._postMessage({ type: 'agentEnd', elapsed: Math.round((Date.now() - startTime) / 1000) });
       return { kind: 'ok' };
@@ -999,6 +1134,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       };
     } finally {
       clearTimeout(connectTimer);
+      this._abort = undefined;
+      this._abortReason = undefined;
     }
   }
 
@@ -1142,9 +1279,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         break;
       }
 
-      case 'error':
-        this._postMessage({ type: 'agentError', content: String(event.content) });
+      case 'status':
+        this._postMessage({ type: 'agentStatus', content: String(event.content) });
         break;
+      case 'error': {
+        const content = String(event.content);
+        const retryable = /resourceexhausted|capacity|worker limit|429|503|timed? ?out|timeout|temporar/i.test(content);
+        this._postMessage({ type: 'agentError', content, retryable });
+        break;
+      }
       case 'tool_denied': {
         const d = event.content as { call_id?: string; name?: string } | string;
         const deniedName = typeof d === 'string' ? d : (d?.name ?? 'tool');
@@ -1156,12 +1299,36 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
   private async _resetAgent(): Promise<void> {
     const settings = this.settings.getSettings();
+    this._backendContextSessionId = undefined;
     try {
       const apiKey = await this.settings.getApiKey();
       const headers: Record<string, string> = {};
       if (apiKey) { headers['Authorization'] = `Bearer ${apiKey}`; }
-      await fetch(`${settings.apiEndpoint}/v1/agent/reset`, { method: 'POST', headers });
+      const workspace = this._editorContext().workspace;
+      const query = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+      await fetch(`${settings.apiEndpoint}/v1/agent/reset${query}`, { method: 'POST', headers });
     } catch { /* server may be down */ }
+  }
+
+  private _activeSessionHistory(): string {
+    const session = this._getActiveSession();
+    if (!session) { return ''; }
+
+    const turns = session.messages
+      .filter((message) =>
+        (message.type === 'addMessage' && message.role === 'user') ||
+        message.type === 'agentText'
+      )
+      .slice(0, -1)
+      .slice(-12)
+      .map((message) => {
+        const role = message.type === 'agentText' ? 'Assistant' : 'User';
+        return `${role}: ${String(message.content ?? '')}`;
+      });
+
+    return turns.length > 0
+      ? `[Conversation history for this VS Code session]\n${turns.join('\n\n')}`
+      : '';
   }
 
   private async _loadModels(): Promise<void> {
@@ -1516,6 +1683,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <div class="settings-group settings-row">
           <label class="settings-label">Enable diagnostics</label>
           <input type="checkbox" id="set-enableDiagnostics" class="settings-checkbox">
+        </div>
+        <div class="settings-group settings-row">
+          <label class="settings-label">Auto-start local backend</label>
+          <input type="checkbox" id="set-autoStartBackend" class="settings-checkbox">
+        </div>
+        <div class="settings-group">
+          <label class="settings-label">Backend Python</label>
+          <input type="text" id="set-backendPython" class="settings-input" placeholder="python3">
         </div>
         <div class="settings-group">
           <label class="settings-label">Theme</label>

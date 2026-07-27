@@ -117,6 +117,7 @@ class AgentProxy:
                 from dabba.tools.artifact_tools import register_artifact_tools
                 from dabba.tools.web_tools import register_web_tools
                 from dabba.tools.rag_tool import register_rag_tools
+                from dabba.tools.interaction_tools import register_interaction_tools
                 register_file_tools(self.registry)
                 register_shell_tools(self.registry)
                 register_code_tools(self.registry)
@@ -126,6 +127,7 @@ class AgentProxy:
                 register_artifact_tools(self.registry)
                 register_web_tools(self.registry)
                 register_rag_tools(self.registry)
+                register_interaction_tools(self.registry)
                 self._todo_store = register_todo_tools(self.registry)
             except Exception as exc:
                 _get_logger().warning("Tool registration failed: %s", exc)
@@ -267,7 +269,7 @@ class AgentProxy:
 
         return llm_generate
 
-    def _ensure_agent_loop(self, workspace: Optional[str] = None):
+    def _ensure_agent_loop(self, workspace: Optional[str] = None, fresh_session: bool = False):
         """Ensure the AgentLoop is initialized, restoring any persisted context."""
         from dabba.agent import AgentLoop
         # Ground the model in a real absolute path instead of letting it guess
@@ -281,7 +283,7 @@ class AgentProxy:
                 registry=self._get_registry(),
                 config=self.agent_config,
                 llm_generate=self._build_llm_generate(),
-                context_manager=self._load_session(workspace),
+                context_manager=None if fresh_session else self._load_session(workspace),
             )
         return self._agent_loop
 
@@ -340,6 +342,30 @@ class AgentProxy:
         except OSError as exc:
             _get_logger().warning("Failed to persist session %s: %s", path, exc)
 
+    def checkpoint_context(self) -> Optional[Dict[str, Any]]:
+        """
+        Serialize the live AgentLoop's full conversation context (system
+        prompt, entries, truncation state) for an external checkpoint (the
+        CLI's /save command). Returns None if no agent loop has run yet.
+        """
+        if self._agent_loop is None:
+            return None
+        return self._agent_loop.context_manager.serialize()
+
+    def restore_context(self, data: Dict[str, Any], workspace: Optional[str] = None) -> None:
+        """
+        Restore a previously-checkpointed conversation context (the CLI's
+        /load command) into a fresh AgentLoop, replacing whatever context
+        _ensure_agent_loop would otherwise build or auto-load from disk.
+        """
+        from dabba.agent.context_manager import ContextManager
+
+        context_manager = ContextManager.deserialize(data)
+        # fresh_session=True so _ensure_agent_loop doesn't overwrite this with
+        # whatever's sitting in the per-workspace session.json.
+        self._ensure_agent_loop(workspace, fresh_session=True)
+        self._agent_loop.context_manager = context_manager
+
     def run(self, user_input: str) -> str:
         """
         Run a single user request through the agent loop.
@@ -350,6 +376,8 @@ class AgentProxy:
         Returns:
             The agent's final response text.
         """
+        if self._is_simple_greeting(user_input):
+            return "Hi! How can I help you today?"
         agent_loop = self._ensure_agent_loop()
         try:
             result = agent_loop.run(user_input)
@@ -379,6 +407,9 @@ class AgentProxy:
         Yields:
             Dicts with "type" and "content" keys.
         """
+        if self._is_simple_greeting(user_input):
+            yield {"type": "text", "content": "Hi! How can I help you today?"}
+            return
         loop = self._ensure_agent_loop()
 
         try:
@@ -406,6 +437,13 @@ class AgentProxy:
         except Exception as exc:
             _get_logger().error("Stream failed: %s", exc)
             yield {"type": "error", "content": str(exc)}
+
+    @staticmethod
+    def _is_simple_greeting(user_input: str) -> bool:
+        """Recognize a standalone greeting before selecting a slow provider."""
+        return user_input.strip().casefold() in {
+            "hi", "hi!", "hello", "hello!", "hey", "hey!",
+        }
 
     def stream_sync(self, user_input: str) -> str:
         """
@@ -576,11 +614,16 @@ class AgentProxy:
             return self._agent_loop.get_metrics()
         return {}
 
-    def reset(self) -> None:
+    def reset(self, workspace: Optional[str] = None) -> None:
         """Reset the agent state for a new session."""
         if self._agent_loop is not None:
             self._agent_loop.reset()
         self._current_tool_calls.clear()
+        if workspace:
+            try:
+                self._session_path(workspace).unlink(missing_ok=True)
+            except OSError as exc:
+                _get_logger().warning("Failed to remove persisted session for %s: %s", workspace, exc)
 
     def reload_config(self) -> None:
         """Reload CLI config from disk and reinitialize agent."""

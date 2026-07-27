@@ -98,6 +98,41 @@ class TestRoleRemap:
         assert remap_tool_role_for_provider(messages) == messages
 
 
+class TestMalformedTextToolCalls:
+    def test_repairs_duplicate_arguments_brace(self):
+        response = (
+            '<tool_call>\n'
+            '{"name":"file_read", {"arguments":{"path":"backend/app/main.py"}}\n'
+            '</tool_call>'
+        )
+
+        calls = McpHandler().parse_tool_calls(response)
+
+        assert len(calls) == 1
+        assert calls[0].tool_name == "file_read"
+        assert calls[0].arguments["path"] == "backend/app/main.py"
+
+    def test_recovers_multiple_calls_without_closing_tags(self):
+        response = (
+            'Working now.\n<tool_call>\n'
+            '{"name":"file_write","arguments":{"path":"a.py","content":"a"}}\n'
+            '<tool_call>\n'
+            '{"name":"file_write","arguments":{"path":"b.py","content":"b"}}'
+        )
+
+        handler = McpHandler()
+        calls = handler.parse_tool_calls(response)
+
+        assert [call.arguments["path"] for call in calls] == ["a.py", "b.py"]
+        assert handler.strip_tool_calls(response) == "Working now."
+
+    def test_incomplete_call_remains_visible_for_completion_validation(self):
+        response = '<tool_call>{"name":"file_write","arguments":{"path":"a.py"'
+
+        assert McpHandler().parse_tool_calls(response) == []
+        assert "<tool_call>" in McpHandler.strip_tool_calls(response)
+
+
 class TestOpenAINativeToolCalling:
     def _fake_client_with_tool_call(self):
         fake_tool_call = MagicMock()

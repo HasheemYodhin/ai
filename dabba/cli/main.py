@@ -375,7 +375,11 @@ def _build_config(args: argparse.Namespace) -> CliConfig:
     if getattr(args, "endpoint", None):
         config.api_endpoint = args.endpoint
     elif "8000" in config.api_endpoint:
-        config.api_endpoint = "http://localhost:8080"
+        config.api_endpoint = "http://127.0.0.1:8080"
+    elif config.api_endpoint.rstrip("/") == "http://localhost:8080":
+        # Linux may resolve localhost to ::1 while uvicorn is bound only to
+        # IPv4, making the TUI appear to ignore even a simple greeting.
+        config.api_endpoint = "http://127.0.0.1:8080"
     if getattr(args, "model", None):
         config.default_model = args.model
     if getattr(args, "no_stream", False):

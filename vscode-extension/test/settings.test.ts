@@ -23,13 +23,15 @@ describe('SettingsManager', () => {
   it('returns defaults when no configuration is set', () => {
     const settings = new SettingsManager(makeContext());
     expect(settings.getSettings()).toEqual({
-      apiEndpoint: 'http://localhost:8080',
+      apiEndpoint: 'http://127.0.0.1:8080',
       model: 'dabba',
       effort: 'medium',
       maxTokens: 4096,
       temperature: 0.7,
       autoReviewOnSave: false,
       enableDiagnostics: true,
+      autoStartBackend: true,
+      backendPython: 'python3',
       theme: 'auto',
     });
   });

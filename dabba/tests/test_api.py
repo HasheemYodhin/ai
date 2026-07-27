@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from dabba.api import create_app
 from dabba.api.auth import authenticate_request
 from dabba.api.rate_limiter import RateLimiter
-from dabba.api.chat_endpoints import ChatEndpoint
+from dabba.api.chat_endpoints import ChatEndpoint, _generate_response
 from dabba.api.streaming_handler import StreamingHandler
 
 
@@ -38,6 +38,14 @@ class TestAuth:
         auth.side_effect = lambda token: token == "valid-token"
         assert auth("valid-token") is True
         assert auth("bad-token") is False
+
+
+def test_local_greeting_responds_without_slow_model_engine():
+    assert _generate_response(
+        [{"role": "user", "content": "Hi"}],
+        model_engine=Mock(),
+        model_name="dabba",
+    ) == "Hi! How can I help you today?"
 
 
 class TestRateLimiter:
@@ -156,6 +164,64 @@ class TestFastAPIApp:
             assert response.status_code == 200
             data = response.json()
             assert "status" in data
+
+    def test_artifact_publish_serves_publicly_and_enforces_ownership(self, tmp_path, monkeypatch):
+        import base64
+        import dabba.platform.core as platform_core
+
+        # The platform services all share one process-wide PlatformStore
+        # singleton backed by a real on-disk DB (get_platform_store()) — point
+        # it at a throwaway directory for this test so it neither pollutes
+        # the developer's real Dabba install nor collides with data left over
+        # from a previous test run (e.g. a duplicate-email signup failure).
+        monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr(platform_core, "_default_store", None)
+
+        test_app = create_app()
+        with TestClient(test_app) as client:
+            signup = client.post("/v1/platform/identity/signup", json={
+                "name": "Pub Tester", "email": "artifact-pub-test@example.com", "password": "a-secure-password",
+            })
+            assert signup.status_code == 201
+            headers = {"Authorization": f"Bearer {signup.json()['token']}"}
+
+            html = b"<!doctype html><html><body>Hello from a published artifact</body></html>"
+            created = client.post("/v1/platform/artifacts", headers=headers, json={
+                "name": "demo.html", "data": base64.b64encode(html).decode(), "mediaType": "text/html",
+            })
+            assert created.status_code == 201
+
+            published = client.post(
+                f"/v1/platform/artifacts/{created.json()['id']}/publish",
+                headers=headers, json={"title": "Demo Page"},
+            )
+            assert published.status_code == 201
+            slug = published.json()["slug"]
+
+            # No Authorization header at all — this must still work.
+            public = client.get(f"/v1/platform/public/artifacts/{slug}")
+            assert public.status_code == 200
+            assert b"Hello from a published artifact" in public.content
+
+            other_signup = client.post("/v1/platform/identity/signup", json={
+                "name": "Other", "email": "artifact-pub-other@example.com", "password": "a-secure-password",
+            })
+            other_headers = {"Authorization": f"Bearer {other_signup.json()['token']}"}
+            forbidden = client.delete(f"/v1/platform/artifacts/publish/{slug}", headers=other_headers)
+            assert forbidden.status_code == 403
+
+            unpublished = client.delete(f"/v1/platform/artifacts/publish/{slug}", headers=headers)
+            assert unpublished.status_code == 204
+            assert client.get(f"/v1/platform/public/artifacts/{slug}").status_code == 404
+
+    def test_agent_processes_endpoint_lists_background_processes(self):
+        test_app = create_app()
+        with TestClient(test_app) as client:
+            response = client.get("/v1/agent/processes")
+            assert response.status_code == 200
+            data = response.json()
+            assert "processes" in data
+            assert isinstance(data["processes"], list)
 
     def test_v1_chat_completions(self):
         test_app = create_app()

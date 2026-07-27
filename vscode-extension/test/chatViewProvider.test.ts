@@ -23,13 +23,15 @@ function makeContext() {
 function makeSettings() {
   return {
     getSettings: vi.fn(() => ({
-      apiEndpoint: 'http://localhost:8080',
+      apiEndpoint: 'http://127.0.0.1:8080',
       model: 'dabba',
       effort: 'medium',
       maxTokens: 4096,
       temperature: 0.7,
       autoReviewOnSave: false,
       enableDiagnostics: true,
+      autoStartBackend: true,
+      backendPython: 'python3',
       theme: 'auto' as const,
     })),
     getApiKey: vi.fn(async () => undefined),
@@ -128,6 +130,24 @@ describe('ChatViewProvider', () => {
       { type: 'addMessage', role: 'user', content: 'first' },
       { type: 'agentText', content: 'reply 1' },
     ]);
+  });
+
+  it('rehydrates only the selected VS Code session history and excludes the current user turn', () => {
+    const provider = new ChatViewProvider(Uri.file('/ext'), makeSettings(), makeContext());
+    const session = (provider as unknown as { _sessions: Array<{ messages: AnyMessage[] }> })._sessions[0];
+    session.messages = [
+      { type: 'addMessage', role: 'user', content: 'first question' },
+      { type: 'agentText', content: 'first answer' },
+      { type: 'toolCall', content: 'not conversation text' },
+      { type: 'addMessage', role: 'user', content: 'current question' },
+    ];
+
+    const history = (provider as unknown as { _activeSessionHistory: () => string })._activeSessionHistory();
+
+    expect(history).toContain('User: first question');
+    expect(history).toContain('Assistant: first answer');
+    expect(history).not.toContain('current question');
+    expect(history).not.toContain('not conversation text');
   });
 
   describe('_primaryWorkspaceFolder', () => {

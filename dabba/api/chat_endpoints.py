@@ -138,10 +138,11 @@ def create_chat_router(
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
 
+        task_context = _create_chat_task(request, req)
         if req.stream:
-            return await _handle_streaming_chat(req, model_engine)
+            return await _handle_streaming_chat(req, model_engine, task_context)
         else:
-            return await _handle_nonstreaming_chat(req, model_engine)
+            return await _handle_nonstreaming_chat(req, model_engine, task_context)
 
     @router.post("/chat/completions/stream")
     async def chat_completions_stream(
@@ -165,7 +166,7 @@ def create_chat_router(
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
 
-        return await _handle_streaming_chat(req, model_engine)
+        return await _handle_streaming_chat(req, model_engine, _create_chat_task(request, req))
 
     return router
 
@@ -173,6 +174,7 @@ def create_chat_router(
 async def _handle_nonstreaming_chat(
     req: ChatCompletionRequest,
     model_engine: Optional[object],
+    task_context=None,
 ) -> Dict:
     """
     Handle a non-streaming chat completion request.
@@ -190,15 +192,35 @@ async def _handle_nonstreaming_chat(
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
     last_message = _content_to_text(messages[-1]["content"]) if messages else ""
-    prompt_tokens = len(last_message.split())
+    # Populated in place by _generate_response if the resolved provider
+    # captures real usage (see registry.py/base.py) — a fresh dict per
+    # request, so no shared state races across concurrent requests.
+    usage_holder: Dict[str, int] = {}
     # _generate_response makes a blocking network/inference call — run it on a
     # worker thread so it doesn't freeze the whole server's event loop (this
     # previously made even unrelated /health checks hang for the full duration
     # of any in-flight chat request).
-    response_text = await asyncio.to_thread(
-        _generate_response, messages, model_engine, req.model, req.effort, _sampling_kwargs(req)
-    )
-    completion_tokens = len(response_text.split())
+    if task_context:
+        tasks, task_id = task_context
+        tasks.transition(task_id, "running", current_step="Generating response")
+    try:
+        response_text = await asyncio.to_thread(
+            _generate_response, messages, model_engine, req.model, req.effort, _sampling_kwargs(req), usage_holder
+        )
+    except Exception as exc:
+        if task_context:
+            from dabba.platform.provider_gateway import normalize_provider_error
+            failure = normalize_provider_error(exc, model=req.model)
+            tasks.transition(task_id, "failed", error=failure.as_dict())
+        raise
+
+    # Real usage when the provider reported it; a word-count estimate
+    # otherwise (the local dabba model, or a provider that doesn't capture
+    # usage yet) — word count is not token count, just the least-bad guess
+    # available without a real tokenizer for every possible model.
+    prompt_tokens = usage_holder.get("prompt_tokens") or len(last_message.split())
+    completion_tokens = usage_holder.get("completion_tokens") or len(response_text.split())
+    total_tokens = usage_holder.get("total_tokens") or (prompt_tokens + completion_tokens)
 
     choice = ChatCompletionChoice(
         index=0,
@@ -215,16 +237,25 @@ async def _handle_nonstreaming_chat(
         usage=CompletionUsage(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
+            total_tokens=total_tokens,
         ),
     )
 
-    return response.to_dict()
+    payload = response.to_dict()
+    if task_context:
+        tasks.transition(
+            task_id,
+            "completed",
+            result={"content": response_text, "usage": usage_holder, "model": req.model},
+        )
+        payload["dabba_task_id"] = task_id
+    return payload
 
 
 async def _handle_streaming_chat(
     req: ChatCompletionRequest,
     model_engine: Optional[object],
+    task_context=None,
 ):
     """
     Handle a streaming chat completion request.
@@ -243,19 +274,44 @@ async def _handle_streaming_chat(
 
     async def event_stream() -> AsyncGenerator[str, None]:
         handler = StreamingHandler(model_name=req.model)
+        tasks = task_id = None
+        if task_context:
+            tasks, task_id = task_context
+            tasks.transition(task_id, "running", current_step="Streaming response")
+            yield f": dabba-task-id={task_id}\n\n"
 
         if req.model and not req.model.startswith("dabba"):
+            usage_holder: Dict[str, int] = {}
+            complete_text = ""
+            event_buffer = ""
             try:
-                async for token in _stream_provider_response(req, messages, model_engine):
+                async for token in _stream_provider_response(req, messages, model_engine, usage_holder):
+                    complete_text += token
+                    event_buffer += token
+                    if tasks and len(event_buffer) >= 500:
+                        tasks.append_event(task_id, "task.output.delta", {"content": event_buffer})
+                        event_buffer = ""
                     yield handler.create_chunk(token, index=0)
-                yield handler.create_chunk("", index=0, finish_reason="stop")
+                if tasks:
+                    if event_buffer:
+                        tasks.append_event(task_id, "task.output.delta", {"content": event_buffer})
+                    tasks.transition(
+                        task_id,
+                        "completed",
+                        result={"content": complete_text, "usage": usage_holder, "model": req.model},
+                    )
+                yield handler.create_chunk("", index=0, finish_reason="stop", usage=usage_holder or None)
                 yield "data: [DONE]\n\n"
+            except asyncio.CancelledError:
+                if tasks:
+                    tasks.cancel(task_id)
+                raise
             except Exception as exc:
-                yield handler.create_chunk(
-                    f"I encountered an error calling '{req.model}': {exc}",
-                    index=0,
-                    finish_reason="stop",
-                )
+                from dabba.platform.provider_gateway import normalize_provider_error
+                failure = normalize_provider_error(exc, model=req.model)
+                if tasks:
+                    tasks.transition(task_id, "failed", error=failure.as_dict())
+                yield f"data: {json.dumps({'error': failure.as_dict()})}\n\n"
                 yield "data: [DONE]\n\n"
             return
 
@@ -263,6 +319,7 @@ async def _handle_streaming_chat(
         # here. Keep yielding SSE comments while slow provider calls (notably
         # NVIDIA GLM/R1 cold starts) are still running, otherwise browsers and
         # reverse proxies can treat the request as idle before the first token.
+        usage_holder: Dict[str, int] = {}
         response_task = asyncio.create_task(
             asyncio.to_thread(
                 _generate_response,
@@ -271,13 +328,24 @@ async def _handle_streaming_chat(
                 req.model,
                 req.effort,
                 _sampling_kwargs(req),
+                usage_holder,
             )
         )
         while not response_task.done():
             yield ": keepalive\n\n"
             await asyncio.sleep(10)
 
-        response_text = await response_task
+        try:
+            response_text = await response_task
+        except Exception as exc:
+            if tasks:
+                from dabba.platform.provider_gateway import normalize_provider_error
+                tasks.transition(
+                    task_id,
+                    "failed",
+                    error=normalize_provider_error(exc, model=req.model).as_dict(),
+                )
+            raise
 
         # Chunk for the typewriter effect while PRESERVING all whitespace —
         # newlines and indentation carry the structure of YAML/JSON/code, so
@@ -286,11 +354,35 @@ async def _handle_streaming_chat(
         # capture group keeps each whitespace run as its own token instead.
         tokens = [t for t in re.split(r"(\s+)", response_text) if t != ""]
 
-        for token in tokens:
-            yield handler.create_chunk(token, index=0)
-            await asyncio.sleep(0.01)
+        try:
+            for token in tokens:
+                yield handler.create_chunk(token, index=0)
+                await asyncio.sleep(0.01)
+        except asyncio.CancelledError:
+            if tasks:
+                tasks.cancel(task_id)
+            raise
 
-        yield handler.create_chunk("", index=0, finish_reason="stop")
+        # Local dabba model never populates usage_holder — fall back to the
+        # same word-count estimate the non-streaming path uses.
+        if not usage_holder:
+            last_message = _content_to_text(messages[-1]["content"]) if messages else ""
+            prompt_tokens = len(last_message.split())
+            completion_tokens = len(response_text.split())
+            usage_holder = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+
+        if tasks:
+            tasks.append_event(task_id, "task.output.delta", {"content": response_text})
+            tasks.transition(
+                task_id,
+                "completed",
+                result={"content": response_text, "usage": usage_holder, "model": req.model},
+            )
+        yield handler.create_chunk("", index=0, finish_reason="stop", usage=usage_holder)
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -304,10 +396,43 @@ async def _handle_streaming_chat(
     )
 
 
+def _create_chat_task(request: Request, req: ChatCompletionRequest):
+    """Create a durable task when the caller supplies a valid Dabba session."""
+    token = request.headers.get("x-dabba-session", "")
+    if not token:
+        return None
+    try:
+        from dabba.platform.services import IdentityService, TaskOrchestrator
+
+        user = IdentityService().authenticate(token)
+        if not user:
+            return None
+        tasks = TaskOrchestrator()
+        task = tasks.create(
+            "chat",
+            {
+                "messages": [
+                    {"role": message.role, "content": message.content}
+                    for message in req.messages
+                ],
+                "stream": req.stream,
+                "effort": req.effort,
+            },
+            user_id=user["id"],
+            model=req.model,
+            idempotency_key=request.headers.get("x-idempotency-key"),
+        )
+        return tasks, task["id"]
+    except Exception:
+        # Durable tracking must never make a previously valid chat unavailable.
+        return None
+
+
 async def _stream_provider_response(
     req: ChatCompletionRequest,
     messages: list,
     model_engine: Optional[object],
+    usage_out: Optional[Dict[str, int]] = None,
 ) -> AsyncGenerator[str, None]:
     del model_engine
     from dabba.api.agent_endpoints import _get_agent_proxy
@@ -316,7 +441,7 @@ async def _stream_provider_response(
     registry = proxy._get_provider_registry()
     resolved_effort = req.effort or getattr(proxy.cli_config, "effort", "medium")
     overrides = {k: v for k, v in _sampling_kwargs(req).items() if v is not None}
-    iterator = registry.stream_chat(messages, model=req.model, effort=resolved_effort, **overrides)
+    iterator = registry.stream_chat(messages, model=req.model, effort=resolved_effort, usage_out=usage_out, **overrides)
 
     pending = asyncio.create_task(asyncio.to_thread(_next_stream_token, iterator))
     while True:
@@ -338,6 +463,7 @@ def _generate_response(
     model_name: Optional[str] = None,
     effort: Optional[str] = None,
     sampling: Optional[Dict] = None,
+    usage_out: Optional[Dict[str, int]] = None,
 ) -> str:
     """
     Generate a response, routing to the right backend for the requested model.
@@ -353,6 +479,12 @@ def _generate_response(
         messages: Full conversation as list of {"role", "content"} dicts.
         model_engine: The local model engine for generation (used for "dabba").
         model_name: The model id the client actually requested.
+        usage_out: pass a fresh dict to have it populated in place with real
+            token counts if the resolved provider captures them — see
+            registry.py's chat()/base.py's BaseProvider docstring for why
+            this is an explicit per-call param, not shared instance state
+            (providers are process-wide singletons reused across concurrent
+            requests).
 
     Returns:
         Generated response text.
@@ -370,12 +502,25 @@ def _generate_response(
             # effort tier's defaults — registry.chat() layers **kwargs on top
             # of EFFORT_PARAMS, so only non-None values should be forwarded.
             overrides = {k: v for k, v in (sampling or {}).items() if v is not None}
-            return registry.chat(messages, model=model_name, effort=resolved_effort, **overrides)
+            return registry.chat(messages, model=model_name, effort=resolved_effort, usage_out=usage_out, **overrides)
         except Exception as exc:
-            return f"I encountered an error calling '{model_name}': {exc}"
+            from dabba.platform.provider_gateway import normalize_provider_error
+            raise normalize_provider_error(exc, model=model_name) from exc
 
     # Local dabba model is text-only — flatten any multimodal content to text.
     local_messages = [{"role": m["role"], "content": _content_to_text(m["content"])} for m in messages]
+    last = local_messages[-1]["content"] if local_messages else ""
+
+    # Do not send a one-word social greeting through the local generation
+    # engine.  Small local checkpoints can take a minute to answer and often
+    # return tokenizer artifacts (for example repeated ``<unk>`` tokens), which
+    # makes the TUI and VS Code look like they never responded.  This fast path
+    # keeps chat health checks and first-use conversations responsive while all
+    # substantive prompts still use the configured model.
+    if isinstance(last, str) and last.strip().casefold() in {
+        "hi", "hello", "hey", "hi!", "hello!", "hey!",
+    }:
+        return "Hi! How can I help you today?"
 
     if _has_images(messages):
         # The client should route image requests to a vision model or OCR them
@@ -395,7 +540,6 @@ def _generate_response(
         except Exception:
             pass
 
-    last = local_messages[-1]["content"] if local_messages else ""
     return _fallback_response(last)
 
 

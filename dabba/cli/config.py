@@ -15,7 +15,12 @@ from typing import Any, Dict, List, Optional
 
 from dabba.utils.paths import get_dabba_config_dir
 
-CLI_CONFIG_PATH = get_dabba_config_dir() / "cli_config.yaml"
+CLI_DATA_DIR = (
+    Path(os.environ["DABBA_DATA_DIR"]).expanduser().resolve()
+    if os.environ.get("DABBA_DATA_DIR")
+    else get_dabba_config_dir()
+)
+CLI_CONFIG_PATH = CLI_DATA_DIR / "cli_config.yaml"
 
 
 @dataclass
@@ -44,7 +49,7 @@ class CliConfig:
         watch_extensions: File extensions to watch.
     """
 
-    api_endpoint: str = "http://localhost:8080"
+    api_endpoint: str = "http://127.0.0.1:8080"
     api_key: str = ""
     default_model: str = "dabba"
     effort: str = "medium"
@@ -57,7 +62,7 @@ class CliConfig:
     show_tool_calls: bool = True
     require_tool_approval: bool = True
     permission_mode: str = "ask"
-    history_file: str = str(get_dabba_config_dir() / "history.jsonl")
+    history_file: str = str(CLI_DATA_DIR / "history.jsonl")
     max_history_files: int = 50
     theme: str = "dark"
     syntax_theme: str = "monokai"
@@ -95,9 +100,38 @@ class CliConfig:
         with open(config_path, "r") as f:
             raw = yaml.safe_load(f) or {}
 
+        # Production config keeps provider credentials in the encrypted vault.
+        # Existing plaintext keys are migrated on first load.
+        use_vault = path is None or config_path == CLI_CONFIG_PATH
+        plaintext_api_key = raw.get("api_key", "")
+        plaintext_keys = dict(raw.get("api_keys", {}) or {})
+        if use_vault:
+            try:
+                from dabba.platform.services import SecretVault
+
+                vault = SecretVault()
+                if plaintext_api_key:
+                    vault.put("cli", "api_key", plaintext_api_key)
+                for provider, value in plaintext_keys.items():
+                    if value:
+                        vault.put("cli", f"provider:{provider}", value)
+                raw["api_key"] = vault.get("cli", "api_key") or ""
+                raw["api_keys"] = {
+                    key.removeprefix("provider:"): vault.get("cli", key) or ""
+                    for key in vault.keys("cli")
+                    if key.startswith("provider:")
+                }
+            except Exception:
+                # Loading should remain possible in minimal installations. Save
+                # refuses plaintext for the production path below.
+                pass
+
         valid_keys = cls.__dataclass_fields__.keys()
         filtered = {k: v for k, v in raw.items() if k in valid_keys}
-        return cls(**filtered)
+        instance = cls(**filtered)
+        if use_vault and (plaintext_api_key or plaintext_keys):
+            instance.save(config_path)
+        return instance
 
     def save(self, path: Optional[Path] = None) -> None:
         """
@@ -108,8 +142,26 @@ class CliConfig:
         """
         config_path = path or CLI_CONFIG_PATH
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = asdict(self)
+        use_vault = path is None or config_path == CLI_CONFIG_PATH
+        if use_vault:
+            from dabba.platform.services import SecretVault
+
+            vault = SecretVault()
+            if self.api_key:
+                vault.put("cli", "api_key", self.api_key)
+            for provider, value in self.api_keys.items():
+                if value:
+                    vault.put("cli", f"provider:{provider}", value)
+            payload["api_key"] = ""
+            payload["api_keys"] = {}
+            payload["secret_store"] = "encrypted"
         with open(config_path, "w") as f:
-            yaml.dump(asdict(self), f, default_flow_style=False, sort_keys=False)
+            yaml.dump(payload, f, default_flow_style=False, sort_keys=False)
+        try:
+            config_path.chmod(0o600)
+        except OSError:
+            pass
 
     def set(self, key: str, value: str) -> None:
         """

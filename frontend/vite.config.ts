@@ -23,8 +23,23 @@ export default defineConfig({
     },
     proxy: {
       '/v1': {
-        target: process.env.VITE_API_URL || 'http://localhost:8080',
+        target: process.env.VITE_API_URL || 'http://127.0.0.1:8080',
         changeOrigin: true,
+      },
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('lucide-react')) return 'lucide'
+          if (id.includes('simple-icons')) return 'simple-icons'
+          if (id.includes('/docx/')) return 'word'
+          if (id.includes('/jspdf/')) return 'pdf'
+          if (id.includes('/exceljs/')) return 'excel'
+          if (id.includes('/pptxgenjs/')) return 'powerpoint'
+        },
       },
     },
   },
