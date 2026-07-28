@@ -1025,7 +1025,10 @@ class ArtifactService:
 
     def __init__(self, store: Optional[PlatformStore] = None):
         self.store = store or get_platform_store()
-        self.root = get_platform_data_dir() / "artifacts"
+        # Keep binary artifacts alongside the SQLite store.  Using the global
+        # config directory here ignored injected/test stores and failed when
+        # that directory was read-only, even though the store itself was valid.
+        self.root = self.store.path.parent / "artifacts"
         self.root.mkdir(parents=True, exist_ok=True)
 
     def store_bytes(

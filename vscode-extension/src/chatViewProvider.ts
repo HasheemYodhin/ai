@@ -1554,7 +1554,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <div id="history-dropdown" class="hidden"></div>
     <div id="session-tabs" class="hidden" aria-hidden="true"></div>
     <div id="changed-files-bar" class="hidden"></div>
-    <div id="messages">
+    <div id="messages" role="log" aria-live="polite" aria-label="Dabba conversation" tabindex="0">
       <div id="welcome-state" class="welcome-state">
         <div class="welcome-mark" aria-hidden="true">◇</div>
         <h2>Build with Dabba</h2>
@@ -1571,14 +1571,14 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     <div id="regen-row" class="hidden">
       <button id="regenBtn" title="Discard the last response and try again">↻ Regenerate</button>
     </div>
-    <div id="status-bar" class="hidden">
+    <div id="status-bar" class="hidden" role="status" aria-live="polite">
       <span class="spinner"></span>
       <span class="status-copy"><strong id="status-phase">Working</strong><span id="status-text">Preparing request…</span></span>
       <span id="status-elapsed">0s</span>
       <span id="token-counter" class="hidden">
         <span id="token-in">↑0</span><span id="token-out">↓0</span>
       </span>
-      <button id="stopBtn" title="Stop">◼</button>
+      <button id="stopBtn" title="Stop the current request" aria-label="Stop the current request">◼ <span>Stop</span></button>
     </div>
     <div id="input-area">
       <div id="attachments-container" class="hidden"></div>
@@ -1599,7 +1599,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
         <button id="optionsBtn" class="options-btn" aria-expanded="false" aria-controls="selectors-row">Generation options</button>
       </div>
       <div id="composer">
-        <textarea id="message-input" rows="1" placeholder="Ask dabba… (@ to mention files, / for commands)"></textarea>
+        <textarea id="message-input" rows="1" aria-label="Message Dabba" aria-keyshortcuts="Enter, Shift+Enter" placeholder="Ask dabba… (@ to mention files, / for commands)"></textarea>
         <button id="micBtn" class="mic-btn" title="Voice input" aria-label="Voice input">◉</button>
         <div id="composer-toolbar">
           <div id="attach-menu-wrapper" style="position:relative;">
@@ -1631,7 +1631,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
           <button id="diffModeBtn" class="composer-icon-btn" title="View changed files" aria-label="View changed files">▱</button>
           <span id="composer-spinner" class="composer-spinner hidden"></span>
           <span id="context-chip" class="composer-chip hidden"></span>
-          <button id="permissionModeBtn" class="composer-chip permission-chip" title="Toggle approval mode">✋ Ask before edits</button>
+          <button id="permissionModeBtn" class="composer-chip permission-chip" title="Toggle approval mode" aria-pressed="false">✋ Ask before edits</button>
           <span class="composer-spacer"></span>
           <button id="sendBtn" class="composer-send" title="Send (Enter)" aria-label="Send message">↑</button>
         </div>

@@ -28,6 +28,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   const isUser = message.role === 'user'
   const isError = message.error
   const [copied, setCopied] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(message.content)
   const [isSpeaking, setIsSpeaking] = useState(false)
@@ -105,9 +106,28 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   }, [message.timestamp])
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(message.content)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    setCopyError(null)
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(message.content)
+      } else {
+        const helper = document.createElement('textarea')
+        helper.value = message.content
+        helper.style.position = 'fixed'
+        helper.style.opacity = '0'
+        document.body.appendChild(helper)
+        try {
+          helper.select()
+          if (!document.execCommand('copy')) throw new Error('Copy was not permitted')
+        } finally {
+          helper.remove()
+        }
+      }
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch (err) {
+      setCopyError((err as Error).message || 'Could not copy message')
+    }
   }
 
   const startEdit = () => {
@@ -441,7 +461,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
 
           {!isEditing && !isStreaming && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
             <div className={cn(
-              'flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity',
+              'flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity',
               isUser ? 'flex-row-reverse' : 'flex-row'
             )}>
               <button
@@ -495,6 +515,9 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
           )}
           {speakError && (
             <span className="text-[10px] text-red-500">{speakError}</span>
+          )}
+          {copyError && (
+            <span role="status" className="text-[10px] text-red-500">{copyError}</span>
           )}
         </div>
       </div>

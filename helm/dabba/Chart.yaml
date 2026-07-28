@@ -1,0 +1,13 @@
+apiVersion: v2
+name: dabba
+description: Dabba AI platform API and web application
+type: application
+version: 0.1.0
+appVersion: "0.3.6"
+home: https://github.com/hasheem/dabba
+keywords:
+  - ai
+  - fastapi
+  - chat
+maintainers:
+  - name: Dabba maintainers

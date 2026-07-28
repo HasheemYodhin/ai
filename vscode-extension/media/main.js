@@ -386,6 +386,8 @@
   function addUserMessage(text, attachments, mentions) {
     removeWelcome();
     const wrap = el('div', 'msg msg-user');
+    wrap.setAttribute('role', 'article');
+    wrap.setAttribute('aria-label', 'You');
     const bubble = el('div', 'msg-bubble');
     if (mentions && mentions.length > 0) {
       const md = el('div', 'message-mentions');
@@ -416,6 +418,8 @@
   function addAgentText(text) {
     removeWelcome();
     const wrap = el('div', 'msg msg-agent');
+    wrap.setAttribute('role', 'article');
+    wrap.setAttribute('aria-label', 'Dabba');
     const body = el('div', 'msg-body');
     body.innerHTML = renderMarkdown(text);
     wrap.appendChild(body);
@@ -563,6 +567,7 @@
 
   function addError(text, retryable) {
     const wrap = el('div', 'msg msg-error');
+    wrap.setAttribute('role', 'alert');
     wrap.appendChild(el('div','msg-bubble','⚠ '+text));
     if (retryable) {
       const retryBtn = el('button', 'msg-retry-btn', '↻ Retry');
@@ -989,9 +994,11 @@
     if (mode === 'auto') {
       permissionModeBtn.textContent = '✓ Auto-accept edits';
       permissionModeBtn.classList.add('auto-accept');
+      permissionModeBtn.setAttribute('aria-pressed', 'true');
     } else {
       permissionModeBtn.textContent = '✋ Ask before edits';
       permissionModeBtn.classList.remove('auto-accept');
+      permissionModeBtn.setAttribute('aria-pressed', 'false');
     }
   }
 
@@ -1179,6 +1186,9 @@
   mcpRefreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'reloadMcpServers' }));
 
   document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+      e.preventDefault(); inputEl.focus(); inputEl.select(); return;
+    }
     if (e.key !== 'Escape') return;
     if (!settingsOverlay.classList.contains('hidden')) { e.preventDefault(); closeSettingsPanel(); return; }
     if (!mcpOverlay.classList.contains('hidden')) { e.preventDefault(); closeMcpPanel(); return; }

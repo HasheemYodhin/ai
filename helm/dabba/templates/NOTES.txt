@@ -1,0 +1,12 @@
+Dabba has been deployed.
+
+In-cluster URL:
+  http://{{ include "dabba.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "dabba.fullname" . }}
+
+Port-forward locally:
+  kubectl -n {{ .Release.Namespace }} port-forward service/{{ include "dabba.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+
+The application health endpoints are /health and /ready.

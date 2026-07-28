@@ -229,6 +229,8 @@ export function InputArea({
   }, [value, files, isLoading, isExtractingDocuments, disabled, mode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // IME keyboards emit Enter while composing; never submit partial text.
+    if (e.nativeEvent.isComposing) return
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void handleSend()
@@ -307,7 +309,9 @@ export function InputArea({
                   {file.name}
                 </span>
                 <button
+                  type="button"
                   onClick={() => removeFile(file.id)}
+                  aria-label={`Remove ${file.name}`}
                   className="p-1 rounded hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary hover:text-red-500 transition-colors"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -361,6 +365,7 @@ export function InputArea({
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder={effectivePlaceholder}
+            aria-label={effectivePlaceholder}
             rows={1}
             disabled={disabled}
             maxLength={maxChars + 100}
@@ -378,6 +383,7 @@ export function InputArea({
               onClick={handleMicClick}
               disabled={isLoading || isExtractingDocuments || disabled || isTranscribing}
               title={isQuickRecording ? 'Stop and transcribe' : 'Voice input'}
+              aria-label={isQuickRecording ? 'Stop recording and transcribe' : 'Start voice input'}
               className={cn(
                 'flex items-center justify-center p-2 rounded-lg transition-colors disabled:opacity-40',
                 isQuickRecording
@@ -392,6 +398,7 @@ export function InputArea({
               onClick={() => setVoiceModalOpen(true)}
               disabled={isLoading || isExtractingDocuments || disabled}
               title="Voice mode"
+              aria-label="Open voice mode"
               className="flex items-center justify-center p-2 rounded-lg text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
             >
               <AudioLines className="w-4 h-4" />
@@ -402,6 +409,7 @@ export function InputArea({
                 onClick={onStop}
                 className="flex items-center gap-1.5 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors"
                 title="Stop generation"
+                aria-label="Stop generation"
               >
                 <Square className="w-4 h-4 fill-current" />
               </button>
@@ -417,6 +425,7 @@ export function InputArea({
                     : 'bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
                 )}
                 title="Send message"
+                aria-label="Send message"
               >
                 {isExtractingDocuments
                   ? <Loader2 className="w-4 h-4 animate-spin" />

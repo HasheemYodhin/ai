@@ -215,6 +215,7 @@ export function ChatWindow({
         </div>
         <button
           onClick={onClear}
+          aria-label="Clear conversation"
           className="text-xs px-3 py-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-red-500 dark:hover:text-red-400 transition-colors font-medium"
         >
           Clear Chat
@@ -242,6 +243,7 @@ export function ChatWindow({
         {showScrollBtn && (
           <button
             onClick={() => scrollToBottom(true)}
+            aria-label="Scroll to latest message"
             className={cn(
               'fixed bottom-28 left-1/2 -translate-x-1/2 p-2.5 rounded-full bg-surface dark:bg-surface-dark-tertiary',
               'border border-border dark:border-border-dark text-accent shadow-md hover:bg-surface-tertiary dark:hover:bg-surface-dark',

@@ -2,6 +2,12 @@ name: Publish Dabba Image to Docker Hub
 
 "on":
   workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker Hub tag to publish for a manual run"
+        required: false
+        default: latest
+        type: string
   push:
     tags: ["v*"]
 
@@ -24,6 +30,7 @@ jobs:
           images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/dabba
           tags: |
             type=ref,event=tag
+            type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.image_tag != '' }}
             type=sha
       - uses: docker/build-push-action@v6
         with:
