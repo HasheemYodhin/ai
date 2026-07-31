@@ -153,10 +153,20 @@ have `@vitest/coverage-v8` installed — see "Known gaps" below.
   built image): fails on any unfixed `CRITICAL` or `HIGH` finding. Add
   accepted findings with justification and a review date to `.trivyignore`
   — never a blanket ignore.
-- **Source code** (CodeQL, `codeql.yml`): findings surface in the repo's
-  Security tab; this workflow does not currently fail the build on findings
-  (CodeQL doesn't gate merges by default — pair it with a branch protection
-  rule requiring the CodeQL check if you want it to block).
+- **Source code** (CodeQL, `codeql.yml`): findings are meant to surface in
+  the repo's Security tab; this workflow does not currently fail the build
+  on findings (CodeQL doesn't gate merges by default — pair it with a branch
+  protection rule requiring the CodeQL check if you want it to block).
+  **This repository is currently private without code scanning/GitHub
+  Advanced Security enabled**, so the SARIF upload 403s with "Code scanning
+  is not enabled for this repository" — a repo Settings toggle, not
+  something a workflow file can fix. The `Perform CodeQL analysis` step uses
+  `continue-on-error: true` so that doesn't fail the job; the SARIF is still
+  produced and uploaded as a `codeql-sarif-<language>` build artifact so
+  findings aren't silently lost. Enable **Settings → Security → Code
+  security and analysis → Code scanning** (requires GitHub Advanced Security
+  for private repos, or make the repo public) to get results in the
+  Security tab automatically — no workflow change needed once that's on.
 
 ## Troubleshooting common failures
 
@@ -169,6 +179,10 @@ have `@vitest/coverage-v8` installed — see "Known gaps" below.
 | `docker-push` fails "DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN ... not set" | Add both secrets under Settings → Secrets and variables → Actions. |
 | `docker-push` never ran on a PR | By design — pushes only happen on `push` to `main` in this repository. |
 | `security` fails on `requirements.txt` pip-audit | Non-blocking by design (see policy above) — check the `::warning::` in the job log for the specific package/CVE. |
+| `pr-validation.yml`'s `secret-scan` fails with `403 Resource not accessible by integration` | `gitleaks-action` calls `GET /pulls/:number/commits`, which needs `pull-requests: read` on the job's token. Already fixed — the job now grants it explicitly. |
+| `codeql.yml` fails with `Code scanning is not enabled for this repository` | Repo-settings/GHAS gap, not a workflow bug — see the Security scan policy section above. The job stays green (`continue-on-error`) and still uploads the SARIF as an artifact. |
+| `validate-description` keeps failing on a PR's own title/body even after `pr-metadata.yml` should have fixed it | Check whether `pr-metadata.yml` has actually run at all (`gh run list` — look for a "PR Metadata Automation" entry). It uses `pull_request_target`, which GitHub always runs using the **base branch's** copy of the workflow file — a PR that introduces or changes `pr-metadata.yml` itself can't benefit from those changes (or from the workflow existing at all, the first time it's added) until merged to `main`. This is a one-time bootstrapping gap, not a bug to fix in the workflow. |
+| Every job shows a `##[warning] The process '/usr/bin/git' failed with exit code 128` / `fatal: No url found for submodule path 'llama.cpp' in .gitmodules` annotation | Pre-existing repo issue, unrelated to any specific workflow: `llama.cpp` is committed as a git **gitlink** (mode `160000`, i.e. as if it were a submodule) but there is no `.gitmodules` file defining its URL anywhere in history (`git ls-tree HEAD llama.cpp` shows the gitlink; `git log --all -- .gitmodules` is empty). `actions/checkout`'s post-job cleanup runs `git submodule foreach` and hits this on every job, on every workflow — it's a harmless warning (jobs still succeed), not a task failure, but worth a deliberate fix: either add a real `.gitmodules` entry for it, or `git rm --cached llama.cpp && git add llama.cpp` to commit it as normal files instead (recommended, since **the current setup means a fresh clone gets an empty `llama.cpp/` directory** — it isn't actually version-controlled today). Out of scope for this task since it doesn't fail any check; flagged here for a deliberate follow-up decision.
 
 ## Known gaps (not fixed by this task — out of scope for a CI setup change)
 

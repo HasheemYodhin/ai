@@ -130,6 +130,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # gitleaks-action calls GET /pulls/:number/commits to scan just the PR
+      # diff; without this the API call 403s with "Resource not accessible
+      # by integration" and the job fails before any scanning happens.
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:
