@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 def _get_logger():
     """Lazy logger to avoid importing torch through dabba.utils."""
     from dabba.utils.logging import get_logger
+
     return get_logger("dabba.cli.agent_proxy")
 
 
@@ -83,6 +84,7 @@ class AgentProxy:
         # its own background loop instead of piggybacking on whichever loop
         # is running when _get_registry() happens to be called.
         from dabba.agent.mcp_client import McpClientManager
+
         self.mcp_manager = McpClientManager()
         # Diffs from file edits this turn, queued here instead of printed
         # directly — the Textual TUI can't safely mix raw Rich console prints
@@ -104,6 +106,7 @@ class AgentProxy:
         """Get or create the ToolRegistry and register all tools."""
         from dabba.agent import ToolRegistry
         from dabba.agent.tool_schema import ToolCall as _ToolCall
+
         if not self._discovered_tools:
             self.registry = ToolRegistry()
             try:
@@ -118,6 +121,7 @@ class AgentProxy:
                 from dabba.tools.web_tools import register_web_tools
                 from dabba.tools.rag_tool import register_rag_tools
                 from dabba.tools.interaction_tools import register_interaction_tools
+
                 register_file_tools(self.registry)
                 register_shell_tools(self.registry)
                 register_code_tools(self.registry)
@@ -134,15 +138,19 @@ class AgentProxy:
 
             try:
                 from dabba.agent.mcp_client import register_mcp_tools
+
                 summary = self.mcp_manager.connect()
                 added = register_mcp_tools(self.registry, self.mcp_manager)
                 if summary["connected"]:
                     _get_logger().info(
                         "MCP servers connected: %s (%d tools registered)",
-                        summary["connected"], added,
+                        summary["connected"],
+                        added,
                     )
                 if summary["failed"]:
-                    _get_logger().warning("MCP servers failed to connect: %s", summary["failed"])
+                    _get_logger().warning(
+                        "MCP servers failed to connect: %s", summary["failed"]
+                    )
             except Exception as exc:
                 # MCP is opt-in (empty config = no-op) — a broken server or
                 # missing `mcp` package must not take down the whole agent.
@@ -177,11 +185,18 @@ class AgentProxy:
                     name = call.tool_name
                     args = call.arguments
 
-                if name in ("shell_exec", "powershell_exec") and not args.get("cwd") and getattr(self.agent_config, "workspace_root", None):
+                if (
+                    name in ("shell_exec", "powershell_exec")
+                    and not args.get("cwd")
+                    and getattr(self.agent_config, "workspace_root", None)
+                ):
                     args["cwd"] = self.agent_config.workspace_root
 
-                if self.permissions.is_dangerous_tool(name) and not self.permissions.check_tool(name, args):
+                if self.permissions.is_dangerous_tool(
+                    name
+                ) and not self.permissions.check_tool(name, args):
                     from dabba.agent.tool_schema import ToolResult as _ToolResult
+
                     return _ToolResult(
                         tool_name=name,
                         call_id=getattr(call, "call_id", ""),
@@ -202,32 +217,45 @@ class AgentProxy:
                         self.output.diff_display(diff_text)
                         # Textual TUI mode: queue for the TUI to render as a
                         # widget instead (raw console prints aren't safe there).
-                        self._pending_diffs.append({"path": args.get("path", "?"), "diff": diff_text})
-                    
+                        self._pending_diffs.append(
+                            {"path": args.get("path", "?"), "diff": diff_text}
+                        )
+
                     # Post-write verification hook
                     if getattr(result, "success", True) and args.get("path"):
                         try:
                             from pathlib import Path
+
                             path = Path(args["path"])
-                            if not path.is_absolute() and getattr(self.agent_config, "workspace_root", None):
+                            if not path.is_absolute() and getattr(
+                                self.agent_config, "workspace_root", None
+                            ):
                                 path = Path(self.agent_config.workspace_root) / path
                             if path.exists():
-                                content = path.read_text(encoding="utf-8", errors="replace")
+                                content = path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )
                                 compile_msg = ""
                                 if path.suffix == ".py":
                                     try:
                                         compile(content, str(path), "exec")
-                                        compile_msg = " (Python compilation check: PASSED)"
+                                        compile_msg = (
+                                            " (Python compilation check: PASSED)"
+                                        )
                                     except SyntaxError as e:
                                         compile_msg = f" (Python compilation check: FAILED with SyntaxError: {e})"
                                 if hasattr(result, "output"):
                                     if isinstance(result.output, dict):
-                                        result.output["verification"] = f"File exists and is readable.{compile_msg}"
+                                        result.output["verification"] = (
+                                            f"File exists and is readable.{compile_msg}"
+                                        )
                                         result.output["current_content"] = content
                                     else:
                                         result.output = f"{result.output}\n\n[Verification: File exists and is readable.{compile_msg}]\n[Current Content of {path.name}:]\n{content}"
                         except Exception as e:
-                            _get_logger().warning("Post-write verification failed: %s", e)
+                            _get_logger().warning(
+                                "Post-write verification failed: %s", e
+                            )
                     return result
 
                 return await self.registry._execute_async(call)
@@ -247,6 +275,7 @@ class AgentProxy:
         """Get or create the provider registry."""
         if not hasattr(self, "_provider_registry") or self._provider_registry is None:
             from dabba.providers.registry import ProviderRegistry
+
             self._provider_registry = ProviderRegistry(self.cli_config)
         return self._provider_registry
 
@@ -258,8 +287,12 @@ class AgentProxy:
             generation_params: Dict[str, Any],
         ) -> str:
             registry = self._get_provider_registry()
-            model  = generation_params.pop("model", None) or self.cli_config.default_model
-            effort = generation_params.pop("effort", None) or getattr(self.cli_config, "effort", "medium")
+            model = (
+                generation_params.pop("model", None) or self.cli_config.default_model
+            )
+            effort = generation_params.pop("effort", None) or getattr(
+                self.cli_config, "effort", "medium"
+            )
             return registry.chat(
                 messages,
                 model=model,
@@ -269,9 +302,12 @@ class AgentProxy:
 
         return llm_generate
 
-    def _ensure_agent_loop(self, workspace: Optional[str] = None, fresh_session: bool = False):
+    def _ensure_agent_loop(
+        self, workspace: Optional[str] = None, fresh_session: bool = False
+    ):
         """Ensure the AgentLoop is initialized, restoring any persisted context."""
         from dabba.agent import AgentLoop
+
         # Ground the model in a real absolute path instead of letting it guess
         # at "the X directory" from conversation history alone. Set on every
         # call (not just first) so it stays current even once the loop is
@@ -283,7 +319,9 @@ class AgentProxy:
                 registry=self._get_registry(),
                 config=self.agent_config,
                 llm_generate=self._build_llm_generate(),
-                context_manager=None if fresh_session else self._load_session(workspace),
+                context_manager=(
+                    None if fresh_session else self._load_session(workspace)
+                ),
             )
         return self._agent_loop
 
@@ -296,6 +334,7 @@ class AgentProxy:
         extension didn't send a workspace root (e.g. no folder open).
         """
         from pathlib import Path
+
         if workspace:
             return Path(workspace) / ".dabba" / "session.json"
         return Path.home() / ".dabba" / "session.json"
@@ -352,7 +391,9 @@ class AgentProxy:
             return None
         return self._agent_loop.context_manager.serialize()
 
-    def restore_context(self, data: Dict[str, Any], workspace: Optional[str] = None) -> None:
+    def restore_context(
+        self, data: Dict[str, Any], workspace: Optional[str] = None
+    ) -> None:
         """
         Restore a previously-checkpointed conversation context (the CLI's
         /load command) into a fresh AgentLoop, replacing whatever context
@@ -381,7 +422,9 @@ class AgentProxy:
         agent_loop = self._ensure_agent_loop()
         try:
             result = agent_loop.run(user_input)
-            response = result.get("response", "") if isinstance(result, dict) else str(result)
+            response = (
+                result.get("response", "") if isinstance(result, dict) else str(result)
+            )
             metrics = agent_loop.get_metrics()
 
             if self.cli_config.show_token_usage:
@@ -418,8 +461,14 @@ class AgentProxy:
                 content = chunk.get("content", "")
 
                 if chunk_type == "tool_call":
-                    tool_name = content.get("name", "") if isinstance(content, dict) else ""
-                    args = content.get("arguments", {}) if isinstance(content, dict) else {}
+                    tool_name = (
+                        content.get("name", "") if isinstance(content, dict) else ""
+                    )
+                    args = (
+                        content.get("arguments", {})
+                        if isinstance(content, dict)
+                        else {}
+                    )
 
                     allowed = self.permissions.check_tool(tool_name, args)
                     if not allowed:
@@ -442,7 +491,12 @@ class AgentProxy:
     def _is_simple_greeting(user_input: str) -> bool:
         """Recognize a standalone greeting before selecting a slow provider."""
         return user_input.strip().casefold() in {
-            "hi", "hi!", "hello", "hello!", "hey", "hey!",
+            "hi",
+            "hi!",
+            "hello",
+            "hello!",
+            "hey",
+            "hey!",
         }
 
     def stream_sync(self, user_input: str) -> str:
@@ -526,12 +580,17 @@ class AgentProxy:
                 arguments = tool_data.get("arguments", {})
                 allowed = self.permissions.check_tool(tool_name, arguments)
                 if not allowed:
-                    yield {"type": "tool_denied", "content": f"Tool '{tool_name}' was denied."}
+                    yield {
+                        "type": "tool_denied",
+                        "content": f"Tool '{tool_name}' was denied.",
+                    }
                     continue
 
             yield chunk
 
-    def _confirm_tool(self, tool_name: str, arguments: Optional[Dict[str, Any]]) -> bool:
+    def _confirm_tool(
+        self, tool_name: str, arguments: Optional[Dict[str, Any]]
+    ) -> bool:
         """
         Render a real y/n confirmation for a dangerous tool call.
 
@@ -563,8 +622,11 @@ class AgentProxy:
             return ""
 
         try:
-            existing = Path(path).expanduser().resolve().read_text(
-                encoding="utf-8", errors="replace"
+            existing = (
+                Path(path)
+                .expanduser()
+                .resolve()
+                .read_text(encoding="utf-8", errors="replace")
             )
         except (OSError, UnicodeDecodeError):
             existing = ""
@@ -623,7 +685,9 @@ class AgentProxy:
             try:
                 self._session_path(workspace).unlink(missing_ok=True)
             except OSError as exc:
-                _get_logger().warning("Failed to remove persisted session for %s: %s", workspace, exc)
+                _get_logger().warning(
+                    "Failed to remove persisted session for %s: %s", workspace, exc
+                )
 
     def reload_config(self) -> None:
         """Reload CLI config from disk and reinitialize agent."""

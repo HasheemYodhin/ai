@@ -119,8 +119,6 @@ def _generate_embeddings(
             pass
 
     import random
+
     rng = random.Random(42)
-    return [
-        [rng.random() for _ in range(384)]
-        for _ in texts
-    ]
+    return [[rng.random() for _ in range(384)] for _ in texts]

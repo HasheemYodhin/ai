@@ -313,7 +313,9 @@ class ScheduledSkillUpdateRequest(BaseModel):
 
 
 def _decode_base64(value: str) -> bytes:
-    encoded = value.split(",", 1)[1] if value.startswith("data:") and "," in value else value
+    encoded = (
+        value.split(",", 1)[1] if value.startswith("data:") and "," in value else value
+    )
     try:
         return base64.b64decode(encoded, validate=True)
     except (ValueError, binascii.Error) as exc:
@@ -359,8 +361,17 @@ def create_platform_router() -> APIRouter:
         if not isinstance(arguments, dict):
             return {}
         visible = (
-            "path", "file_path", "directory", "command", "query", "url",
-            "pattern", "destination", "branch", "tool", "name",
+            "path",
+            "file_path",
+            "directory",
+            "command",
+            "query",
+            "url",
+            "pattern",
+            "destination",
+            "branch",
+            "tool",
+            "name",
         )
         summary: Dict[str, str] = {}
         for key in visible:
@@ -374,7 +385,9 @@ def create_platform_router() -> APIRouter:
         task_record = tasks.get(run["taskId"])
         selected_model = task_record.get("model")
         selected_effort = task_record.get("request", {}).get("effort")
-        description = item["description"].strip() or "No additional description was supplied."
+        description = (
+            item["description"].strip() or "No additional description was supplied."
+        )
         # If this item was run before, carry the previous run's summary forward
         # so a "Continue with tools" resume builds on the prior work instead of
         # starting a fresh session that has to rediscover the workspace.
@@ -383,7 +396,8 @@ def create_platform_router() -> APIRouter:
             "\n\nThis assignment was worked on previously. Here is the summary of what was "
             "already done — continue from here, do NOT restart from scratch, and only redo "
             f"work if it is actually missing or broken:\n{prior_summary}\n"
-            if prior_summary else ""
+            if prior_summary
+            else ""
         )
         # Surface the user's checklist so the agent works through it in order.
         try:
@@ -395,10 +409,12 @@ def create_platform_router() -> APIRouter:
             "\n\nWork through this checklist in order; complete every item and note which you "
             "finished in your summary:\n"
             + "\n".join(
-                f"  [{'x' if s['status'] == 'done' else ' '}] {s['title']}" for s in subtasks
+                f"  [{'x' if s['status'] == 'done' else ' '}] {s['title']}"
+                for s in subtasks
             )
             + "\n"
-            if pending else ""
+            if pending
+            else ""
         )
         prompt = (
             "You are completing a Dabba Cowork assignment. Work autonomously and produce a concrete result.\n\n"
@@ -414,10 +430,17 @@ def create_platform_router() -> APIRouter:
             from dabba.api.agent_endpoints import _get_agent_proxy
 
             proxy = _get_agent_proxy()
-            response = proxy._get_provider_registry().chat([
-                {"role": "system", "content": "You are Dabba Cowork. Complete the assignment without calling tools."},
-                {"role": "user", "content": prompt},
-            ], model=selected_model, effort=selected_effort)
+            response = proxy._get_provider_registry().chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "You are Dabba Cowork. Complete the assignment without calling tools.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                model=selected_model,
+                effort=selected_effort,
+            )
             if str(response).lower().startswith(("i encountered an error", "error:")):
                 raise RuntimeError(str(response))
             return response
@@ -435,7 +458,9 @@ def create_platform_router() -> APIRouter:
         if selected_effort:
             proxy.cli_config.effort = selected_effort
         try:
-            loop = proxy._ensure_agent_loop(run.get("workspacePath"), fresh_session=True)
+            loop = proxy._ensure_agent_loop(
+                run.get("workspacePath"), fresh_session=True
+            )
 
             original_generate = loop.llm_generate
 
@@ -460,9 +485,12 @@ def create_platform_router() -> APIRouter:
                 if api_key:
                     priority = (
                         preferred_fallbacks.index(info.id)
-                        if info.id in preferred_fallbacks else len(preferred_fallbacks)
+                        if info.id in preferred_fallbacks
+                        else len(preferred_fallbacks)
                     )
-                    available.append((priority, info.provider != primary_provider, info.id))
+                    available.append(
+                        (priority, info.provider != primary_provider, info.id)
+                    )
             for _, _, model_id in sorted(available)[:3]:
                 fallback_models.append(model_id)
 
@@ -471,19 +499,26 @@ def create_platform_router() -> APIRouter:
                 last_error: Optional[Exception] = None
                 for index, candidate in enumerate(candidates):
                     try:
-                        return original_generate(messages, {**parameters, "model": candidate})
+                        return original_generate(
+                            messages, {**parameters, "model": candidate}
+                        )
                     except Exception as exc:
                         last_error = exc
                         if index + 1 >= len(candidates):
                             raise
                         next_model = candidates[index + 1]
                         tasks.append_event(
-                            run["taskId"], "cowork.provider.fallback",
-                            {"model": candidate, "nextModel": next_model,
-                             "error": str(exc)[:500]},
+                            run["taskId"],
+                            "cowork.provider.fallback",
+                            {
+                                "model": candidate,
+                                "nextModel": next_model,
+                                "error": str(exc)[:500],
+                            },
                         )
                         tasks.transition(
-                            run["taskId"], "running",
+                            run["taskId"],
+                            "running",
                             current_step=f"Switching model to {next_model}",
                         )
                         time.sleep(0.5)
@@ -499,15 +534,26 @@ def create_platform_router() -> APIRouter:
                 # of tools that actually changed the selected workspace this run.
                 task_text = f"{item['title']}\n{description}".lower()
                 change_request_words = (
-                    "add", "build", "continue", "create", "develop", "fix",
-                    "implement", "make", "update", "write",
+                    "add",
+                    "build",
+                    "continue",
+                    "create",
+                    "develop",
+                    "fix",
+                    "implement",
+                    "make",
+                    "update",
+                    "write",
                 )
                 requires_workspace_change = bool(run.get("workspacePath")) and any(
                     word in task_text for word in change_request_words
                 )
                 mutation_tools = {
-                    "file_write", "file_edit", "transactional_edit",
-                    "markdown_to_pdf", "markdown_to_docx",
+                    "file_write",
+                    "file_edit",
+                    "transactional_edit",
+                    "markdown_to_pdf",
+                    "markdown_to_docx",
                 }
                 successful_mutations: list[str] = []
                 successful_verifications: list[str] = []
@@ -524,27 +570,36 @@ def create_platform_router() -> APIRouter:
                         step = max(1, int(data.get("step", 1)))
                         progress = min(0.82, 0.12 + step * 0.08)
                         tasks.transition(
-                            run["taskId"], "running", progress=progress,
+                            run["taskId"],
+                            "running",
+                            progress=progress,
                             current_step=f"Agent reasoning step {step}",
                         )
                     elif kind == "text" and isinstance(data, str) and data.strip():
                         last_work_event = "text"
                         responses.append(data)
                         tasks.append_event(
-                            run["taskId"], "cowork.note",
+                            run["taskId"],
+                            "cowork.note",
                             {"content": data.strip()[:2000]},
                         )
                     elif kind == "tool_call" and isinstance(data, dict):
                         last_work_event = "tool_call"
                         tool_name = str(data.get("name") or "tool")
                         tasks.transition(
-                            run["taskId"], "running",
+                            run["taskId"],
+                            "running",
                             current_step=f"Using {tool_name}",
                         )
                         tasks.append_event(
-                            run["taskId"], "cowork.tool.started",
-                            {"tool": tool_name,
-                             "arguments": _cowork_tool_summary(data.get("arguments"))},
+                            run["taskId"],
+                            "cowork.tool.started",
+                            {
+                                "tool": tool_name,
+                                "arguments": _cowork_tool_summary(
+                                    data.get("arguments")
+                                ),
+                            },
                         )
                     elif kind == "tool_result" and isinstance(data, dict):
                         last_work_event = "tool_result"
@@ -554,30 +609,48 @@ def create_platform_router() -> APIRouter:
                         if success and tool_name in mutation_tools:
                             successful_mutations.append(tool_name)
                             last_mutation_index = event_index
-                        elif success and tool_name in {"file_read", "file_search", "code_analyze", "shell_exec"}:
+                        elif success and tool_name in {
+                            "file_read",
+                            "file_search",
+                            "code_analyze",
+                            "shell_exec",
+                        }:
                             # A successful inspection/test after the final write is
                             # the minimum evidence that the agent checked its work.
                             successful_verifications.append(tool_name)
                             last_verification_index = event_index
                         tasks.append_event(
-                            run["taskId"], "cowork.tool.finished",
-                            {"tool": tool_name, "success": success,
-                             "error": str(data.get("error") or "")[:500] or None},
+                            run["taskId"],
+                            "cowork.tool.finished",
+                            {
+                                "tool": tool_name,
+                                "success": success,
+                                "error": str(data.get("error") or "")[:500] or None,
+                            },
                         )
                         tasks.transition(
-                            run["taskId"], "running",
-                            current_step=(f"Finished {tool_name}" if success
-                                          else f"{tool_name} failed; reviewing result"),
+                            run["taskId"],
+                            "running",
+                            current_step=(
+                                f"Finished {tool_name}"
+                                if success
+                                else f"{tool_name} failed; reviewing result"
+                            ),
                         )
                     elif kind == "error":
                         raise RuntimeError(str(data or "Cowork agent failed"))
-                content = "\n\n".join(part.strip() for part in responses if part.strip())
+                content = "\n\n".join(
+                    part.strip() for part in responses if part.strip()
+                )
                 if "<tool_call>" in content.lower():
                     raise RuntimeError(
                         "The model ended with unexecuted tool calls, so Cowork did not "
                         "mark this assignment complete. Use Continue with tools to resume."
                     )
-                if last_work_event in {"tool_call", "tool_result"} and loop.get_metrics().get("step_count", 0) >= loop.config.max_steps:
+                if (
+                    last_work_event in {"tool_call", "tool_result"}
+                    and loop.get_metrics().get("step_count", 0) >= loop.config.max_steps
+                ):
                     raise RuntimeError(
                         "Cowork reached its step limit before producing a final result. "
                         "Use Continue with tools to resume from the existing files."
@@ -586,7 +659,9 @@ def create_platform_router() -> APIRouter:
                     raise RuntimeError(content)
                 if not content:
                     raise RuntimeError("Cowork ended without producing a final result")
-                has_workspace_mutation = bool(successful_mutations or proxy._pending_diffs)
+                has_workspace_mutation = bool(
+                    successful_mutations or proxy._pending_diffs
+                )
                 if requires_workspace_change and not has_workspace_mutation:
                     raise RuntimeError(
                         "Cowork did not make any successful file changes in the selected folder. "
@@ -597,7 +672,8 @@ def create_platform_router() -> APIRouter:
                     # This prevents a one-file partial attempt from being presented
                     # as a verified implementation.
                     verified_after_change = bool(successful_verifications) and (
-                        last_mutation_index < 0 or last_verification_index > last_mutation_index
+                        last_mutation_index < 0
+                        or last_verification_index > last_mutation_index
                     )
                     if not verified_after_change:
                         raise RuntimeError(
@@ -612,7 +688,9 @@ def create_platform_router() -> APIRouter:
             content = ""
             turn_prompt = prompt
             recoverable = (
-                "unexecuted tool calls", "step limit", "did not make any successful",
+                "unexecuted tool calls",
+                "step limit",
+                "did not make any successful",
                 "did not verify the changes",
             )
             for continuation in range(6):
@@ -621,14 +699,19 @@ def create_platform_router() -> APIRouter:
                     break
                 except RuntimeError as exc:
                     message = str(exc)
-                    if continuation >= 5 or not any(marker in message.lower() for marker in recoverable):
+                    if continuation >= 5 or not any(
+                        marker in message.lower() for marker in recoverable
+                    ):
                         raise
                     tasks.append_event(
-                        run["taskId"], "cowork.continuation",
+                        run["taskId"],
+                        "cowork.continuation",
                         {"attempt": continuation + 1, "reason": message[:500]},
                     )
                     tasks.transition(
-                        run["taskId"], "running", progress=min(0.9, 0.72 + continuation * 0.03),
+                        run["taskId"],
+                        "running",
+                        progress=min(0.9, 0.72 + continuation * 0.03),
                         current_step=f"Continuing implementation (turn {continuation + 2}/6)",
                     )
                     turn_prompt = (
@@ -642,9 +725,13 @@ def create_platform_router() -> APIRouter:
             return {
                 "content": content,
                 "toolCallCount": metrics.get("tool_call_count", 0),
-                "changedFiles": list(dict.fromkeys(
-                    diff.get("path", "") for diff in proxy._pending_diffs if diff.get("path")
-                )),
+                "changedFiles": list(
+                    dict.fromkeys(
+                        diff.get("path", "")
+                        for diff in proxy._pending_diffs
+                        if diff.get("path")
+                    )
+                ),
             }
         finally:
             proxy.close()
@@ -653,19 +740,29 @@ def create_platform_router() -> APIRouter:
         from dabba.api.agent_endpoints import _get_agent_proxy
 
         proxy = _get_agent_proxy()
-        return proxy._get_provider_registry().chat([
-            {"role": "system", "content": instructions},
-            {"role": "user", "content": "Run this scheduled skill now and return its result."},
-        ])
+        return proxy._get_provider_registry().chat(
+            [
+                {"role": "system", "content": instructions},
+                {
+                    "role": "user",
+                    "content": "Run this scheduled skill now and return its result.",
+                },
+            ]
+        )
 
     async def scheduler_loop() -> None:
         while True:
             try:
                 due_runs = await asyncio.to_thread(scheduled_skills.dispatch_due)
                 for run in due_runs:
-                    launch(asyncio.to_thread(
-                        scheduled_skills.execute, run["id"], run["userId"], execute_skill
-                    ))
+                    launch(
+                        asyncio.to_thread(
+                            scheduled_skills.execute,
+                            run["id"],
+                            run["userId"],
+                            execute_skill,
+                        )
+                    )
             except Exception:
                 # Individual dispatch failures are retained by the durable task layer;
                 # the scheduler itself must stay alive for later schedules.
@@ -673,9 +770,14 @@ def create_platform_router() -> APIRouter:
             try:
                 due_cowork = await asyncio.to_thread(cowork.dispatch_due_schedules)
                 for run in due_cowork:
-                    launch(asyncio.to_thread(
-                        cowork.execute, run["id"], run["userId"], execute_cowork_item
-                    ))
+                    launch(
+                        asyncio.to_thread(
+                            cowork.execute,
+                            run["id"],
+                            run["userId"],
+                            execute_cowork_item,
+                        )
+                    )
             except Exception:
                 pass
             await asyncio.sleep(30)
@@ -760,89 +862,120 @@ def create_platform_router() -> APIRouter:
     ):
         user = current_user(authorization)
         try:
-            return cowork.create(user["id"], body.title, description=body.description,
-                status=body.status, priority=body.priority, assignee=body.assignee,
-                due_at=body.dueAt, tags=body.tags, conversation_id=body.conversationId)
+            return cowork.create(
+                user["id"],
+                body.title,
+                description=body.description,
+                status=body.status,
+                priority=body.priority,
+                assignee=body.assignee,
+                due_at=body.dueAt,
+                tags=body.tags,
+                conversation_id=body.conversationId,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/cowork/items/{item_id}")
     async def update_cowork_item(
-        item_id: str, body: CoworkUpdateRequest,
+        item_id: str,
+        body: CoworkUpdateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return cowork.update(item_id, user["id"], body.model_dump(exclude_unset=True))
+            return cowork.update(
+                item_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.delete("/cowork/items/{item_id}", status_code=204)
     async def delete_cowork_item(
-        item_id: str, authorization: Optional[str] = Header(default=None),
+        item_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             cowork.delete(item_id, user["id"])
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.get("/cowork/items/{item_id}/activity")
     async def cowork_item_activity(
-        item_id: str, authorization: Optional[str] = Header(default=None),
+        item_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return {"activity": cowork.activity(item_id, user["id"])}
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
 
     @router.get("/cowork/items/{item_id}/runs")
     async def cowork_item_runs(
-        item_id: str, limit: int = 50,
+        item_id: str,
+        limit: int = 50,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return {"runs": cowork.runs(item_id, user["id"], limit)}
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
 
     @router.get("/cowork/items/{item_id}/subtasks")
     async def list_cowork_subtasks(
-        item_id: str, authorization: Optional[str] = Header(default=None),
+        item_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return {"subtasks": cowork.list_subtasks(item_id, user["id"])}
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
 
     @router.post("/cowork/items/{item_id}/subtasks", status_code=201)
     async def add_cowork_subtask(
-        item_id: str, body: CoworkSubtaskCreateRequest,
+        item_id: str,
+        body: CoworkSubtaskCreateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return cowork.add_subtask(item_id, user["id"], body.title)
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/cowork/subtasks/{subtask_id}")
     async def update_cowork_subtask(
-        subtask_id: str, body: CoworkSubtaskUpdateRequest,
+        subtask_id: str,
+        body: CoworkSubtaskUpdateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return cowork.update_subtask(subtask_id, user["id"], body.model_dump(exclude_unset=True))
+            return cowork.update_subtask(
+                subtask_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Subtask not found") from exc
         except ValueError as exc:
@@ -850,7 +983,8 @@ def create_platform_router() -> APIRouter:
 
     @router.delete("/cowork/subtasks/{subtask_id}", status_code=204)
     async def delete_cowork_subtask(
-        subtask_id: str, authorization: Optional[str] = Header(default=None),
+        subtask_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
@@ -860,40 +994,56 @@ def create_platform_router() -> APIRouter:
 
     @router.get("/cowork/items/{item_id}/schedules")
     async def list_cowork_schedules(
-        item_id: str, authorization: Optional[str] = Header(default=None),
+        item_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return {"schedules": cowork.list_schedules(item_id, user["id"])}
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
 
     @router.post("/cowork/items/{item_id}/schedules", status_code=201)
     async def create_cowork_schedule(
-        item_id: str, body: CoworkScheduleCreateRequest,
+        item_id: str,
+        body: CoworkScheduleCreateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return cowork.create_schedule(
-                item_id, user["id"], cadence=body.cadence, interval_minutes=body.intervalMinutes,
-                time_of_day=body.timeOfDay, weekdays=body.weekdays, mode=body.mode,
-                workspace_path=body.workspacePath, model=body.model, effort=body.effort,
+                item_id,
+                user["id"],
+                cadence=body.cadence,
+                interval_minutes=body.intervalMinutes,
+                time_of_day=body.timeOfDay,
+                weekdays=body.weekdays,
+                mode=body.mode,
+                workspace_path=body.workspacePath,
+                model=body.model,
+                effort=body.effort,
                 enabled=body.enabled,
             )
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/cowork/schedules/{schedule_id}")
     async def update_cowork_schedule(
-        schedule_id: str, body: CoworkScheduleUpdateRequest,
+        schedule_id: str,
+        body: CoworkScheduleUpdateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return cowork.update_schedule(schedule_id, user["id"], body.model_dump(exclude_unset=True))
+            return cowork.update_schedule(
+                schedule_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
         except ValueError as exc:
@@ -901,7 +1051,8 @@ def create_platform_router() -> APIRouter:
 
     @router.delete("/cowork/schedules/{schedule_id}", status_code=204)
     async def delete_cowork_schedule(
-        schedule_id: str, authorization: Optional[str] = Header(default=None),
+        schedule_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
@@ -911,26 +1062,37 @@ def create_platform_router() -> APIRouter:
 
     @router.post("/cowork/items/{item_id}/runs", status_code=202)
     async def run_cowork_item(
-        item_id: str, body: CoworkRunRequest,
+        item_id: str,
+        body: CoworkRunRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            run = cowork.dispatch(item_id, user["id"], mode=body.mode,
-                                  workspace_path=body.workspacePath, model=body.model,
-                                  effort=body.effort)
-            launch(asyncio.to_thread(
-                cowork.execute, run["id"], user["id"], execute_cowork_item
-            ))
+            run = cowork.dispatch(
+                item_id,
+                user["id"],
+                mode=body.mode,
+                workspace_path=body.workspacePath,
+                model=body.model,
+                effort=body.effort,
+            )
+            launch(
+                asyncio.to_thread(
+                    cowork.execute, run["id"], user["id"], execute_cowork_item
+                )
+            )
             return run
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Cowork item not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Cowork item not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @router.post("/cowork/runs/{run_id}/cancel")
     async def cancel_cowork_run(
-        run_id: str, authorization: Optional[str] = Header(default=None),
+        run_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
@@ -938,7 +1100,9 @@ def create_platform_router() -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Cowork run not found") from exc
 
-    def run_agent_definition(definition: Dict[str, Any], prompt: str, workspace_path: Optional[str] = None) -> str:
+    def run_agent_definition(
+        definition: Dict[str, Any], prompt: str, workspace_path: Optional[str] = None
+    ) -> str:
         """
         Execute one prompt against a named subagent type: a fresh AgentProxy
         scoped to that definition's system prompt, tool allowlist, and model —
@@ -960,7 +1124,9 @@ def create_platform_router() -> APIRouter:
         try:
             loop = proxy._ensure_agent_loop(workspace_path, fresh_session=True)
             result = loop.run(prompt, system_prompt=definition["systemPrompt"])
-            return result.get("response", "") if isinstance(result, dict) else str(result)
+            return (
+                result.get("response", "") if isinstance(result, dict) else str(result)
+            )
         finally:
             proxy.close()
 
@@ -971,24 +1137,32 @@ def create_platform_router() -> APIRouter:
 
     @router.post("/skills", status_code=201)
     async def create_skill_package(
-        body: SkillPackageCreateRequest, authorization: Optional[str] = Header(default=None),
+        body: SkillPackageCreateRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return skill_packages.create(
-                user["id"], body.name, body.instructions,
-                description=body.description, script=body.script,
+                user["id"],
+                body.name,
+                body.instructions,
+                description=body.description,
+                script=body.script,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/skills/{skill_id}")
     async def update_skill_package(
-        skill_id: str, body: SkillPackageUpdateRequest, authorization: Optional[str] = Header(default=None),
+        skill_id: str,
+        body: SkillPackageUpdateRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return skill_packages.update(skill_id, user["id"], body.model_dump(exclude_unset=True))
+            return skill_packages.update(
+                skill_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Skill not found") from exc
         except ValueError as exc:
@@ -996,7 +1170,8 @@ def create_platform_router() -> APIRouter:
 
     @router.delete("/skills/{skill_id}", status_code=204)
     async def delete_skill_package(
-        skill_id: str, authorization: Optional[str] = Header(default=None),
+        skill_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
@@ -1006,7 +1181,8 @@ def create_platform_router() -> APIRouter:
 
     @router.post("/skills/match")
     async def match_skill_package(
-        body: SkillMatchRequest, authorization: Optional[str] = Header(default=None),
+        body: SkillMatchRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         """
         Best-matching skill for a free-text message, by relevance — lets the
@@ -1018,49 +1194,66 @@ def create_platform_router() -> APIRouter:
         return {"skill": skill_packages.find_matching(user["id"], body.message)}
 
     @router.get("/agent-definitions")
-    async def list_agent_definitions(authorization: Optional[str] = Header(default=None)):
+    async def list_agent_definitions(
+        authorization: Optional[str] = Header(default=None),
+    ):
         user = current_user(authorization)
         return {"definitions": agent_definitions.list(user["id"])}
 
     @router.post("/agent-definitions", status_code=201)
     async def create_agent_definition(
-        body: AgentDefinitionCreateRequest, authorization: Optional[str] = Header(default=None),
+        body: AgentDefinitionCreateRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             return agent_definitions.create(
-                user["id"], body.name, body.systemPrompt, description=body.description,
-                allowed_tools=body.allowedTools, model=body.model, effort=body.effort,
+                user["id"],
+                body.name,
+                body.systemPrompt,
+                description=body.description,
+                allowed_tools=body.allowedTools,
+                model=body.model,
+                effort=body.effort,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/agent-definitions/{definition_id}")
     async def update_agent_definition(
-        definition_id: str, body: AgentDefinitionUpdateRequest,
+        definition_id: str,
+        body: AgentDefinitionUpdateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return agent_definitions.update(definition_id, user["id"], body.model_dump(exclude_unset=True))
+            return agent_definitions.update(
+                definition_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Agent definition not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Agent definition not found"
+            ) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.delete("/agent-definitions/{definition_id}", status_code=204)
     async def delete_agent_definition(
-        definition_id: str, authorization: Optional[str] = Header(default=None),
+        definition_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             agent_definitions.delete(definition_id, user["id"])
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Agent definition not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Agent definition not found"
+            ) from exc
 
     @router.post("/agent-definitions/dispatch")
     async def dispatch_agent_definitions(
-        body: AgentDefinitionDispatchRequest, authorization: Optional[str] = Header(default=None),
+        body: AgentDefinitionDispatchRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         """
         Fan out prompts to multiple named subagent types in parallel and wait
@@ -1071,15 +1264,21 @@ def create_platform_router() -> APIRouter:
         try:
             return await asyncio.to_thread(
                 agent_definitions.dispatch_parallel,
-                body.assignments, user["id"],
-                lambda definition, prompt: run_agent_definition(definition, prompt, body.workspacePath),
+                body.assignments,
+                user["id"],
+                lambda definition, prompt: run_agent_definition(
+                    definition, prompt, body.workspacePath
+                ),
             )
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"Unknown agent definition: {exc}") from exc
+            raise HTTPException(
+                status_code=404, detail=f"Unknown agent definition: {exc}"
+            ) from exc
 
     @router.post("/agent-definitions/pipeline")
     async def run_agent_definition_pipeline(
-        body: AgentDefinitionPipelineRequest, authorization: Optional[str] = Header(default=None),
+        body: AgentDefinitionPipelineRequest,
+        authorization: Optional[str] = Header(default=None),
     ):
         """
         Run named subagent types as a sequential pipeline — each stage's
@@ -1093,12 +1292,14 @@ def create_platform_router() -> APIRouter:
         stages = []
         for stage in body.stages:
             definition = agent_definitions.get(stage.definitionId, user["id"])
-            stages.append({
-                "role": definition["name"],
-                "prompt_template": stage.promptTemplate,
-                "output_schema": stage.outputSchema,
-                "_definition": definition,
-            })
+            stages.append(
+                {
+                    "role": definition["name"],
+                    "prompt_template": stage.promptTemplate,
+                    "output_schema": stage.outputSchema,
+                    "_definition": definition,
+                }
+            )
 
         def runner(role: str, prompt: str) -> Any:
             definition = next(s["_definition"] for s in stages if s["role"] == role)
@@ -1109,14 +1310,21 @@ def create_platform_router() -> APIRouter:
                 {k: v for k, v in s.items() if k != "_definition"} for s in stages
             ]
             results = await asyncio.to_thread(
-                SubagentCoordinator().pipeline, plain_stages, runner, initial_input=body.initialInput,
+                SubagentCoordinator().pipeline,
+                plain_stages,
+                runner,
+                initial_input=body.initialInput,
             )
             return {"results": results}
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail=f"Unknown agent definition: {exc}") from exc
+            raise HTTPException(
+                status_code=404, detail=f"Unknown agent definition: {exc}"
+            ) from exc
 
     @router.get("/scheduled-skills")
-    async def list_scheduled_skills(authorization: Optional[str] = Header(default=None)):
+    async def list_scheduled_skills(
+        authorization: Optional[str] = Header(default=None),
+    ):
         user = current_user(authorization)
         return {"schedules": scheduled_skills.list(user["id"])}
 
@@ -1127,21 +1335,32 @@ def create_platform_router() -> APIRouter:
     ):
         user = current_user(authorization)
         try:
-            return scheduled_skills.create(user["id"], body.name, body.skillName,
-                body.instructions, cadence=body.cadence,
-                interval_minutes=body.intervalMinutes, time_of_day=body.timeOfDay,
-                weekdays=body.weekdays, enabled=body.enabled, next_run_at=body.nextRunAt)
+            return scheduled_skills.create(
+                user["id"],
+                body.name,
+                body.skillName,
+                body.instructions,
+                cadence=body.cadence,
+                interval_minutes=body.intervalMinutes,
+                time_of_day=body.timeOfDay,
+                weekdays=body.weekdays,
+                enabled=body.enabled,
+                next_run_at=body.nextRunAt,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.patch("/scheduled-skills/{schedule_id}")
     async def update_scheduled_skill(
-        schedule_id: str, body: ScheduledSkillUpdateRequest,
+        schedule_id: str,
+        body: ScheduledSkillUpdateRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return scheduled_skills.update(schedule_id, user["id"], body.model_dump(exclude_unset=True))
+            return scheduled_skills.update(
+                schedule_id, user["id"], body.model_dump(exclude_unset=True)
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
         except ValueError as exc:
@@ -1149,7 +1368,8 @@ def create_platform_router() -> APIRouter:
 
     @router.delete("/scheduled-skills/{schedule_id}", status_code=204)
     async def delete_scheduled_skill(
-        schedule_id: str, authorization: Optional[str] = Header(default=None),
+        schedule_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
@@ -1159,26 +1379,34 @@ def create_platform_router() -> APIRouter:
 
     @router.post("/scheduled-skills/{schedule_id}/run", status_code=202)
     async def run_scheduled_skill(
-        schedule_id: str, authorization: Optional[str] = Header(default=None),
+        schedule_id: str,
+        authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
             run = scheduled_skills.dispatch(schedule_id, user["id"])
-            launch(asyncio.to_thread(
-                scheduled_skills.execute, run["id"], user["id"], execute_skill
-            ))
+            launch(
+                asyncio.to_thread(
+                    scheduled_skills.execute, run["id"], user["id"], execute_skill
+                )
+            )
             return run
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
 
     @router.get("/scheduled-skills/runs")
     async def list_scheduled_skill_runs(
-        scheduleId: Optional[str] = None, limit: int = 50,
+        scheduleId: Optional[str] = None,
+        limit: int = 50,
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
         try:
-            return {"runs": scheduled_skills.runs(user["id"], scheduleId, max(1, min(limit, 200)))}
+            return {
+                "runs": scheduled_skills.runs(
+                    user["id"], scheduleId, max(1, min(limit, 200))
+                )
+            }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
 
@@ -1325,7 +1553,9 @@ def create_platform_router() -> APIRouter:
     ):
         user = current_user(authorization)
         try:
-            return workspaces.register(body.rootPath, name=body.name, user_id=user["id"])
+            return workspaces.register(
+                body.rootPath, name=body.name, user_id=user["id"]
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1426,7 +1656,9 @@ def create_platform_router() -> APIRouter:
             or approval["action"] != "worktree_create"
             or approval["status"] != "approved"
         ):
-            raise HTTPException(status_code=403, detail="An approved worktree_create action is required")
+            raise HTTPException(
+                status_code=403, detail="An approved worktree_create action is required"
+            )
         return worktrees.create(workspace["rootPath"], body.destination, body.branch)
 
     @router.post("/browser/inspect")
@@ -1436,8 +1668,12 @@ def create_platform_router() -> APIRouter:
     ):
         user = current_user(authorization)
         if not body.url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Browser URL must use http or https")
-        screenshot = artifacts.root / "browser-runs" / f"{user['id']}-{len(body.url)}.png"
+            raise HTTPException(
+                status_code=400, detail="Browser URL must use http or https"
+            )
+        screenshot = (
+            artifacts.root / "browser-runs" / f"{user['id']}-{len(body.url)}.png"
+        )
         try:
             result = browser.inspect(body.url, str(screenshot))
         except RuntimeError as exc:
@@ -1512,7 +1748,8 @@ def create_platform_router() -> APIRouter:
 
     @router.post("/artifacts/{artifact_id}/publish", status_code=201)
     async def publish_artifact(
-        artifact_id: str, body: ArtifactPublishRequest,
+        artifact_id: str,
+        body: ArtifactPublishRequest,
         authorization: Optional[str] = Header(default=None),
     ):
         """Mint a public, unauthenticated share URL for an artifact you own."""
@@ -1523,20 +1760,29 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Artifact not found") from exc
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
-        return {**published, "url": f"/v1/platform/public/artifacts/{published['slug']}"}
+        return {
+            **published,
+            "url": f"/v1/platform/public/artifacts/{published['slug']}",
+        }
 
     @router.get("/artifacts/published")
-    async def list_published_artifacts(authorization: Optional[str] = Header(default=None)):
+    async def list_published_artifacts(
+        authorization: Optional[str] = Header(default=None),
+    ):
         user = current_user(authorization)
         return {"published": artifacts.list_published(user["id"])}
 
     @router.delete("/artifacts/publish/{slug}", status_code=204)
-    async def unpublish_artifact(slug: str, authorization: Optional[str] = Header(default=None)):
+    async def unpublish_artifact(
+        slug: str, authorization: Optional[str] = Header(default=None)
+    ):
         user = current_user(authorization)
         try:
             artifacts.unpublish(slug, user["id"])
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="Published artifact not found") from exc
+            raise HTTPException(
+                status_code=404, detail="Published artifact not found"
+            ) from exc
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
 
@@ -1550,7 +1796,10 @@ def create_platform_router() -> APIRouter:
         try:
             published = artifacts.get_published(slug)
         except KeyError as exc:
-            raise HTTPException(status_code=404, detail="This link doesn't point to a published artifact") from exc
+            raise HTTPException(
+                status_code=404,
+                detail="This link doesn't point to a published artifact",
+            ) from exc
         artifact = published["artifact"]
         return FileResponse(artifact["path"], media_type=artifact["mediaType"])
 
@@ -1591,7 +1840,9 @@ def create_platform_router() -> APIRouter:
         }
 
     @router.delete("/memory/{memory_id}", status_code=204)
-    async def delete_memory(memory_id: str, authorization: Optional[str] = Header(default=None)):
+    async def delete_memory(
+        memory_id: str, authorization: Optional[str] = Header(default=None)
+    ):
         user = current_user(authorization)
         try:
             memory.delete(memory_id, user["id"])

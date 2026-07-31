@@ -10,7 +10,13 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from dabba.platform.core import PlatformStore, get_platform_store, json_dumps, json_loads, utc_ms
+from dabba.platform.core import (
+    PlatformStore,
+    get_platform_store,
+    json_dumps,
+    json_loads,
+    utc_ms,
+)
 
 
 class CodeIndexService:
@@ -36,7 +42,9 @@ class CodeIndexService:
                 continue
         now = utc_ms()
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM code_symbols WHERE workspace_id=?", (workspace_id,))
+            conn.execute(
+                "DELETE FROM code_symbols WHERE workspace_id=?", (workspace_id,)
+            )
             conn.executemany(
                 """
                 INSERT INTO code_symbols
@@ -66,7 +74,9 @@ class CodeIndexService:
             "indexedAt": now,
         }
 
-    def search(self, workspace_id: str, query: str, limit: int = 50) -> list[Dict[str, Any]]:
+    def search(
+        self, workspace_id: str, query: str, limit: int = 50
+    ) -> list[Dict[str, Any]]:
         rows = self.store.fetchall(
             """
             SELECT * FROM code_symbols
@@ -103,7 +113,9 @@ class CodeIndexService:
                     dependencies.append(node.module or "")
             records = []
             for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if isinstance(
+                    node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+                ):
                     kind = "class" if isinstance(node, ast.ClassDef) else "function"
                     records.append(
                         {
@@ -112,9 +124,11 @@ class CodeIndexService:
                             "symbol": node.name,
                             "kind": kind,
                             "line": node.lineno,
-                            "signature": ast.get_source_segment(text, node).splitlines()[0][:300]
-                            if ast.get_source_segment(text, node)
-                            else None,
+                            "signature": (
+                                ast.get_source_segment(text, node).splitlines()[0][:300]
+                                if ast.get_source_segment(text, node)
+                                else None
+                            ),
                             "dependencies": dependencies,
                         }
                     )
@@ -150,16 +164,25 @@ class VerificationService:
         path = Path(root)
         commands: list[tuple[str, list[str]]] = []
         if (path / "frontend" / "package.json").exists():
-            commands.extend([
-                ("frontend-build", ["npm", "run", "build", "--prefix", "frontend"]),
-                ("frontend-lint", ["npm", "run", "lint", "--prefix", "frontend"]),
-            ])
+            commands.extend(
+                [
+                    ("frontend-build", ["npm", "run", "build", "--prefix", "frontend"]),
+                    ("frontend-lint", ["npm", "run", "lint", "--prefix", "frontend"]),
+                ]
+            )
         elif (path / "package.json").exists():
-            commands.extend([("build", ["npm", "run", "build"]), ("test", ["npm", "test", "--", "--run"])])
+            commands.extend(
+                [
+                    ("build", ["npm", "run", "build"]),
+                    ("test", ["npm", "test", "--", "--run"]),
+                ]
+            )
         if any(path.glob("**/test_*.py")):
             commands.append(("python-tests", ["python3", "-m", "pytest", "-q"]))
         if (path / "Cargo.toml").exists():
-            commands.extend([("cargo-check", ["cargo", "check"]), ("cargo-test", ["cargo", "test"])])
+            commands.extend(
+                [("cargo-check", ["cargo", "check"]), ("cargo-test", ["cargo", "test"])]
+            )
         if (path / "go.mod").exists():
             commands.append(("go-test", ["go", "test", "./..."]))
         return commands
@@ -198,7 +221,10 @@ class VerificationService:
                         "success": False,
                     }
                 )
-        return {"success": bool(results) and all(item["success"] for item in results), "results": results}
+        return {
+            "success": bool(results) and all(item["success"] for item in results),
+            "results": results,
+        }
 
 
 class WorktreeService:
@@ -328,8 +354,13 @@ def validate_json_schema(data: Any, schema: Dict[str, Any]) -> None:
 
 
 _TYPE_MAP = {
-    "object": dict, "array": list, "string": str,
-    "number": (int, float), "integer": int, "boolean": bool, "null": type(None),
+    "object": dict,
+    "array": list,
+    "string": str,
+    "number": (int, float),
+    "integer": int,
+    "boolean": bool,
+    "null": type(None),
 }
 
 
@@ -338,14 +369,18 @@ def _validate_node(data: Any, schema: Dict[str, Any], path: str) -> None:
     if expected is not None:
         py_type = _TYPE_MAP.get(expected)
         if py_type is not None and not isinstance(data, py_type):
-            raise SchemaValidationError(f"{path}: expected type '{expected}', got {type(data).__name__}")
+            raise SchemaValidationError(
+                f"{path}: expected type '{expected}', got {type(data).__name__}"
+            )
 
     if expected == "object" or (expected is None and isinstance(data, dict)):
         if not isinstance(data, dict):
             return
         for required_key in schema.get("required", []):
             if required_key not in data:
-                raise SchemaValidationError(f"{path}: missing required property '{required_key}'")
+                raise SchemaValidationError(
+                    f"{path}: missing required property '{required_key}'"
+                )
         properties = schema.get("properties", {})
         for key, subschema in properties.items():
             if key in data:
@@ -377,9 +412,11 @@ class BrowserAutomation:
             page = browser.new_page(viewport={"width": 1440, "height": 1000})
             page.on(
                 "console",
-                lambda message: console_errors.append(message.text)
-                if message.type == "error"
-                else None,
+                lambda message: (
+                    console_errors.append(message.text)
+                    if message.type == "error"
+                    else None
+                ),
             )
             page.on(
                 "requestfailed",

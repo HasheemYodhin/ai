@@ -42,6 +42,7 @@ class QuantizationType(Enum):
         WEIGHT_FP4: Weight-only FP4 quantization (grouped).
         WEIGHT_FP8: Weight-only FP8 quantization.
     """
+
     DYNAMIC_INT8_PER_TENSOR = "dynamic_int8_per_tensor"
     DYNAMIC_INT8_PER_CHANNEL = "dynamic_int8_per_channel"
     WEIGHT_INT8 = "weight_int8"
@@ -82,6 +83,7 @@ class QuantizationReport:
         layer_reports: Per-layer quantization details.
         config_snapshot: Model configuration.
     """
+
     quantization_type: str = ""
     original_model_size_mb: float = 0.0
     quantized_model_size_mb: float = 0.0
@@ -96,7 +98,9 @@ class QuantizationReport:
     original_peak_memory_mb: float = 0.0
     quantized_peak_memory_mb: float = 0.0
     layer_reports: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(default_factory=dict)
+    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(
+        default_factory=dict
+    )
 
 
 class _QuantizedLinear(nn.Module):
@@ -136,7 +140,14 @@ class _QuantizedLinear(nn.Module):
         )
         self.register_buffer(
             "_scale",
-            torch.zeros(1 if quant_type == QuantizationType.DYNAMIC_INT8_PER_TENSOR else out_features, 1),
+            torch.zeros(
+                (
+                    1
+                    if quant_type == QuantizationType.DYNAMIC_INT8_PER_TENSOR
+                    else out_features
+                ),
+                1,
+            ),
         )
 
         if bias:
@@ -144,7 +155,9 @@ class _QuantizedLinear(nn.Module):
         else:
             self._bias = None
 
-    def quantize_(self, weight: torch.Tensor, bias: Optional[torch.Tensor] = None) -> None:
+    def quantize_(
+        self, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
+    ) -> None:
         """
         Quantize the given weight tensor.
 
@@ -154,14 +167,10 @@ class _QuantizedLinear(nn.Module):
         """
         if self.quant_type == QuantizationType.DYNAMIC_INT8_PER_TENSOR:
             scale = weight.abs().max() / 127.0
-            self._scale = nn.Parameter(
-                scale.view(1, 1), requires_grad=False
-            )
+            self._scale = nn.Parameter(scale.view(1, 1), requires_grad=False)
         else:  # Per-channel
             scale = weight.abs().amax(dim=1, keepdim=True) / 127.0
-            self._scale = nn.Parameter(
-                scale, requires_grad=False
-            )
+            self._scale = nn.Parameter(scale, requires_grad=False)
 
         self._qweight = nn.Parameter(
             (weight / self._scale).round().clamp(-127, 127).to(torch.int8),
@@ -254,7 +263,9 @@ class _WeightOnlyQuantizedLinear(nn.Module):
         else:
             self._bias = None
 
-    def quantize_(self, weight: torch.Tensor, bias: Optional[torch.Tensor] = None) -> None:
+    def quantize_(
+        self, weight: torch.Tensor, bias: Optional[torch.Tensor] = None
+    ) -> None:
         """
         Quantize the given weight tensor.
 
@@ -283,7 +294,9 @@ class _WeightOnlyQuantizedLinear(nn.Module):
             # INT8: simple rounding
             w_q = (w_normalized * 127).round().clamp(-127, 127).to(torch.int8)
             qshape = (out_features, (in_features * self._bits + 7) // 8)
-            self._qweight = nn.Parameter(w_q.view(*qshape).to(torch.uint8), requires_grad=False)
+            self._qweight = nn.Parameter(
+                w_q.view(*qshape).to(torch.uint8), requires_grad=False
+            )
 
         self._scale = nn.Parameter(scale.squeeze(-1), requires_grad=False)
 
@@ -305,7 +318,9 @@ class _WeightOnlyQuantizedLinear(nn.Module):
             Output tensor of shape (..., out_features).
         """
         if not self._is_quantized:
-            raise RuntimeError("Weight-only quantized layer has not been quantized yet.")
+            raise RuntimeError(
+                "Weight-only quantized layer has not been quantized yet."
+            )
         weight = self._dequantize_weight(x.dtype)
         return F.linear(x, weight, self._bias)
 
@@ -331,7 +346,9 @@ class _WeightOnlyQuantizedLinear(nn.Module):
             # Handle negative values (symmetric 4-bit: -7 to 7)
             w_lo = torch.where(w_lo > 7, w_lo - 16, w_lo)
             w_hi = torch.where(w_hi > 7, w_hi - 16, w_hi)
-            w_4bit = torch.stack([w_lo, w_hi], dim=-1).view(out_features, -1)[:, :self.in_features]
+            w_4bit = torch.stack([w_lo, w_hi], dim=-1).view(out_features, -1)[
+                :, : self.in_features
+            ]
             weight = w_4bit.float() / 7.0
         else:
             weight = self._qweight.float() / 127.0
@@ -520,7 +537,8 @@ class Quantizer:
 
         if eval_input_ids is None:
             eval_input_ids = torch.randint(
-                0, self.model.config.vocab_size - 1,
+                0,
+                self.model.config.vocab_size - 1,
                 (batch_size, seq_length),
                 device=self.device,
             )
@@ -559,15 +577,20 @@ class Quantizer:
         report.original_speed_tps = orig_tokens_per_sec
 
         if self._cuda:
-            report.original_peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            report.original_peak_memory_mb = torch.cuda.max_memory_allocated() / (
+                1024**2
+            )
 
         # Quantize
         quantized_model = self.quantize(quant_type, verbose=verbose)
         report.quantized_model_size_mb = self._get_model_size_mb(quantized_model)
-        report.size_reduction_mb = report.original_model_size_mb - report.quantized_model_size_mb
+        report.size_reduction_mb = (
+            report.original_model_size_mb - report.quantized_model_size_mb
+        )
         report.size_reduction_pct = (
             (report.size_reduction_mb / report.original_model_size_mb) * 100
-            if report.original_model_size_mb > 0 else 0
+            if report.original_model_size_mb > 0
+            else 0
         )
 
         # Speed measurement (quantized)
@@ -598,12 +621,12 @@ class Quantizer:
         report.quantized_speed_tps = quant_tokens_per_sec
 
         if avg_quant_time > 0:
-            report.speedup_pct = (
-                (avg_orig_time - avg_quant_time) / avg_quant_time * 100
-            )
+            report.speedup_pct = (avg_orig_time - avg_quant_time) / avg_quant_time * 100
 
         if self._cuda:
-            report.quantized_peak_memory_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            report.quantized_peak_memory_mb = torch.cuda.max_memory_allocated() / (
+                1024**2
+            )
 
         # Per-layer reports
         for name, module in quantized_model.named_modules():
@@ -611,10 +634,13 @@ class Quantizer:
                 report.layer_reports[name] = {
                     "original_bytes": module.original_size_bytes,
                     "quantized_bytes": module.quantized_size_bytes,
-                    "saved_bytes": module.original_size_bytes - module.quantized_size_bytes,
+                    "saved_bytes": module.original_size_bytes
+                    - module.quantized_size_bytes,
                     "saved_pct": (
-                        (1 - module.quantized_size_bytes / module.original_size_bytes) * 100
-                        if module.original_size_bytes > 0 else 0
+                        (1 - module.quantized_size_bytes / module.original_size_bytes)
+                        * 100
+                        if module.original_size_bytes > 0
+                        else 0
                     ),
                 }
 
@@ -700,7 +726,7 @@ class Quantizer:
             if id(param) not in seen_params:
                 total_bytes += param.numel() * param.element_size()
 
-        return total_bytes / (1024 ** 2)
+        return total_bytes / (1024**2)
 
     def _config_snapshot(self) -> Dict[str, Union[int, float, str, bool, None]]:
         """Capture a snapshot of the model configuration."""
@@ -753,17 +779,21 @@ class Quantizer:
         ]
 
         if report.original_peak_memory_mb > 0:
-            lines.extend([
-                f"  Original peak:  {report.original_peak_memory_mb:.2f} MiB",
-                f"  Quantized peak: {report.quantized_peak_memory_mb:.2f} MiB",
-            ])
+            lines.extend(
+                [
+                    f"  Original peak:  {report.original_peak_memory_mb:.2f} MiB",
+                    f"  Quantized peak: {report.quantized_peak_memory_mb:.2f} MiB",
+                ]
+            )
 
-        lines.extend([
-            "",
-            "Top-5 Layer Savings:",
-            f"  {'Layer':<40} {'Saved':>10} {'%':>8}",
-            "-" * 60,
-        ])
+        lines.extend(
+            [
+                "",
+                "Top-5 Layer Savings:",
+                f"  {'Layer':<40} {'Saved':>10} {'%':>8}",
+                "-" * 60,
+            ]
+        )
 
         sorted_layers = sorted(
             report.layer_reports.items(),

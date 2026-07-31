@@ -13,6 +13,7 @@ The voice model (~63MB ONNX file) is downloaded once via
 ~/.local/share/piper-voices/ — see get_dabba_config_dir() sibling
 convention, though Piper manages its own cache dir rather than dabba's.
 """
+
 from __future__ import annotations
 
 import io
@@ -50,6 +51,7 @@ def _load_voice(voice_name: str):
         )
 
     from piper import PiperVoice
+
     voice = PiperVoice.load(str(model_path))
     _voice_cache[voice_name] = voice
     return voice
@@ -86,7 +88,9 @@ def create_tts_router() -> APIRouter:
         except HTTPException:
             raise
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Speech synthesis failed: {exc}")
+            raise HTTPException(
+                status_code=502, detail=f"Speech synthesis failed: {exc}"
+            )
 
         return Response(content=wav_bytes, media_type="audio/wav")
 

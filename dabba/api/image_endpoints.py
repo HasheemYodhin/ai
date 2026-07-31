@@ -12,6 +12,7 @@ HF model priority (first actively-served wins):
   2. stabilityai/stable-diffusion-xl-base-1.0
   3. stabilityai/stable-diffusion-3.5-medium
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,16 +33,18 @@ class ImageGenerationRequest(BaseModel):
 
 # ── NVIDIA NIM Image (FLUX.1-dev via NvidiaProvider) ─────────────────────────
 
+
 def _generate_via_nvidia(prompt: str, api_key: str, n: int) -> dict:
     """
     Delegates to NvidiaProvider.generate_image() — single source of truth.
     """
     from dabba.providers.nvidia_provider import NvidiaProvider
+
     return NvidiaProvider().generate_image(prompt, api_key, n)
 
 
-
 # ── Google Imagen ─────────────────────────────────────────────────────────────
+
 
 def _generate_via_google_imagen(prompt: str, api_key: str, n: int) -> dict:
     """
@@ -82,8 +85,12 @@ def _generate_via_google_imagen(prompt: str, api_key: str, n: int) -> dict:
 
 # ── OpenAI DALL-E ─────────────────────────────────────────────────────────────
 
-def _generate_via_openai(prompt: str, api_key: str, model: str, size: str, n: int) -> dict:
+
+def _generate_via_openai(
+    prompt: str, api_key: str, model: str, size: str, n: int
+) -> dict:
     from openai import OpenAI
+
     client = OpenAI(api_key=api_key, timeout=60.0)
     resp = client.images.generate(model=model, prompt=prompt, size=size, n=n)
 
@@ -128,7 +135,9 @@ def _generate_via_huggingface(prompt: str, hf_token: str, model: str) -> dict:
         err = resp.json()
         message = err.get("error") or str(err)
         if err.get("estimated_time"):
-            message += f" (model cold-starting, retry in ~{int(err['estimated_time'])}s)"
+            message += (
+                f" (model cold-starting, retry in ~{int(err['estimated_time'])}s)"
+            )
     except Exception:
         message = resp.text or f"HTTP {resp.status_code}"
     raise RuntimeError(message)
@@ -156,6 +165,7 @@ def _generate_via_huggingface_with_fallbacks(
 
 # ── Router ────────────────────────────────────────────────────────────────────
 
+
 def create_image_router() -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["images"])
 
@@ -166,12 +176,12 @@ def create_image_router() -> APIRouter:
             raise HTTPException(status_code=400, detail="prompt cannot be empty")
 
         from dabba.api.agent_endpoints import _get_agent_proxy
+
         proxy = _get_agent_proxy()
         keys = getattr(proxy.cli_config, "api_keys", {}) or {}
         # Model-specific FLUX key takes priority over the generic NVIDIA key
-        nvidia_key = (
-            keys.get("black-forest-labs/flux.1-dev", "")
-            or keys.get("nvidia", "")
+        nvidia_key = keys.get("black-forest-labs/flux.1-dev", "") or keys.get(
+            "nvidia", ""
         )
         google_key = keys.get("google", "")
         openai_key = keys.get("openai", "")
@@ -206,7 +216,10 @@ def create_image_router() -> APIRouter:
         if google_key and not is_explicit_hf and not is_explicit_openai:
             try:
                 return await asyncio.to_thread(
-                    _generate_via_google_imagen, prompt, google_key, max(1, min(req.n, 4))
+                    _generate_via_google_imagen,
+                    prompt,
+                    google_key,
+                    max(1, min(req.n, 4)),
                 )
             except Exception as exc:
                 errors.append(f"Google Imagen: {exc}")
@@ -215,8 +228,12 @@ def create_image_router() -> APIRouter:
         if openai_key and not is_explicit_hf:
             try:
                 return await asyncio.to_thread(
-                    _generate_via_openai, prompt, openai_key,
-                    req.model or "gpt-image-1", req.size or "1024x1024", max(1, min(req.n, 4)),
+                    _generate_via_openai,
+                    prompt,
+                    openai_key,
+                    req.model or "gpt-image-1",
+                    req.size or "1024x1024",
+                    max(1, min(req.n, 4)),
                 )
             except Exception as exc:
                 errors.append(f"OpenAI: {exc}")
@@ -226,14 +243,16 @@ def create_image_router() -> APIRouter:
             explicit_hf_model = req.model[3:] if is_explicit_hf else None
             try:
                 return await asyncio.to_thread(
-                    _generate_via_huggingface_with_fallbacks, prompt, hf_key, explicit_hf_model
+                    _generate_via_huggingface_with_fallbacks,
+                    prompt,
+                    hf_key,
+                    explicit_hf_model,
                 )
             except Exception as exc:
                 errors.append(f"Hugging Face: {exc}")
 
         raise HTTPException(
-            status_code=502,
-            detail="Image generation failed — " + " | ".join(errors)
+            status_code=502, detail="Image generation failed — " + " | ".join(errors)
         )
 
     return router

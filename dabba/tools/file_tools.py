@@ -110,7 +110,12 @@ def write_file(path: str, content: str) -> Dict[str, object]:
         )
 
     logger.info("Wrote file '%s' (%d bytes)", file_path, actual_size)
-    return {"status": "success", "path": str(file_path), "size": actual_size, "exists": True}
+    return {
+        "status": "success",
+        "path": str(file_path),
+        "size": actual_size,
+        "exists": True,
+    }
 
 
 def edit_file(path: str, old_string: str, new_string: str) -> Dict[str, object]:
@@ -157,9 +162,7 @@ def edit_file(path: str, old_string: str, new_string: str) -> Dict[str, object]:
             f"the intended edit at {file_path}"
         )
 
-    logger.info(
-        "Edited file '%s': %d replacement(s)", file_path, count
-    )
+    logger.info("Edited file '%s': %d replacement(s)", file_path, count)
     return {
         "status": "success",
         "path": str(file_path),
@@ -197,7 +200,9 @@ def transactional_edit(root: str, edits: List[Dict[str, str]]) -> Dict[str, obje
         if not old_string:
             raise ValueError(f"old_string cannot be empty for {relative}")
         if old_string not in content:
-            raise ValueError(f"old_string not found in {relative}; no files were changed")
+            raise ValueError(
+                f"old_string not found in {relative}; no files were changed"
+            )
         updated = content.replace(old_string, new_string, 1)
         originals[path] = path.read_bytes()
         replacements[path] = updated
@@ -237,7 +242,9 @@ def transactional_edit(root: str, edits: List[Dict[str, str]]) -> Dict[str, obje
     }
 
 
-def search_files(pattern: str, path: str = ".", regex: bool = False) -> List[Dict[str, object]]:
+def search_files(
+    pattern: str, path: str = ".", regex: bool = False
+) -> List[Dict[str, object]]:
     """
     Search for files matching a pattern and containing matching content.
 
@@ -265,28 +272,34 @@ def search_files(pattern: str, path: str = ".", regex: bool = False) -> List[Dic
         for entry in root.rglob("*"):
             if entry.is_file() and compiled.search(str(entry.relative_to(root))):
                 stats = entry.stat()
-                results.append({
-                    "path": str(entry),
-                    "size": stats.st_size,
-                    "modified": stats.st_mtime,
-                })
+                results.append(
+                    {
+                        "path": str(entry),
+                        "size": stats.st_size,
+                        "modified": stats.st_mtime,
+                    }
+                )
                 if len(results) >= MAX_SEARCH_RESULTS:
                     break
     else:
         for entry in root.glob(pattern):
             if entry.is_file():
                 stats = entry.stat()
-                results.append({
-                    "path": str(entry),
-                    "size": stats.st_size,
-                    "modified": stats.st_mtime,
-                })
+                results.append(
+                    {
+                        "path": str(entry),
+                        "size": stats.st_size,
+                        "modified": stats.st_mtime,
+                    }
+                )
                 if len(results) >= MAX_SEARCH_RESULTS:
                     break
 
     logger.info(
         "Searched '%s' for '%s': %d matches",
-        root, pattern, len(results),
+        root,
+        pattern,
+        len(results),
     )
     return results
 
@@ -317,13 +330,15 @@ def list_directory(path: str = ".") -> List[Dict[str, object]]:
         if len(entries) >= MAX_LIST_ENTRIES:
             break
         stats = entry.stat()
-        entries.append({
-            "name": entry.name,
-            "path": str(entry),
-            "type": "dir" if entry.is_dir() else "file",
-            "size": stats.st_size,
-            "modified": stats.st_mtime,
-        })
+        entries.append(
+            {
+                "name": entry.name,
+                "path": str(entry),
+                "type": "dir" if entry.is_dir() else "file",
+                "size": stats.st_size,
+                "modified": stats.st_mtime,
+            }
+        )
 
     return entries
 
@@ -358,8 +373,12 @@ def register_file_tools(registry: ToolRegistry) -> None:
                         type="object",
                         properties={
                             "path": ToolParameter(name="path", type="string"),
-                            "old_string": ToolParameter(name="old_string", type="string"),
-                            "new_string": ToolParameter(name="new_string", type="string"),
+                            "old_string": ToolParameter(
+                                name="old_string", type="string"
+                            ),
+                            "new_string": ToolParameter(
+                                name="new_string", type="string"
+                            ),
                         },
                     ),
                 ),
@@ -374,10 +393,15 @@ def register_file_tools(registry: ToolRegistry) -> None:
             name="file_read",
             description="Read the contents of a file from the filesystem.",
             parameters=[
-                ToolParameter(name="path", type="string", description="Path to the file to read."),
                 ToolParameter(
-                    name="max_size", type="integer", description="Maximum bytes to read.",
-                    required=False, default=MAX_READ_SIZE,
+                    name="path", type="string", description="Path to the file to read."
+                ),
+                ToolParameter(
+                    name="max_size",
+                    type="integer",
+                    description="Maximum bytes to read.",
+                    required=False,
+                    default=MAX_READ_SIZE,
                 ),
             ],
             handler=read_file,
@@ -390,8 +414,12 @@ def register_file_tools(registry: ToolRegistry) -> None:
             name="file_write",
             description="Write text content to a file, creating parent directories if needed.",
             parameters=[
-                ToolParameter(name="path", type="string", description="Path to write to."),
-                ToolParameter(name="content", type="string", description="Text content to write."),
+                ToolParameter(
+                    name="path", type="string", description="Path to write to."
+                ),
+                ToolParameter(
+                    name="content", type="string", description="Text content to write."
+                ),
             ],
             handler=write_file,
             handler_sync=True,
@@ -403,9 +431,15 @@ def register_file_tools(registry: ToolRegistry) -> None:
             name="file_edit",
             description="Replace exact occurrences of old_string with new_string in a file.",
             parameters=[
-                ToolParameter(name="path", type="string", description="Path to the file to edit."),
-                ToolParameter(name="old_string", type="string", description="Text to find."),
-                ToolParameter(name="new_string", type="string", description="Replacement text."),
+                ToolParameter(
+                    name="path", type="string", description="Path to the file to edit."
+                ),
+                ToolParameter(
+                    name="old_string", type="string", description="Text to find."
+                ),
+                ToolParameter(
+                    name="new_string", type="string", description="Replacement text."
+                ),
             ],
             handler=edit_file,
             handler_sync=True,
@@ -417,9 +451,25 @@ def register_file_tools(registry: ToolRegistry) -> None:
             name="file_search",
             description="Search for files by glob or regex pattern in a directory tree.",
             parameters=[
-                ToolParameter(name="pattern", type="string", description="Search pattern (glob or regex)."),
-                ToolParameter(name="path", type="string", description="Root directory to search.", required=False, default="."),
-                ToolParameter(name="regex", type="boolean", description="Use regex instead of glob.", required=False, default=False),
+                ToolParameter(
+                    name="pattern",
+                    type="string",
+                    description="Search pattern (glob or regex).",
+                ),
+                ToolParameter(
+                    name="path",
+                    type="string",
+                    description="Root directory to search.",
+                    required=False,
+                    default=".",
+                ),
+                ToolParameter(
+                    name="regex",
+                    type="boolean",
+                    description="Use regex instead of glob.",
+                    required=False,
+                    default=False,
+                ),
             ],
             handler=search_files,
             handler_sync=True,
@@ -431,7 +481,13 @@ def register_file_tools(registry: ToolRegistry) -> None:
             name="file_list",
             description="List all entries in a directory with metadata.",
             parameters=[
-                ToolParameter(name="path", type="string", description="Directory to list.", required=False, default="."),
+                ToolParameter(
+                    name="path",
+                    type="string",
+                    description="Directory to list.",
+                    required=False,
+                    default=".",
+                ),
             ],
             handler=list_directory,
             handler_sync=True,

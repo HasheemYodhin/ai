@@ -40,7 +40,9 @@ async def test_transcribe_rejects_unknown_model(monkeypatch):
 @pytest.mark.asyncio
 async def test_transcribe_rejects_invalid_base64(monkeypatch):
     monkeypatch.setattr(audio_endpoints.shutil, "which", lambda _: "/usr/bin/ffmpeg")
-    request = audio_endpoints.TranscribeRequest(audio_base64="not valid base64!", model="base")
+    request = audio_endpoints.TranscribeRequest(
+        audio_base64="not valid base64!", model="base"
+    )
 
     with pytest.raises(HTTPException, match="Invalid audio data") as error:
         await _endpoint("/v1/transcribe", "POST")(request)
@@ -51,7 +53,9 @@ async def test_transcribe_rejects_invalid_base64(monkeypatch):
 @pytest.mark.asyncio
 async def test_transcribe_runs_worker_and_returns_text(monkeypatch):
     monkeypatch.setattr(audio_endpoints.shutil, "which", lambda _: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(audio_endpoints, "_transcribe_file", lambda path, model: "hello from audio")
+    monkeypatch.setattr(
+        audio_endpoints, "_transcribe_file", lambda path, model: "hello from audio"
+    )
     request = audio_endpoints.TranscribeRequest(
         audio_base64=base64.b64encode(b"fake audio container").decode(),
         model="base",

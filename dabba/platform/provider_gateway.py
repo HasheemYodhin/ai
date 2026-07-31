@@ -49,14 +49,17 @@ def normalize_provider_error(
         return exc
     raw = str(exc)
     lowered = raw.lower()
-    if any(marker in lowered for marker in (
-        "resourceexhausted",
-        "resource exhausted",
-        "request limit reached",
-        "capacity",
-        "overloaded",
-        "503",
-    )):
+    if any(
+        marker in lowered
+        for marker in (
+            "resourceexhausted",
+            "resource exhausted",
+            "request limit reached",
+            "capacity",
+            "overloaded",
+            "503",
+        )
+    ):
         return ProviderFailure(
             "The selected model is temporarily at capacity.",
             "provider_capacity",
@@ -74,7 +77,9 @@ def normalize_provider_error(
             provider,
             model,
         )
-    if any(marker in lowered for marker in ("timed out", "timeout", "deadline exceeded")):
+    if any(
+        marker in lowered for marker in ("timed out", "timeout", "deadline exceeded")
+    ):
         return ProviderFailure(
             "The model took too long to respond.",
             "provider_timeout",
@@ -83,7 +88,10 @@ def normalize_provider_error(
             provider,
             model,
         )
-    if any(marker in lowered for marker in ("401", "403", "unauthorized", "invalid api key", "forbidden")):
+    if any(
+        marker in lowered
+        for marker in ("401", "403", "unauthorized", "invalid api key", "forbidden")
+    ):
         return ProviderFailure(
             "The provider credentials are missing, expired, or lack permission.",
             "provider_authentication",
@@ -92,7 +100,10 @@ def normalize_provider_error(
             provider,
             model,
         )
-    if any(marker in lowered for marker in ("context length", "maximum context", "too many tokens")):
+    if any(
+        marker in lowered
+        for marker in ("context length", "maximum context", "too many tokens")
+    ):
         return ProviderFailure(
             "The request is larger than this model's context window.",
             "context_length_exceeded",
@@ -139,7 +150,11 @@ class ProviderGateway:
         value = configured.get(model, []) if isinstance(configured, dict) else []
         if isinstance(value, str):
             value = [value]
-        return [candidate for candidate in value if isinstance(candidate, str) and candidate != model]
+        return [
+            candidate
+            for candidate in value
+            if isinstance(candidate, str) and candidate != model
+        ]
 
     def run(
         self,
@@ -167,10 +182,14 @@ class ProviderGateway:
                 started = time.perf_counter()
                 try:
                     result = operation(candidate)
-                    self._success(provider, candidate, (time.perf_counter() - started) * 1000)
+                    self._success(
+                        provider, candidate, (time.perf_counter() - started) * 1000
+                    )
                     return result
                 except Exception as exc:
-                    failure = normalize_provider_error(exc, provider=provider, model=candidate)
+                    failure = normalize_provider_error(
+                        exc, provider=provider, model=candidate
+                    )
                     last_failure = failure
                     self._failure(provider, candidate, failure)
                     if not failure.retryable or attempt + 1 >= self.max_attempts:
@@ -205,10 +224,14 @@ class ProviderGateway:
                     for token in operation(candidate):
                         emitted = emitted or bool(token)
                         yield token
-                    self._success(provider, candidate, (time.perf_counter() - started) * 1000)
+                    self._success(
+                        provider, candidate, (time.perf_counter() - started) * 1000
+                    )
                     return
                 except Exception as exc:
-                    failure = normalize_provider_error(exc, provider=provider, model=candidate)
+                    failure = normalize_provider_error(
+                        exc, provider=provider, model=candidate
+                    )
                     last_failure = failure
                     self._failure(provider, candidate, failure)
                     # Retrying a partially emitted stream duplicates content. Provider

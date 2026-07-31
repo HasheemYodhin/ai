@@ -44,9 +44,9 @@ class Validator:
         self.logger = get_logger("dabba.trainer")
 
         self.amp_dtype = (
-            torch.bfloat16 if amp_dtype == "bfloat16"
-            else torch.float16 if amp_dtype == "float16"
-            else torch.float32
+            torch.bfloat16
+            if amp_dtype == "bfloat16"
+            else torch.float16 if amp_dtype == "float16" else torch.float32
         )
 
     def validate(
@@ -81,7 +81,11 @@ class Validator:
                 labels = batch["labels"]
                 attention_mask = batch.get("attention_mask")
 
-                input_ids = input_ids.to(self.model.device if hasattr(self.model, 'device') else next(self.model.parameters()).device)
+                input_ids = input_ids.to(
+                    self.model.device
+                    if hasattr(self.model, "device")
+                    else next(self.model.parameters()).device
+                )
                 labels = labels.to(input_ids.device)
 
                 with autocast(
@@ -90,7 +94,11 @@ class Validator:
                 ):
                     outputs = self.model(
                         input_ids=input_ids,
-                        attention_mask=attention_mask.to(input_ids.device) if attention_mask is not None else None,
+                        attention_mask=(
+                            attention_mask.to(input_ids.device)
+                            if attention_mask is not None
+                            else None
+                        ),
                     )
                     logits = outputs["logits"]
 

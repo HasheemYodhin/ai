@@ -8,6 +8,7 @@ POST /v1/agent  →  Server-Sent Events stream of agent loop events:
     {"type": "done",        "content": {"steps": N}}
     {"type": "error",       "content": "..."}
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -54,17 +55,27 @@ class AgentRequest(BaseModel):
     model: Optional[str] = None
     effort: Optional[str] = None
     # Editor context sent by the extension
-    workspace: Optional[str] = None       # workspace root path
-    active_file: Optional[str] = None     # currently open file
-    selection: Optional[str] = None       # selected code
-    reset: bool = False                   # clear conversation first
-    permission_mode: str = "ask"          # "ask" pauses for approval, "auto" skips it
-    research: bool = False                 # collect web evidence before the agent answers
-    conversation_id: Optional[str] = None  # isolates simultaneous web-chat agent sessions
-    require_plan_approval: bool = False    # pause on a proposed multi-step plan until the user approves it
-    use_tool_search: Optional[bool] = None         # None = leave the agent loop's existing default alone
-    max_steps: Optional[int] = None                # None = leave the agent loop's existing default alone
-    allowed_tools: Optional[List[str]] = None      # Optional per-turn tool scope for connector/plugin mode
+    workspace: Optional[str] = None  # workspace root path
+    active_file: Optional[str] = None  # currently open file
+    selection: Optional[str] = None  # selected code
+    reset: bool = False  # clear conversation first
+    permission_mode: str = "ask"  # "ask" pauses for approval, "auto" skips it
+    research: bool = False  # collect web evidence before the agent answers
+    conversation_id: Optional[str] = (
+        None  # isolates simultaneous web-chat agent sessions
+    )
+    require_plan_approval: bool = (
+        False  # pause on a proposed multi-step plan until the user approves it
+    )
+    use_tool_search: Optional[bool] = (
+        None  # None = leave the agent loop's existing default alone
+    )
+    max_steps: Optional[int] = (
+        None  # None = leave the agent loop's existing default alone
+    )
+    allowed_tools: Optional[List[str]] = (
+        None  # Optional per-turn tool scope for connector/plugin mode
+    )
     context_compaction_threshold: Optional[float] = None
     context_compaction_keep_recent: Optional[int] = None
 
@@ -128,6 +139,7 @@ def _requires_approval(tool_name: str) -> bool:
     )
     return read_only is None
 
+
 # call_id -> Future[bool], resolved by POST /v1/agent/approve.
 # A tool call genuinely pauses server-side execution until this resolves —
 # the client can no longer just cosmetically delay showing the result after
@@ -154,6 +166,7 @@ def _get_agent_proxy(conversation_id: Optional[str] = None):
         proxy = _conversation_proxies.get(conversation_id)
         if proxy is None:
             from dabba.cli.agent_proxy import AgentProxy
+
             proxy = AgentProxy()
             proxy.permissions.set_mode("allow")
             proxy.agent_config.require_tool_approval = False
@@ -161,6 +174,7 @@ def _get_agent_proxy(conversation_id: Optional[str] = None):
         return proxy
     if _agent_proxy is None:
         from dabba.cli.agent_proxy import AgentProxy
+
         _agent_proxy = AgentProxy()
         # Extension runs headless — never block on interactive approval.
         # Two separate gates exist: PermissionManager (CLI/TUI) and
@@ -175,13 +189,19 @@ def _get_agent_proxy(conversation_id: Optional[str] = None):
 
 def _text_stream(message: str) -> StreamingResponse:
     """One-shot SSE response for a canned reply — used when a command can't proceed."""
+
     async def gen():
         yield f"data: {json.dumps({'type': 'text', 'content': message})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'content': {'steps': 0}})}\n\n"
+
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -190,37 +210,216 @@ def _is_likely_command(text: str) -> bool:
     if not text or len(text) < 2:
         return False
     stripped = text.strip()
-    q_starters = {"what", "why", "how", "when", "where", "who", "whom", "whose",
-                  "which", "is", "are", "was", "were", "do", "does", "did",
-                  "can", "could", "will", "would", "shall", "should", "may",
-                  "might", "must", "has", "have", "had", "explain", "describe",
-                  "tell", "show", "define", "list", "find", "search", "summarize"}
+    q_starters = {
+        "what",
+        "why",
+        "how",
+        "when",
+        "where",
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "is",
+        "are",
+        "was",
+        "were",
+        "do",
+        "does",
+        "did",
+        "can",
+        "could",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "may",
+        "might",
+        "must",
+        "has",
+        "have",
+        "had",
+        "explain",
+        "describe",
+        "tell",
+        "show",
+        "define",
+        "list",
+        "find",
+        "search",
+        "summarize",
+    }
     first_word = stripped.split()[0].lower().rstrip("?,.;:!")
     if first_word in q_starters:
         return False
     import shutil
+
     common_commands = {
-        "ls", "df", "du", "ps", "top", "htop", "who", "whoami", "pwd", "id",
-        "uname", "date", "cal", "clear", "env", "printenv", "which", "whereis",
-        "type", "time", "sleep", "yes", "seq", "shuf", "sort", "uniq", "wc",
-        "head", "tail", "cat", "tac", "rev", "cut", "tr", "fmt", "pr", "fold",
-        "nl", "od", "base64", "cksum", "sum", "md5sum", "sha1sum", "sha256sum",
-        "git", "curl", "wget", "ssh", "scp", "rsync", "tar", "gzip", "gunzip",
-        "zip", "unzip", "make", "cmake", "ninja", "meson", "npm", "yarn",
-        "pnpm", "pip", "pip3", "cargo", "go", "rustc", "gcc", "g++", "clang",
-        "clang++", "python", "python3", "node", "deno", "bun", "ruby", "perl",
-        "php", "swift", "kotlin", "docker", "podman", "kubectl", "helm",
-        "terraform", "ansible", "vagrant", "chmod", "chown", "cp", "mv", "rm",
-        "mkdir", "rmdir", "touch", "ln", "mount", "umount", "dd", "find",
-        "locate", "grep", "egrep", "fgrep", "awk", "sed", "xargs", "tee",
-        "echo", "printf", "read", "test", "expr", "let", "set", "export",
-        "source", ".", "exec", "eval", "trap", "kill", "pkill", "killall",
-        "nohup", "disown", "fg", "bg", "jobs", "screen", "tmux", "sudo",
-        "doas", "su", "passwd", "useradd", "usermod", "groupadd", "systemctl",
-        "journalctl", "service", "iptables", "ufw", "ping", "traceroute",
-        "nslookup", "dig", "host", "netstat", "ss", "ip", "ifconfig",
-        "nmcli", "nmtui", "iwctl", "bluetoothctl", "alsamixer", "pactl",
-        "xrandr", "xset", "xinput", "xdg-open", "open",
+        "ls",
+        "df",
+        "du",
+        "ps",
+        "top",
+        "htop",
+        "who",
+        "whoami",
+        "pwd",
+        "id",
+        "uname",
+        "date",
+        "cal",
+        "clear",
+        "env",
+        "printenv",
+        "which",
+        "whereis",
+        "type",
+        "time",
+        "sleep",
+        "yes",
+        "seq",
+        "shuf",
+        "sort",
+        "uniq",
+        "wc",
+        "head",
+        "tail",
+        "cat",
+        "tac",
+        "rev",
+        "cut",
+        "tr",
+        "fmt",
+        "pr",
+        "fold",
+        "nl",
+        "od",
+        "base64",
+        "cksum",
+        "sum",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "git",
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "rsync",
+        "tar",
+        "gzip",
+        "gunzip",
+        "zip",
+        "unzip",
+        "make",
+        "cmake",
+        "ninja",
+        "meson",
+        "npm",
+        "yarn",
+        "pnpm",
+        "pip",
+        "pip3",
+        "cargo",
+        "go",
+        "rustc",
+        "gcc",
+        "g++",
+        "clang",
+        "clang++",
+        "python",
+        "python3",
+        "node",
+        "deno",
+        "bun",
+        "ruby",
+        "perl",
+        "php",
+        "swift",
+        "kotlin",
+        "docker",
+        "podman",
+        "kubectl",
+        "helm",
+        "terraform",
+        "ansible",
+        "vagrant",
+        "chmod",
+        "chown",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "rmdir",
+        "touch",
+        "ln",
+        "mount",
+        "umount",
+        "dd",
+        "find",
+        "locate",
+        "grep",
+        "egrep",
+        "fgrep",
+        "awk",
+        "sed",
+        "xargs",
+        "tee",
+        "echo",
+        "printf",
+        "read",
+        "test",
+        "expr",
+        "let",
+        "set",
+        "export",
+        "source",
+        ".",
+        "exec",
+        "eval",
+        "trap",
+        "kill",
+        "pkill",
+        "killall",
+        "nohup",
+        "disown",
+        "fg",
+        "bg",
+        "jobs",
+        "screen",
+        "tmux",
+        "sudo",
+        "doas",
+        "su",
+        "passwd",
+        "useradd",
+        "usermod",
+        "groupadd",
+        "systemctl",
+        "journalctl",
+        "service",
+        "iptables",
+        "ufw",
+        "ping",
+        "traceroute",
+        "nslookup",
+        "dig",
+        "host",
+        "netstat",
+        "ss",
+        "ip",
+        "ifconfig",
+        "nmcli",
+        "nmtui",
+        "iwctl",
+        "bluetoothctl",
+        "alsamixer",
+        "pactl",
+        "xrandr",
+        "xset",
+        "xinput",
+        "xdg-open",
+        "open",
     }
     tokens = stripped.split()
     first = tokens[0]
@@ -242,6 +441,7 @@ def _is_likely_command(text: str) -> bool:
 
 def _exec_shell_response(command: str) -> StreamingResponse:
     """Execute a shell command and return output as SSE."""
+
     async def gen():
         try:
             cmd_label = f"$ {command}"
@@ -264,10 +464,15 @@ def _exec_shell_response(command: str) -> StreamingResponse:
         except Exception as exc:
             yield f"data: {json.dumps({'type': 'text', 'content': chr(10060) + ' Command failed: ' + str(exc)})}\n\n"
         yield f"data: {json.dumps({'type': 'done', 'content': {'steps': 0}})}\n\n"
+
     return StreamingResponse(
         gen(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -326,12 +531,14 @@ async def _collect_research_evidence(query: str) -> List[Dict[str, str]]:
             except Exception:
                 # A search result can still be cited even when a site blocks fetching.
                 content = ""
-        evidence.append({
-            "title": title,
-            "url": url,
-            "snippet": snippet,
-            "content": content[:RESEARCH_SOURCE_CHARS],
-        })
+        evidence.append(
+            {
+                "title": title,
+                "url": url,
+                "snippet": snippet,
+                "content": content[:RESEARCH_SOURCE_CHARS],
+            }
+        )
 
     if not evidence:
         raise RuntimeError("No sources were returned for this research query.")
@@ -359,7 +566,11 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
     query = req.message.strip()
     yield {
         "type": "tool_call",
-        "content": {"name": "web_search", "arguments": {"query": query}, "call_id": "research-search"},
+        "content": {
+            "name": "web_search",
+            "arguments": {"query": query},
+            "call_id": "research-search",
+        },
     }
     try:
         evidence = await _collect_research_evidence(query)
@@ -379,13 +590,18 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
         "content": {
             "tool": "web_search",
             "success": True,
-            "output": f"Collected {len(evidence)} sources: " + ", ".join(source["title"] for source in evidence),
+            "output": f"Collected {len(evidence)} sources: "
+            + ", ".join(source["title"] for source in evidence),
         },
     }
     for index, source in enumerate(evidence, 1):
         yield {
             "type": "tool_call",
-            "content": {"name": "web_fetch", "arguments": {"url": source["url"]}, "call_id": f"research-source-{index}"},
+            "content": {
+                "name": "web_fetch",
+                "arguments": {"url": source["url"]},
+                "call_id": f"research-source-{index}",
+            },
         }
         yield {
             "type": "tool_result",
@@ -397,7 +613,9 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
         }
 
     prompt = _research_prompt(req, evidence)
-    loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+    loop_agent = proxy._ensure_agent_loop(
+        req.workspace, fresh_session=bool(req.conversation_id)
+    )
     gen = loop_agent.stream_chat(prompt)
     last_disconnect_check = [0.0]
     client_gone = False
@@ -407,7 +625,9 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
                 chunk = await gen.__anext__()
             except StopAsyncIteration:
                 break
-            if not client_gone and await _client_disconnected(request, last_disconnect_check):
+            if not client_gone and await _client_disconnected(
+                request, last_disconnect_check
+            ):
                 # Client is gone, but keep draining the agent loop so any
                 # in-flight tool call finishes and the session still gets
                 # saved server-side — just stop forwarding chunks nobody
@@ -416,7 +636,10 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
             if not client_gone:
                 yield chunk
         if not client_gone:
-            source_lines = [f"[{index}] {source['title']} - {source['url']}" for index, source in enumerate(evidence, 1)]
+            source_lines = [
+                f"[{index}] {source['title']} - {source['url']}"
+                for index, source in enumerate(evidence, 1)
+            ]
             yield {"type": "text", "content": "\n\nSources\n" + "\n".join(source_lines)}
     finally:
         if not req.conversation_id:
@@ -453,6 +676,7 @@ def create_agent_router() -> APIRouter:
         proxy.agent_config.active_file = req.active_file
 
         if req.research:
+
             async def research_event_gen():
                 steps = 0
                 try:
@@ -482,14 +706,22 @@ def create_agent_router() -> APIRouter:
         # /explain, /fix — operate on the current editor selection
         if first_word in ("/explain", "/fix"):
             if not req.selection:
-                return _text_stream("Select some code in the editor first, then run " + first_word + ".")
-            req.message = f"{_CODE_ACTION_PROMPTS[first_word]}\n\n```\n{req.selection}\n```"
-            msg_stripped = ""  # no longer a slash command — falls through to the agent below
+                return _text_stream(
+                    "Select some code in the editor first, then run " + first_word + "."
+                )
+            req.message = (
+                f"{_CODE_ACTION_PROMPTS[first_word]}\n\n```\n{req.selection}\n```"
+            )
+            msg_stripped = (
+                ""  # no longer a slash command — falls through to the agent below
+            )
 
         # /test, /review — operate on the whole active file (read server-side, same machine as VSCode)
         elif first_word in ("/test", "/review"):
             if not req.active_file:
-                return _text_stream("Open a file in the editor first, then run " + first_word + ".")
+                return _text_stream(
+                    "Open a file in the editor first, then run " + first_word + "."
+                )
             try:
                 with open(req.active_file, "r", errors="replace") as f:
                     content = f.read(20000)
@@ -499,17 +731,17 @@ def create_agent_router() -> APIRouter:
             msg_stripped = ""
 
         # Check for remaining slash commands
-        if msg_stripped.startswith('/'):
+        if msg_stripped.startswith("/"):
             parts = msg_stripped.split()
             cmd = parts[0].lower()
             args = parts[1:]
 
             async def command_event_gen():
                 try:
-                    if cmd in ('/clear', '/new', '/new-session', '/reset'):
+                    if cmd in ("/clear", "/new", "/new-session", "/reset"):
                         proxy.reset()
                         yield f"data: {json.dumps({'type': 'text', 'content': '🧹 Conversation cleared and session reset successfully.'})}\n\n"
-                    elif cmd == '/tools':
+                    elif cmd == "/tools":
                         try:
                             tools = proxy._get_registry().list_tools()
                             lines = ["🔧 **Available Tools:**\n"]
@@ -519,12 +751,13 @@ def create_agent_router() -> APIRouter:
                         except Exception as exc:
                             msg = f"Could not list tools: {exc}"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/mcp':
+                    elif cmd == "/mcp":
                         try:
                             proxy._get_registry()  # ensures connect() has run at least once
                             status = proxy.mcp_manager.status()
                             if not status["servers"]:
                                 from dabba.agent.mcp_client import MCP_CONFIG_PATH
+
                                 msg = (
                                     f"No MCP servers connected. Configure servers in `{MCP_CONFIG_PATH}` "
                                     '(e.g. `{"mcpServers": {"name": {"command": "npx", "args": [...]}}}`) '
@@ -533,26 +766,38 @@ def create_agent_router() -> APIRouter:
                             else:
                                 lines = ["🔌 **Connected MCP Servers:**\n"]
                                 for server, tools in status["tools_by_server"].items():
-                                    lines.append(f"- **{server}** ({len(tools)} tools): {', '.join(tools)}")
+                                    lines.append(
+                                        f"- **{server}** ({len(tools)} tools): {', '.join(tools)}"
+                                    )
                                 msg = "\n".join(lines)
                         except Exception as exc:
                             msg = f"Could not get MCP status: {exc}"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/plan':
+                    elif cmd == "/plan":
                         goal = " ".join(args) or req.message
-                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                        loop_agent = proxy._ensure_agent_loop(
+                            req.workspace, fresh_session=bool(req.conversation_id)
+                        )
                         tool_dicts = [
-                            {"name": t.name, "description": t.description, "parameters": t.parameters_to_json_schema()}
+                            {
+                                "name": t.name,
+                                "description": t.description,
+                                "parameters": t.parameters_to_json_schema(),
+                            }
                             for t in proxy._get_registry().list_tools()
                         ]
                         try:
                             plan = loop_agent.planner.create_plan(goal, tool_dicts)
-                            steps = [s.description or s.tool_name for s in plan.steps] or ["No steps — try phrasing the goal differently."]
+                            steps = [
+                                s.description or s.tool_name for s in plan.steps
+                            ] or ["No steps — try phrasing the goal differently."]
                         except Exception as exc:
                             steps = [f"Planning failed: {exc}"]
                         yield f"data: {json.dumps({'type': 'plan', 'content': steps})}\n\n"
-                    elif cmd == '/compact':
-                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                    elif cmd == "/compact":
+                        loop_agent = proxy._ensure_agent_loop(
+                            req.workspace, fresh_session=bool(req.conversation_id)
+                        )
                         cm = loop_agent.context_manager
                         before = cm.entry_count
                         before_tokens = cm.total_tokens
@@ -575,10 +820,10 @@ def create_agent_router() -> APIRouter:
                         except Exception as exc:
                             msg = f"Compact failed: {exc}"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/diff':
+                    elif cmd == "/diff":
                         msg = "⇄ Use the **View Diff** button under a file-edit tool result to open a diff. `/diff` with no active edit has nothing to show."
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/usage':
+                    elif cmd == "/usage":
                         metrics = proxy._get_metrics()
                         steps = metrics.get("step_count", 0)
                         tool_calls = metrics.get("tool_call_count", 0)
@@ -593,21 +838,27 @@ def create_agent_router() -> APIRouter:
                             f"- **Reasoning Effort:** `{getattr(proxy.cli_config, 'effort', 'medium')}`"
                         )
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/effort':
+                    elif cmd == "/effort":
                         tiers = ("low", "medium", "high", "xhigh", "max")
                         if args and args[0].lower() in tiers:
                             proxy.cli_config.effort = args[0].lower()
                             proxy.cli_config.save()
                             msg = f"⚙ Reasoning effort → `{args[0].lower()}`"
                         else:
-                            current = getattr(proxy.cli_config, 'effort', 'medium')
+                            current = getattr(proxy.cli_config, "effort", "medium")
                             msg = f"💡 Current effort: `{current}`. Usage: `/effort <low|medium|high|xhigh|max>`"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/keys':
+                    elif cmd == "/keys":
                         if args and args[0] == "set" and len(args) >= 3:
                             provider = args[1].lower()
                             key_value = args[2]
-                            valid = {"anthropic", "openai", "google", "nvidia", "huggingface"}
+                            valid = {
+                                "anthropic",
+                                "openai",
+                                "google",
+                                "nvidia",
+                                "huggingface",
+                            }
                             if provider not in valid:
                                 msg = f"❌ Unknown provider: `{provider}`. Valid: {', '.join(sorted(valid))}"
                             else:
@@ -635,21 +886,30 @@ def create_agent_router() -> APIRouter:
                             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
                         else:
                             keys = getattr(proxy.cli_config, "api_keys", {}) or {}
-                            providers = ["anthropic", "openai", "google", "nvidia", "huggingface"]
+                            providers = [
+                                "anthropic",
+                                "openai",
+                                "google",
+                                "nvidia",
+                                "huggingface",
+                            ]
                             lines = ["🔑 **API Key Status:**\n"]
                             for p in providers:
                                 status = "✅ set" if keys.get(p) else "⬜ not set"
                                 lines.append(f"- **{p}**: {status}")
-                            lines.append("\nUsage: `/keys set <provider> <key>` or `/keys delete <provider>`")
+                            lines.append(
+                                "\nUsage: `/keys set <provider> <key>` or `/keys delete <provider>`"
+                            )
                             yield f"data: {json.dumps({'type': 'text', 'content': chr(10).join(lines)})}\n\n"
-                    elif cmd == '/git':
+                    elif cmd == "/git":
                         import subprocess
+
                         cwd = req.workspace or "."
                         subcmd = args[0].lower() if args else "status"
                         git_cmds = {
                             "status": ["git", "status", "--short"],
-                            "diff":   ["git", "diff", "--stat"],
-                            "log":    ["git", "log", "--oneline", "-10"],
+                            "diff": ["git", "diff", "--stat"],
+                            "log": ["git", "log", "--oneline", "-10"],
                             "branch": ["git", "branch"],
                         }
                         if subcmd == "commit":
@@ -658,17 +918,27 @@ def create_agent_router() -> APIRouter:
                         else:
                             git_cmd = git_cmds.get(subcmd)
                         if not git_cmd:
-                            msg = f"Unknown git subcommand: `{subcmd}`. Try: status, diff, log, branch, commit \"msg\""
+                            msg = f'Unknown git subcommand: `{subcmd}`. Try: status, diff, log, branch, commit "msg"'
                         else:
                             try:
-                                result = subprocess.run(git_cmd, cwd=cwd, capture_output=True, text=True, timeout=15)
-                                output = (result.stdout + result.stderr).strip() or "(no output)"
+                                result = subprocess.run(
+                                    git_cmd,
+                                    cwd=cwd,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=15,
+                                )
+                                output = (
+                                    result.stdout + result.stderr
+                                ).strip() or "(no output)"
                                 msg = f"```\n$ git {subcmd}\n{output}\n```"
                             except Exception as exc:
                                 msg = f"git command failed: {exc}"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/memory':
-                        loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                    elif cmd == "/memory":
+                        loop_agent = proxy._ensure_agent_loop(
+                            req.workspace, fresh_session=bool(req.conversation_id)
+                        )
                         history_len = loop_agent.context_manager.entry_count
                         msg = (
                             "🧠 **Session Memory:**\n"
@@ -676,62 +946,83 @@ def create_agent_router() -> APIRouter:
                             f"- **System Prompt Present:** Yes\n"
                         )
                         import os
-                        if req.workspace and os.path.exists(os.path.join(req.workspace, 'attachments')):
-                            files = os.listdir(os.path.join(req.workspace, 'attachments'))
+
+                        if req.workspace and os.path.exists(
+                            os.path.join(req.workspace, "attachments")
+                        ):
+                            files = os.listdir(
+                                os.path.join(req.workspace, "attachments")
+                            )
                             if files:
                                 msg += f"- **Attached Files:** {', '.join(files)}\n"
                         yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/search':
+                    elif cmd == "/search":
                         query = " ".join(args)
                         if not query:
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/search <query>`'})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'text', 'content': f'🔍 Searching for: **{query}**...'})}\n\n"
                             try:
-                                from dabba.tools.web_tools import search_web, WebToolError
+                                from dabba.tools.web_tools import (
+                                    search_web,
+                                    WebToolError,
+                                )
+
                                 results = search_web(query, num_results=6)
                                 lines = [f"🔍 **Web Search Results for:** `{query}`\n"]
                                 for i, r in enumerate(results, 1):
                                     lines.append(f"**{i}. [{r['title']}]({r['url']})**")
-                                    if r.get('snippet'):
+                                    if r.get("snippet"):
                                         lines.append(f"   {r['snippet']}")
                                 msg = "\n".join(lines)
                                 # Inject results into agent context for follow-up questions
-                                loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                                loop_agent = proxy._ensure_agent_loop(
+                                    req.workspace,
+                                    fresh_session=bool(req.conversation_id),
+                                )
                                 loop_agent.context_manager.add_entry(
                                     role="assistant",
                                     content=f"[Web search results for '{query}']\n{msg}",
-                                    metadata={"type": "web_search"}
+                                    metadata={"type": "web_search"},
                                 )
                             except Exception as exc:
                                 msg = f"❌ Search failed: {exc}"
                             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/read':
+                    elif cmd == "/read":
                         url = args[0] if args else ""
                         if not url or not url.startswith("http"):
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/read <url>`'})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'text', 'content': f'🌐 Fetching: **{url}**...'})}\n\n"
                             try:
-                                from dabba.tools.web_tools import fetch_url, WebToolError
+                                from dabba.tools.web_tools import (
+                                    fetch_url,
+                                    WebToolError,
+                                )
+
                                 result = fetch_url(url)
-                                content = result.get("text") or result.get("content", "")
+                                content = result.get("text") or result.get(
+                                    "content", ""
+                                )
                                 title = result.get("title") or url
                                 truncated = str(content)[:8000]
                                 msg = f"🌐 **{title}**\n\nURL: {url}\n\n---\n\n{truncated}"
                                 if len(str(content)) > 8000:
                                     msg += f"\n\n*(truncated — {len(str(content))} total chars)*"
                                 # Inject URL content into agent context
-                                loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                                loop_agent = proxy._ensure_agent_loop(
+                                    req.workspace,
+                                    fresh_session=bool(req.conversation_id),
+                                )
                                 loop_agent.context_manager.add_entry(
                                     role="assistant",
                                     content=f"[URL content fetched from {url}]\n{truncated}",
-                                    metadata={"type": "url_fetch"}
+                                    metadata={"type": "url_fetch"},
                                 )
                             except Exception as exc:
                                 msg = f"❌ Could not fetch URL: {exc}"
                             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/find':
+                    elif cmd == "/find":
                         keyword = " ".join(args)
                         if not keyword:
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/find <keyword or phrase>`'})}\n\n"
@@ -740,37 +1031,67 @@ def create_agent_router() -> APIRouter:
                         else:
                             try:
                                 result = subprocess.run(
-                                    ["grep", "-rn", "--include=*.py", "--include=*.ts",
-                                     "--include=*.js", "--include=*.go", "--include=*.java",
-                                     "--include=*.rs", "--include=*.cpp", "--include=*.c",
-                                     "--include=*.md", "-l", keyword, req.workspace],
-                                    capture_output=True, text=True, timeout=15
+                                    [
+                                        "grep",
+                                        "-rn",
+                                        "--include=*.py",
+                                        "--include=*.ts",
+                                        "--include=*.js",
+                                        "--include=*.go",
+                                        "--include=*.java",
+                                        "--include=*.rs",
+                                        "--include=*.cpp",
+                                        "--include=*.c",
+                                        "--include=*.md",
+                                        "-l",
+                                        keyword,
+                                        req.workspace,
+                                    ],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=15,
                                 )
-                                files_with_matches = [f for f in result.stdout.strip().split("\n") if f]
+                                files_with_matches = [
+                                    f for f in result.stdout.strip().split("\n") if f
+                                ]
                                 if not files_with_matches:
                                     msg = f"No matches found for `{keyword}` in workspace."
                                 else:
                                     # Get line snippets from top 8 files
-                                    lines = [f"🔍 **Found `{keyword}` in {len(files_with_matches)} file(s):**\n"]
+                                    lines = [
+                                        f"🔍 **Found `{keyword}` in {len(files_with_matches)} file(s):**\n"
+                                    ]
                                     for fpath in files_with_matches[:8]:
-                                        rel = fpath.replace(req.workspace, "").lstrip("/")
+                                        rel = fpath.replace(req.workspace, "").lstrip(
+                                            "/"
+                                        )
                                         grep2 = subprocess.run(
                                             ["grep", "-n", keyword, fpath],
-                                            capture_output=True, text=True, timeout=5
+                                            capture_output=True,
+                                            text=True,
+                                            timeout=5,
                                         )
-                                        for line in grep2.stdout.strip().split("\n")[:3]:
+                                        for line in grep2.stdout.strip().split("\n")[
+                                            :3
+                                        ]:
                                             if ":" in line:
                                                 lineno, snippet = line.split(":", 1)
-                                                lines.append(f"📄 `{rel}:{lineno}` — `{snippet.strip()[:100]}`")
+                                                lines.append(
+                                                    f"📄 `{rel}:{lineno}` — `{snippet.strip()[:100]}`"
+                                                )
                                     if len(files_with_matches) > 8:
-                                        lines.append(f"\n…and {len(files_with_matches) - 8} more files")
+                                        lines.append(
+                                            f"\n…and {len(files_with_matches) - 8} more files"
+                                        )
                                     msg = "\n".join(lines)
                             except subprocess.TimeoutExpired:
-                                msg = "❌ Search timed out. Try a more specific keyword."
+                                msg = (
+                                    "❌ Search timed out. Try a more specific keyword."
+                                )
                             except Exception as exc:
                                 msg = f"❌ Search failed: {exc}"
                             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
-                    elif cmd == '/remember':
+                    elif cmd == "/remember":
                         fact = " ".join(args)
                         if not fact:
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/remember <fact to save>`'})}\n\n"
@@ -778,12 +1099,12 @@ def create_agent_router() -> APIRouter:
                             try:
                                 _memory_manager.add(fact)
                                 count = len(_memory_manager)
-                                plural = 'ies' if count != 1 else 'y'
-                                confirm_msg = f'✅ Remembered: *{fact}*\n\n({count} total memor{plural} saved)'
+                                plural = "ies" if count != 1 else "y"
+                                confirm_msg = f"✅ Remembered: *{fact}*\n\n({count} total memor{plural} saved)"
                                 yield f"data: {__import__('json').dumps({'type': 'text', 'content': confirm_msg})}\n\n"
                             except ValueError as e:
                                 yield f"data: {json.dumps({'type': 'text', 'content': f'⚠ {e}'})}\n\n"
-                    elif cmd == '/memories':
+                    elif cmd == "/memories":
                         memories = _memory_manager.list()
                         if not memories:
                             yield f"data: {json.dumps({'type': 'text', 'content': '📭 No memories saved yet. Use `/remember <fact>` to save one.'})}\n\n"
@@ -791,9 +1112,11 @@ def create_agent_router() -> APIRouter:
                             lines = [f"🧠 **Saved Memories ({len(memories)}):**\n"]
                             for i, m in enumerate(memories, 1):
                                 lines.append(f"{i}. {m['fact']}")
-                            lines.append("\n*Use `/forget <number>` to delete a memory.*")
+                            lines.append(
+                                "\n*Use `/forget <number>` to delete a memory.*"
+                            )
                             yield f"data: {json.dumps({'type': 'text', 'content': chr(10).join(lines)})}\n\n"
-                    elif cmd == '/forget':
+                    elif cmd == "/forget":
                         arg = " ".join(args)
                         if not arg:
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/forget <number>` or `/forget <text>`'})}\n\n"
@@ -806,7 +1129,7 @@ def create_agent_router() -> APIRouter:
                                 yield f"data: {json.dumps({'type': 'text', 'content': f'🗑 Forgot: *{removed}*'})}\n\n"
                             else:
                                 yield f"data: {json.dumps({'type': 'text', 'content': f'❌ Memory not found: `{arg}`. Use `/memories` to list them.'})}\n\n"
-                    elif cmd == '/model':
+                    elif cmd == "/model":
                         if args:
                             new_model = args[0]
                             proxy.cli_config.default_model = new_model
@@ -814,7 +1137,7 @@ def create_agent_router() -> APIRouter:
                             yield f"data: {json.dumps({'type': 'text', 'content': f'🔄 Model changed to: `{new_model}`'})}\n\n"
                         else:
                             yield f"data: {json.dumps({'type': 'text', 'content': '💡 Usage: `/model <model_id>` to switch models, or select the model chip below.'})}\n\n"
-                    elif cmd == '/help':
+                    elif cmd == "/help":
                         help_text = (
                             "💡 **Available Slash Commands:**\n\n"
                             "**Code actions** (need a selection or open file):\n"
@@ -845,16 +1168,19 @@ def create_agent_router() -> APIRouter:
                             "- `/diff`: How to view the last file diff.\n"
                             "- `/tools`: List all tools the agent can call.\n"
                             "- `/mcp`: List connected MCP servers and their tools.\n"
-                            "- `/git <status|diff|log|branch|commit \"msg\">`: Run git commands."
+                            '- `/git <status|diff|log|branch|commit "msg">`: Run git commands.'
                         )
                         yield f"data: {json.dumps({'type': 'text', 'content': help_text})}\n\n"
                     else:
                         # Unknown slash command — route to agent as a normal message
                         req.message = msg_stripped
                         prompt = _build_prompt(req)
+
                         async def route_to_agent():
                             steps = 0
-                            loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+                            loop_agent = proxy._ensure_agent_loop(
+                                req.workspace, fresh_session=bool(req.conversation_id)
+                            )
                             gen = loop_agent.stream_chat(prompt)
                             last_disconnect_check = [0.0]
                             client_gone = False
@@ -864,7 +1190,9 @@ def create_agent_router() -> APIRouter:
                                         chunk = await gen.__anext__()
                                     except StopAsyncIteration:
                                         break
-                                    if not client_gone and await _client_disconnected(request, last_disconnect_check):
+                                    if not client_gone and await _client_disconnected(
+                                        request, last_disconnect_check
+                                    ):
                                         client_gone = True
                                     if not client_gone:
                                         yield f"data: {json.dumps(chunk)}\n\n"
@@ -877,6 +1205,7 @@ def create_agent_router() -> APIRouter:
                                     proxy.save_session(req.workspace)
                                 if not client_gone:
                                     yield f"data: {json.dumps({'type': 'error', 'content': str(exc)})}\n\n"
+
                         async for chunk in route_to_agent():
                             yield chunk
                         return
@@ -902,7 +1231,9 @@ def create_agent_router() -> APIRouter:
 
         async def event_gen():
             steps = 0
-            loop_agent = proxy._ensure_agent_loop(req.workspace, fresh_session=bool(req.conversation_id))
+            loop_agent = proxy._ensure_agent_loop(
+                req.workspace, fresh_session=bool(req.conversation_id)
+            )
             loop_agent.config.require_plan_approval = req.require_plan_approval
             if req.use_tool_search is not None:
                 loop_agent.config.use_tool_search = req.use_tool_search
@@ -912,13 +1243,19 @@ def create_agent_router() -> APIRouter:
             # user returns to normal chat so a previous selection cannot leak.
             loop_agent.config.allowed_tools = req.allowed_tools or None
             if req.context_compaction_threshold is not None:
-                loop_agent.context_manager.compaction_threshold = req.context_compaction_threshold
+                loop_agent.context_manager.compaction_threshold = (
+                    req.context_compaction_threshold
+                )
             if req.context_compaction_keep_recent is not None:
-                loop_agent.context_manager.compaction_keep_recent = req.context_compaction_keep_recent
+                loop_agent.context_manager.compaction_keep_recent = (
+                    req.context_compaction_keep_recent
+                )
             gen = loop_agent.stream_chat(prompt)
             last_disconnect_check = [0.0]
             client_gone = False
-            to_send = None  # value fed back into gen.asend(); only plan approval uses this
+            to_send = (
+                None  # value fed back into gen.asend(); only plan approval uses this
+            )
             try:
                 # Flush SSE before a slow or cold model starts so clients do
                 # not mistake model startup for an unreachable local server.
@@ -936,10 +1273,14 @@ def create_agent_router() -> APIRouter:
                         if not client_gone:
                             yield f"data: {json.dumps(chunk)}\n\n"
                         if plan_id:
-                            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                            fut: asyncio.Future = (
+                                asyncio.get_event_loop().create_future()
+                            )
                             _pending_approvals[plan_id] = fut
                             try:
-                                approved = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_SECONDS)
+                                approved = await asyncio.wait_for(
+                                    fut, timeout=APPROVAL_TIMEOUT_SECONDS
+                                )
                             except asyncio.TimeoutError:
                                 approved = False
                             finally:
@@ -947,7 +1288,9 @@ def create_agent_router() -> APIRouter:
                             to_send = approved
                         continue
 
-                    if not client_gone and await _client_disconnected(request, last_disconnect_check):
+                    if not client_gone and await _client_disconnected(
+                        request, last_disconnect_check
+                    ):
                         # Client is gone, but keep draining the agent loop so
                         # any in-flight tool call finishes and the session
                         # still gets saved server-side — just stop forwarding
@@ -966,16 +1309,24 @@ def create_agent_router() -> APIRouter:
                         if not client_gone:
                             yield f"data: {json.dumps(chunk)}\n\n"
 
-                        if req.permission_mode == "ask" and _requires_approval(tool_name) and call_id:
+                        if (
+                            req.permission_mode == "ask"
+                            and _requires_approval(tool_name)
+                            and call_id
+                        ):
                             # Genuinely pause here — the underlying async generator has not
                             # advanced past this yield, so AgentLoop._execute_tool_calls has
                             # NOT run yet. Nothing executes until this future resolves.
-                            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+                            fut: asyncio.Future = (
+                                asyncio.get_event_loop().create_future()
+                            )
                             _pending_approvals[call_id] = fut
                             try:
                                 if not client_gone:
                                     yield f"data: {json.dumps({'type': 'approval_required', 'content': {'call_id': call_id, 'name': tool_name, 'arguments': content.get('arguments', {})}})}\n\n"
-                                approved = await asyncio.wait_for(fut, timeout=APPROVAL_TIMEOUT_SECONDS)
+                                approved = await asyncio.wait_for(
+                                    fut, timeout=APPROVAL_TIMEOUT_SECONDS
+                                )
                             except asyncio.TimeoutError:
                                 approved = False
                             finally:
@@ -1060,25 +1411,27 @@ def create_agent_router() -> APIRouter:
         keys = getattr(proxy.cli_config, "api_keys", {}) or {}
         models = []
         for m in registry.list_all_models():
-            models.append({
-                "id": m.id,
-                "name": m.name,
-                "provider": m.provider,
-                "tier": m.tier,
-                "description": m.description,
-                "has_key": (
-                    bool(keys.get(m.id))
-                    or bool(keys.get(m.id.lower()))
-                    or (
-                        m.provider not in ("nvidia", "anthropic", "openai")
-                        and (
-                            bool(keys.get(m.provider))
-                            or bool(keys.get(m.provider.lower()))
+            models.append(
+                {
+                    "id": m.id,
+                    "name": m.name,
+                    "provider": m.provider,
+                    "tier": m.tier,
+                    "description": m.description,
+                    "has_key": (
+                        bool(keys.get(m.id))
+                        or bool(keys.get(m.id.lower()))
+                        or (
+                            m.provider not in ("nvidia", "anthropic", "openai")
+                            and (
+                                bool(keys.get(m.provider))
+                                or bool(keys.get(m.provider.lower()))
+                            )
                         )
-                    )
-                    or not m.requires_key
-                ),
-            })
+                        or not m.requires_key
+                    ),
+                }
+            )
         return {
             "models": models,
             "current": proxy.cli_config.default_model,
@@ -1169,6 +1522,7 @@ def create_agent_router() -> APIRouter:
         servers = []
         try:
             from dabba.platform.services import ConnectorRuntime
+
             connector_runtime = ConnectorRuntime()
         except Exception:
             connector_runtime = None
@@ -1177,7 +1531,9 @@ def create_agent_router() -> APIRouter:
             tools = live["tools_by_server"].get(name, [])
             authenticated = connected and bool(tools)
             read_only = True
-            health_message = None if tools else "No tools were discovered from the connector."
+            health_message = (
+                None if tools else "No tools were discovered from the connector."
+            )
             if name.lower() == "linkedin":
                 # The built-in LinkedIn server exposes public/simulation tools
                 # even without an account token. Tool discovery therefore does
@@ -1198,17 +1554,19 @@ def create_agent_router() -> APIRouter:
                     read_only=read_only,
                     message=health_message,
                 )
-            servers.append({
-                "name": name,
-                "command": cfg.command,
-                "args": cfg.args,
-                "connected": bool(verified and verified["status"] == "connected"),
-                "processRunning": connected,
-                "authenticated": bool(verified and verified["authenticated"]),
-                "verifiedStatus": verified["status"] if verified else "unknown",
-                "message": verified["message"] if verified else health_message,
-                "tools": tools,
-            })
+            servers.append(
+                {
+                    "name": name,
+                    "command": cfg.command,
+                    "args": cfg.args,
+                    "connected": bool(verified and verified["status"] == "connected"),
+                    "processRunning": connected,
+                    "authenticated": bool(verified and verified["authenticated"]),
+                    "verifiedStatus": verified["status"] if verified else "unknown",
+                    "message": verified["message"] if verified else health_message,
+                    "tools": tools,
+                }
+            )
         return {"servers": servers}
 
     @router.post("/v1/mcp/reload")
@@ -1235,7 +1593,12 @@ def create_agent_router() -> APIRouter:
         ever *adds* new sessions). This is how the web UI's "Add connector"
         form and the VSCode extension's MCP panel both create servers.
         """
-        from dabba.agent.mcp_client import load_mcp_config, save_mcp_config, register_mcp_tools, McpServerConfig
+        from dabba.agent.mcp_client import (
+            load_mcp_config,
+            save_mcp_config,
+            register_mcp_tools,
+            McpServerConfig,
+        )
 
         name = req.name.strip()
         command = req.command.strip()
@@ -1246,9 +1609,13 @@ def create_agent_router() -> APIRouter:
 
         configs = load_mcp_config()
         if name in configs:
-            raise HTTPException(status_code=409, detail=f"A connector named '{name}' already exists")
+            raise HTTPException(
+                status_code=409, detail=f"A connector named '{name}' already exists"
+            )
 
-        configs[name] = McpServerConfig(name=name, command=command, args=req.args, env=req.env)
+        configs[name] = McpServerConfig(
+            name=name, command=command, args=req.args, env=req.env
+        )
         save_mcp_config(configs)
 
         proxy = _get_agent_proxy()
@@ -1272,6 +1639,7 @@ def create_agent_router() -> APIRouter:
         save_mcp_config(configs)
 
         from dabba.agent.mcp_client import register_mcp_tools
+
         proxy = _get_agent_proxy()
         summary = proxy.mcp_manager.connect(configs)
         register_mcp_tools(proxy._get_registry(), proxy.mcp_manager)

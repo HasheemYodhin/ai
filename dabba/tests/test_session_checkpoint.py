@@ -15,7 +15,9 @@ def _make_session(tmp_path):
     output = OutputHandler(config=config, no_color=True)
     permissions = PermissionManager(mode="ask", persistent=False)
     agent = AgentProxy(cli_config=config, output=output, permissions=permissions)
-    return InteractiveSession(agent=agent, output=output, config=config, permissions=permissions)
+    return InteractiveSession(
+        agent=agent, output=output, config=config, permissions=permissions
+    )
 
 
 def test_checkpoint_restores_full_agent_state(tmp_path):
@@ -25,7 +27,9 @@ def test_checkpoint_restores_full_agent_state(tmp_path):
     loop.run("Please help me build something")
     session.permissions.grant_session("shell_exec")
     session.permissions.set_mode("allow")
-    session.history.append({"role": "user", "content": "Please help me build something"})
+    session.history.append(
+        {"role": "user", "content": "Please help me build something"}
+    )
     session.history.append({"role": "assistant", "content": "OK, doing that."})
 
     save_path = str(tmp_path / "checkpoint.jsonl")

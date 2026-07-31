@@ -18,6 +18,7 @@ from typing import Callable, Dict, List, Optional, Set
 def _get_logger():
     """Lazy logger to avoid importing torch through dabba.utils."""
     from dabba.utils.logging import get_logger
+
     return get_logger("dabba.cli.file_watcher")
 
 
@@ -56,10 +57,32 @@ class FileWatcher:
     ):
         self.workspace_root = Path(workspace_root).resolve()
         self.extensions = extensions or {
-            ".py", ".js", ".ts", ".rs", ".go", ".md", ".txt",
-            ".yaml", ".yml", ".json", ".toml", ".cfg", ".ini",
-            ".html", ".css", ".scss", ".less", ".vue", ".svelte",
-            ".c", ".cpp", ".h", ".hpp", ".java", ".kt", ".swift",
+            ".py",
+            ".js",
+            ".ts",
+            ".rs",
+            ".go",
+            ".md",
+            ".txt",
+            ".yaml",
+            ".yml",
+            ".json",
+            ".toml",
+            ".cfg",
+            ".ini",
+            ".html",
+            ".css",
+            ".scss",
+            ".less",
+            ".vue",
+            ".svelte",
+            ".c",
+            ".cpp",
+            ".h",
+            ".hpp",
+            ".java",
+            ".kt",
+            ".swift",
         }
         self.callback = callback
         self.poll_interval = poll_interval

@@ -214,6 +214,7 @@ class DocumentParser:
 
         try:
             import fitz
+
             doc = fitz.open(str(path))
             for page in doc:
                 text = page.get_text().strip()
@@ -223,6 +224,7 @@ class DocumentParser:
         except ImportError:
             try:
                 from pdfminer.high_level import extract_text
+
                 text = extract_text(str(path))
                 if text.strip():
                     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
@@ -240,7 +242,11 @@ class DocumentParser:
             return []
 
         document = Document(str(path))
-        texts = [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+        texts = [
+            paragraph.text.strip()
+            for paragraph in document.paragraphs
+            if paragraph.text.strip()
+        ]
         for table in document.tables:
             for row in table.rows:
                 cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
@@ -257,7 +263,9 @@ class DocumentParser:
             if "xl/sharedStrings.xml" in names:
                 root = ET.fromstring(archive.read("xl/sharedStrings.xml"))
                 for item in root.findall(".//{*}si"):
-                    shared_strings.append("".join(node.text or "" for node in item.findall(".//{*}t")))
+                    shared_strings.append(
+                        "".join(node.text or "" for node in item.findall(".//{*}t"))
+                    )
 
             sheet_names: Dict[str, str] = {}
             if "xl/workbook.xml" in names:
@@ -266,7 +274,11 @@ class DocumentParser:
                     sheet_names[str(index)] = sheet.attrib.get("name", f"Sheet {index}")
 
             worksheet_paths = sorted(
-                (name for name in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name)),
+                (
+                    name
+                    for name in names
+                    if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name)
+                ),
                 key=lambda name: int(re.search(r"(\d+)", Path(name).stem).group(1)),
             )
             for index, worksheet_path in enumerate(worksheet_paths, start=1):
@@ -278,7 +290,9 @@ class DocumentParser:
                         cell_type = cell.attrib.get("t")
                         value_node = cell.find("{*}v")
                         if cell_type == "inlineStr":
-                            value = "".join(node.text or "" for node in cell.findall(".//{*}t"))
+                            value = "".join(
+                                node.text or "" for node in cell.findall(".//{*}t")
+                            )
                         elif value_node is None:
                             value = ""
                         elif cell_type == "s":
@@ -304,7 +318,8 @@ class DocumentParser:
         with zipfile.ZipFile(path) as archive:
             slide_paths = sorted(
                 (
-                    name for name in archive.namelist()
+                    name
+                    for name in archive.namelist()
                     if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
                 ),
                 key=lambda name: int(re.search(r"(\d+)", Path(name).stem).group(1)),
@@ -313,7 +328,9 @@ class DocumentParser:
                 root = ET.fromstring(archive.read(slide_path))
                 paragraphs = []
                 for paragraph in root.findall(".//{*}p"):
-                    text = "".join(node.text or "" for node in paragraph.findall(".//{*}t")).strip()
+                    text = "".join(
+                        node.text or "" for node in paragraph.findall(".//{*}t")
+                    ).strip()
                     if text:
                         paragraphs.append(text)
                 if paragraphs:
@@ -343,10 +360,19 @@ class DocumentParser:
 
         if extensions is None:
             extensions = [
-                ".txt", ".md", ".json", ".jsonl", ".csv",
-                ".pdf", ".docx", ".xlsx", ".pptx",
+                ".txt",
+                ".md",
+                ".json",
+                ".jsonl",
+                ".csv",
+                ".pdf",
+                ".docx",
+                ".xlsx",
+                ".pptx",
             ]
-        extensions = [e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions]
+        extensions = [
+            e.lower() if e.startswith(".") else f".{e.lower()}" for e in extensions
+        ]
 
         pattern = "**/*" if recursive else "*"
         for file_path in dir_path.glob(pattern):

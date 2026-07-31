@@ -36,6 +36,7 @@ class EvictionPolicy(Enum):
         LRU: Evict least recently used entries.
         SLIDING_WINDOW: Keep only the most recent entries.
     """
+
     NONE = "none"
     LRU = "lru"
     SLIDING_WINDOW = "sliding_window"
@@ -50,6 +51,7 @@ class QuantizationMode(Enum):
         INT8: 8-bit integer quantization per channel.
         FP8: 8-bit floating point (E4M3 or E5M2).
     """
+
     NONE = "none"
     INT8 = "int8"
     FP8 = "fp8"
@@ -68,6 +70,7 @@ class BlockMetadata:
         last_access_step: Last step this block was accessed (for LRU).
         is_active: Whether the block is currently in use.
     """
+
     block_id: int = 0
     layer_idx: int = 0
     sequence_idx: int = 0
@@ -111,12 +114,18 @@ class PagedBlock:
 
         # Allocate fixed-size buffer
         self.key_buffer = torch.zeros(
-            block_size, num_heads, head_dim,
-            dtype=dtype, device=device,
+            block_size,
+            num_heads,
+            head_dim,
+            dtype=dtype,
+            device=device,
         )
         self.value_buffer = torch.zeros(
-            block_size, num_heads, head_dim,
-            dtype=dtype, device=device,
+            block_size,
+            num_heads,
+            head_dim,
+            dtype=dtype,
+            device=device,
         )
         self.num_tokens = 0
 
@@ -153,8 +162,8 @@ class PagedBlock:
             (num_tokens, num_heads, head_dim).
         """
         return (
-            self.key_buffer[:self.num_tokens],
-            self.value_buffer[:self.num_tokens],
+            self.key_buffer[: self.num_tokens],
+            self.value_buffer[: self.num_tokens],
         )
 
     def clear(self) -> None:
@@ -270,8 +279,7 @@ class KVCacheOptimizer:
             New PagedBlock, or evicts an existing block if at capacity.
         """
         # Check capacity
-        if (self.max_blocks > 0
-                and len(self._blocks[layer_idx]) >= self.max_blocks):
+        if self.max_blocks > 0 and len(self._blocks[layer_idx]) >= self.max_blocks:
             self._evict_block(layer_idx)
 
         block = PagedBlock(
@@ -350,7 +358,9 @@ class KVCacheOptimizer:
         """
         blocks = self._blocks[layer_idx]
         if not blocks:
-            return torch.empty(0, device=self.device), torch.empty(0, device=self.device)
+            return torch.empty(0, device=self.device), torch.empty(
+                0, device=self.device
+            )
 
         keys_list = []
         values_list = []
@@ -571,7 +581,7 @@ class KVCacheOptimizer:
             layer_tokens = sum(b.num_tokens for b in blocks)
             layer_blocks = len(blocks)
             per_layer[layer_idx] = {
-                "memory_mb": layer_bytes / (1024 ** 2),
+                "memory_mb": layer_bytes / (1024**2),
                 "tokens": layer_tokens,
                 "blocks": layer_blocks,
             }
@@ -580,8 +590,8 @@ class KVCacheOptimizer:
             num_blocks += layer_blocks
 
         return {
-            "total_memory_mb": total_bytes / (1024 ** 2),
-            "total_memory_gb": total_bytes / (1024 ** 3),
+            "total_memory_mb": total_bytes / (1024**2),
+            "total_memory_gb": total_bytes / (1024**3),
             "num_blocks": num_blocks,
             "total_tokens_cached": total_tokens,
             "per_layer": per_layer,
@@ -640,9 +650,14 @@ class KVCacheOptimizer:
         bytes_per_elem = 2  # FP16 baseline
 
         baseline_bytes = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * bytes_per_elem
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * bytes_per_elem
         )
-        baseline_mb = baseline_bytes / (1024 ** 2)
+        baseline_mb = baseline_bytes / (1024**2)
 
         if self.quantization_mode == QuantizationMode.INT8:
             opt_bytes_per_elem = 1
@@ -652,14 +667,21 @@ class KVCacheOptimizer:
             opt_bytes_per_elem = bytes_per_elem
 
         optimized_bytes = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * opt_bytes_per_elem
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * opt_bytes_per_elem
         )
 
         # Block management overhead (small)
         num_blocks = math.ceil(seq_length / self.block_size)
-        overhead_bytes = num_blocks * cfg.num_layers * 64  # ~64 bytes metadata per block
+        overhead_bytes = (
+            num_blocks * cfg.num_layers * 64
+        )  # ~64 bytes metadata per block
 
-        optimized_mb = (optimized_bytes + overhead_bytes) / (1024 ** 2)
+        optimized_mb = (optimized_bytes + overhead_bytes) / (1024**2)
         saved_mb = baseline_mb - optimized_mb
         saved_pct = (saved_mb / baseline_mb * 100) if baseline_mb > 0 else 0
 

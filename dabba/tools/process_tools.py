@@ -21,7 +21,11 @@ from typing import Dict, List, Optional
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry
-from dabba.tools.shell_tools import DEFAULT_PERMISSION_MANAGER, ShellPermissionManager, _spawn
+from dabba.tools.shell_tools import (
+    DEFAULT_PERMISSION_MANAGER,
+    ShellPermissionManager,
+    _spawn,
+)
 from dabba.utils.logging import get_logger
 
 logger = get_logger("dabba.tools.process_tools")
@@ -96,12 +100,21 @@ async def start_process(
     process_id = uuid.uuid4().hex[:12]
     managed = ManagedProcess(process_id=process_id, command=command, proc=proc)
     if proc.stdout:
-        managed._readers.append(asyncio.ensure_future(_pump(proc.stdout, managed.stdout_lines)))
+        managed._readers.append(
+            asyncio.ensure_future(_pump(proc.stdout, managed.stdout_lines))
+        )
     if proc.stderr:
-        managed._readers.append(asyncio.ensure_future(_pump(proc.stderr, managed.stderr_lines)))
+        managed._readers.append(
+            asyncio.ensure_future(_pump(proc.stderr, managed.stderr_lines))
+        )
 
     _PROCESSES[process_id] = managed
-    logger.info("Started background process '%s' (pid=%s): %s", process_id, proc.pid, command[:100])
+    logger.info(
+        "Started background process '%s' (pid=%s): %s",
+        process_id,
+        proc.pid,
+        command[:100],
+    )
 
     return {
         "process_id": process_id,
@@ -121,13 +134,15 @@ def list_processes() -> List[Dict[str, object]]:
     """
     result = []
     for p in _PROCESSES.values():
-        result.append({
-            "process_id": p.process_id,
-            "command": p.command,
-            "pid": p.proc.pid,
-            "status": p.status,
-            "uptime_seconds": round(time.monotonic() - p.started_at, 1),
-        })
+        result.append(
+            {
+                "process_id": p.process_id,
+                "command": p.command,
+                "pid": p.proc.pid,
+                "status": p.status,
+                "uptime_seconds": round(time.monotonic() - p.started_at, 1),
+            }
+        )
     return result
 
 
@@ -190,7 +205,9 @@ async def stop_process(process_id: str, force: bool = False) -> Dict[str, object
     for reader in managed._readers:
         reader.cancel()
 
-    logger.info("Stopped background process '%s' (status=%s)", process_id, managed.status)
+    logger.info(
+        "Stopped background process '%s' (status=%s)", process_id, managed.status
+    )
     return {"process_id": process_id, "status": managed.status}
 
 
@@ -210,9 +227,25 @@ def register_process_tools(registry: ToolRegistry) -> None:
                 "poll its logs and process_stop to end it."
             ),
             parameters=[
-                ToolParameter(name="command", type="string", description="Command to run in the background."),
-                ToolParameter(name="name", type="string", description="Friendly label for the process.", required=False, default=None),
-                ToolParameter(name="cwd", type="string", description="Working directory to run in.", required=False, default=None),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="Command to run in the background.",
+                ),
+                ToolParameter(
+                    name="name",
+                    type="string",
+                    description="Friendly label for the process.",
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="cwd",
+                    type="string",
+                    description="Working directory to run in.",
+                    required=False,
+                    default=None,
+                ),
             ],
             handler=start_process,
             handler_sync=False,
@@ -234,8 +267,18 @@ def register_process_tools(registry: ToolRegistry) -> None:
             name="process_output",
             description="Get buffered stdout/stderr from a background process.",
             parameters=[
-                ToolParameter(name="process_id", type="string", description="ID returned by process_start."),
-                ToolParameter(name="tail", type="integer", description="Max lines to return per stream.", required=False, default=200),
+                ToolParameter(
+                    name="process_id",
+                    type="string",
+                    description="ID returned by process_start.",
+                ),
+                ToolParameter(
+                    name="tail",
+                    type="integer",
+                    description="Max lines to return per stream.",
+                    required=False,
+                    default=200,
+                ),
             ],
             handler=get_process_output,
             handler_sync=True,
@@ -247,8 +290,18 @@ def register_process_tools(registry: ToolRegistry) -> None:
             name="process_stop",
             description="Stop a background process started with process_start.",
             parameters=[
-                ToolParameter(name="process_id", type="string", description="ID returned by process_start."),
-                ToolParameter(name="force", type="boolean", description="Send SIGKILL instead of SIGTERM.", required=False, default=False),
+                ToolParameter(
+                    name="process_id",
+                    type="string",
+                    description="ID returned by process_start.",
+                ),
+                ToolParameter(
+                    name="force",
+                    type="boolean",
+                    description="Send SIGKILL instead of SIGTERM.",
+                    required=False,
+                    default=False,
+                ),
             ],
             handler=stop_process,
             handler_sync=False,

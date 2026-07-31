@@ -39,7 +39,11 @@ def json_loads(value: Optional[str], default: Any = None) -> Any:
 def get_platform_data_dir() -> Path:
     """Return the overrideable root for mutable platform state."""
     configured = os.environ.get("DABBA_DATA_DIR")
-    return Path(configured).expanduser().resolve() if configured else get_dabba_config_dir()
+    return (
+        Path(configured).expanduser().resolve()
+        if configured
+        else get_dabba_config_dir()
+    )
 
 
 def get_workspace_roots() -> list[Path]:
@@ -47,7 +51,8 @@ def get_workspace_roots() -> list[Path]:
     configured = os.environ.get("DABBA_WORKSPACE_ROOTS", "")
     candidates = (
         [Path(value) for value in configured.split(os.pathsep) if value.strip()]
-        if configured else [Path.cwd(), Path.home()]
+        if configured
+        else [Path.cwd(), Path.home()]
     )
     roots: list[Path] = []
     for candidate in candidates:

@@ -87,14 +87,18 @@ class TestNormalization:
 
 class TestAttention:
     def test_mha_forward_shape(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, cache = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_mha_with_mask(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         mask = torch.zeros(2, 1, 10, 10)
@@ -102,14 +106,22 @@ class TestAttention:
         assert out.shape == (2, 10, 64)
 
     def test_gqa_forward(self):
-        attn = GroupedQueryAttention(hidden_size=64, num_heads=4, num_key_value_heads=2, head_dim=16, max_position_embeddings=64)
+        attn = GroupedQueryAttention(
+            hidden_size=64,
+            num_heads=4,
+            num_key_value_heads=2,
+            head_dim=16,
+            max_position_embeddings=64,
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, cache = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_mqa_forward(self):
-        attn = MultiQueryAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiQueryAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, cache = attn(x, position_ids=pos)
@@ -139,7 +151,9 @@ class TestAttention:
         assert cache.size == 0
 
     def test_attention_use_cache(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, cache = attn(x, position_ids=pos, use_cache=True)

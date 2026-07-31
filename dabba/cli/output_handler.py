@@ -16,7 +16,6 @@ from typing import Any, Generator, List, Optional, TextIO
 
 from dabba.cli.config import CliConfig
 
-
 try:
     from rich.console import Console
     from rich.markdown import Markdown
@@ -29,6 +28,7 @@ try:
     from rich.columns import Columns
     from rich.padding import Padding
     import rich.box as box
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -39,20 +39,21 @@ try:
     from prompt_toolkit.styles import Style as PTStyle
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.key_binding import KeyBindings
+
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
 
 # Color palette
-_C_USER     = "bold cyan"
-_C_DABBA    = "bold green"
-_C_SYSTEM   = "dim white"
-_C_ERROR    = "bold red"
-_C_WARNING  = "bold yellow"
-_C_INFO     = "dim"
-_C_TOOL     = "bold blue"
-_C_BORDER   = "bright_black"
+_C_USER = "bold cyan"
+_C_DABBA = "bold green"
+_C_SYSTEM = "dim white"
+_C_ERROR = "bold red"
+_C_WARNING = "bold yellow"
+_C_INFO = "dim"
+_C_TOOL = "bold blue"
+_C_BORDER = "bright_black"
 
 
 @dataclass
@@ -86,10 +87,12 @@ class OutputHandler:
         if PROMPT_TOOLKIT_AVAILABLE and not self.no_color:
             self._prompt_session = PromptSession(
                 history=InMemoryHistory(),
-                style=PTStyle.from_dict({
-                    "prompt": "bold ansicyan",
-                    "": "ansiwhite",
-                }),
+                style=PTStyle.from_dict(
+                    {
+                        "prompt": "bold ansicyan",
+                        "": "ansiwhite",
+                    }
+                ),
                 multiline=False,
                 wrap_lines=True,
             )
@@ -256,7 +259,7 @@ class OutputHandler:
         with Live(
             _make_spinner(0),
             console=self._console,
-            transient=True,      # erased from screen when done
+            transient=True,  # erased from screen when done
             refresh_per_second=12,
         ) as live:
             stop_event = threading.Event()
@@ -337,7 +340,9 @@ class OutputHandler:
 
     def warning(self, message: str) -> None:
         if RICH_AVAILABLE and self._console:
-            self._console.print(f"  [bold yellow]![/bold yellow]  {message}", style="yellow")
+            self._console.print(
+                f"  [bold yellow]![/bold yellow]  {message}", style="yellow"
+            )
         else:
             self._write_plain(f"  !  {message}")
 
@@ -373,12 +378,16 @@ class OutputHandler:
     def markdown(self, text: str) -> None:
         """Render markdown text."""
         if RICH_AVAILABLE and self._console:
-            md = Markdown(text, code_theme=getattr(self.config, "syntax_theme", "monokai"))
+            md = Markdown(
+                text, code_theme=getattr(self.config, "syntax_theme", "monokai")
+            )
             self._console.print(Padding(md, (0, 0, 0, 2)))
         else:
             self._write_plain(text)
 
-    def code_block(self, code: str, language: str = "", title: Optional[str] = None) -> None:
+    def code_block(
+        self, code: str, language: str = "", title: Optional[str] = None
+    ) -> None:
         if RICH_AVAILABLE and self._console:
             try:
                 syntax = Syntax(
@@ -389,7 +398,9 @@ class OutputHandler:
                     padding=1,
                 )
                 if title:
-                    self._console.print(Panel(syntax, title=title, border_style="bright_black"))
+                    self._console.print(
+                        Panel(syntax, title=title, border_style="bright_black")
+                    )
                 else:
                     self._console.print(Panel(syntax, border_style="bright_black"))
             except Exception:
@@ -412,11 +423,18 @@ class OutputHandler:
                 t.add_row(*[str(c) for c in row])
             self._console.print(Padding(t, (0, 0, 0, 2)))
         else:
-            col_w = [max(len(h), max((len(str(r[i])) for r in rows), default=0)) for i, h in enumerate(headers)]
-            self._write_plain("  " + " │ ".join(h.ljust(w) for h, w in zip(headers, col_w)))
+            col_w = [
+                max(len(h), max((len(str(r[i])) for r in rows), default=0))
+                for i, h in enumerate(headers)
+            ]
+            self._write_plain(
+                "  " + " │ ".join(h.ljust(w) for h, w in zip(headers, col_w))
+            )
             self._write_plain("  " + "─┼─".join("─" * w for w in col_w))
             for row in rows:
-                self._write_plain("  " + " │ ".join(str(c).ljust(w) for c, w in zip(row, col_w)))
+                self._write_plain(
+                    "  " + " │ ".join(str(c).ljust(w) for c, w in zip(row, col_w))
+                )
 
     def divider(self, char: str = "─", length: int = 60) -> None:
         if RICH_AVAILABLE and self._console:

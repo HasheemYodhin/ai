@@ -32,7 +32,6 @@ from dabba.platform.core import (
     utc_ms,
 )
 
-
 TASK_STATES = {
     "queued",
     "planning",
@@ -47,13 +46,18 @@ TERMINAL_TASK_STATES = {"completed", "failed", "cancelled"}
 
 
 def compute_next_run(
-    cadence: str, after_ms: int, interval_minutes: Optional[int],
-    time_of_day: Optional[str], weekdays: Optional[list[int]],
+    cadence: str,
+    after_ms: int,
+    interval_minutes: Optional[int],
+    time_of_day: Optional[str],
+    weekdays: Optional[list[int]],
 ) -> int:
     """Next fire time (epoch ms) for a recurring schedule. Shared by skill and Cowork schedules."""
     after = datetime.fromtimestamp(after_ms / 1000, tz=timezone.utc)
     if cadence == "interval":
-        return int((after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000)
+        return int(
+            (after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000
+        )
     hour, minute = map(int, (time_of_day or "09:00").split(":"))
     candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if candidate <= after:
@@ -66,8 +70,10 @@ def compute_next_run(
 
 
 def validate_cadence(
-    cadence: str, interval_minutes: Optional[int],
-    time_of_day: Optional[str], weekdays: Optional[list[int]],
+    cadence: str,
+    interval_minutes: Optional[int],
+    time_of_day: Optional[str],
+    weekdays: Optional[list[int]],
 ) -> None:
     """Validate recurring-schedule fields. Shared by skill and Cowork schedules."""
     if cadence not in {"interval", "daily", "weekly"}:
@@ -83,6 +89,8 @@ def validate_cadence(
             raise ValueError("Time must use HH:MM")
     if cadence == "weekly" and not all(day in range(7) for day in (weekdays or [])):
         raise ValueError("Weekdays must be between 0 and 6")
+
+
 TASK_TRANSITIONS = {
     "queued": {"planning", "running", "cancelled", "failed"},
     "planning": {"running", "waiting_for_approval", "cancelled", "failed"},
@@ -192,7 +200,10 @@ class TaskOrchestrator:
         if status not in TASK_STATES:
             raise ValueError(f"Unknown task state: {status}")
         current = self.get(task_id)
-        if status != current["status"] and status not in TASK_TRANSITIONS[current["status"]]:
+        if (
+            status != current["status"]
+            and status not in TASK_TRANSITIONS[current["status"]]
+        ):
             raise ValueError(
                 f"Invalid task transition: {current['status']} -> {status}"
             )
@@ -300,7 +311,9 @@ class TaskOrchestrator:
     def run(
         self,
         task_id: str,
-        handler: Callable[[Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]],
+        handler: Callable[
+            [Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]
+        ],
     ) -> Dict[str, Any]:
         """Run a registered job handler while persisting progress and failure."""
         task = self.get(task_id)
@@ -334,7 +347,9 @@ class TaskOrchestrator:
     def submit(
         self,
         task_id: str,
-        handler: Callable[[Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]],
+        handler: Callable[
+            [Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]
+        ],
     ) -> threading.Thread:
         """Start a durable in-process job; external workers can call run instead."""
         thread = threading.Thread(
@@ -347,7 +362,9 @@ class TaskOrchestrator:
         return thread
 
     @staticmethod
-    def _insert_event(conn, task_id: str, kind: str, payload: Dict[str, Any], now: int) -> int:
+    def _insert_event(
+        conn, task_id: str, kind: str, payload: Dict[str, Any], now: int
+    ) -> int:
         cursor = conn.execute(
             """
             INSERT INTO task_events(task_id, event_type, payload_json, created_at)
@@ -397,11 +414,24 @@ class ApprovalService:
     def risk_for(self, action: str, arguments: Optional[Dict[str, Any]] = None) -> str:
         lowered = action.lower()
         args = json_dumps(arguments or {}).lower()
-        if any(marker in lowered or marker in args for marker in ("delete", "rm -", "secret", "token", "password", "push --force")):
+        if any(
+            marker in lowered or marker in args
+            for marker in (
+                "delete",
+                "rm -",
+                "secret",
+                "token",
+                "password",
+                "push --force",
+            )
+        ):
             return "critical"
         if lowered in self.ALWAYS_ASK or lowered in self.ASK_BY_DEFAULT:
             return "high"
-        if any(marker in lowered for marker in ("write", "edit", "execute", "send", "create")):
+        if any(
+            marker in lowered
+            for marker in ("write", "edit", "execute", "send", "create")
+        ):
             return "medium"
         return "low"
 
@@ -471,7 +501,11 @@ class ApprovalService:
         row = self.store.fetchone("SELECT * FROM approvals WHERE id=?", (approval_id,))
         if not row:
             raise KeyError(f"Approval not found: {approval_id}")
-        if row["status"] == "pending" and row["expires_at"] and row["expires_at"] < utc_ms():
+        if (
+            row["status"] == "pending"
+            and row["expires_at"]
+            and row["expires_at"] < utc_ms()
+        ):
             with self.store.transaction() as conn:
                 conn.execute(
                     "UPDATE approvals SET status='expired', decided_at=? WHERE id=?",
@@ -592,11 +626,17 @@ class IdentityService:
         row = self.store.fetchone(
             "SELECT * FROM users WHERE email=?", (email.strip().lower(),)
         )
-        if not row or row["disabled"] or not self.verify_password(password, row["password_hash"]):
+        if (
+            not row
+            or row["disabled"]
+            or not self.verify_password(password, row["password_hash"])
+        ):
             self.store.audit(
                 "identity.login",
                 "denied",
-                details={"emailHash": hashlib.sha256(email.lower().encode()).hexdigest()[:16]},
+                details={
+                    "emailHash": hashlib.sha256(email.lower().encode()).hexdigest()[:16]
+                },
             )
             raise ValueError("Invalid email or password")
         token = secrets.token_urlsafe(48)
@@ -758,7 +798,11 @@ class WorkspaceService:
         self.store = store or get_platform_store()
 
     def register(
-        self, root_path: str, *, name: Optional[str] = None, user_id: Optional[str] = None
+        self,
+        root_path: str,
+        *,
+        name: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         root = Path(root_path).expanduser().resolve()
         if not root.is_dir():
@@ -777,7 +821,9 @@ class WorkspaceService:
         return self.get(workspace_id)
 
     def get(self, workspace_id: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM workspaces WHERE id=?", (workspace_id,))
+        row = self.store.fetchone(
+            "SELECT * FROM workspaces WHERE id=?", (workspace_id,)
+        )
         if not row:
             raise KeyError(f"Workspace not found: {workspace_id}")
         return {
@@ -797,7 +843,10 @@ class WorkspaceService:
             return {
                 "path": None,
                 "parent": None,
-                "roots": [{"name": root.name or str(root), "path": str(root)} for root in roots],
+                "roots": [
+                    {"name": root.name or str(root), "path": str(root)}
+                    for root in roots
+                ],
                 "directories": [],
             }
         current = resolve_workspace_directory(path)
@@ -811,7 +860,9 @@ class WorkspaceService:
                 continue
             try:
                 if child.is_dir():
-                    directories.append({"name": child.name, "path": str(child.resolve())})
+                    directories.append(
+                        {"name": child.name, "path": str(child.resolve())}
+                    )
             except OSError:
                 continue
             if len(directories) >= 500:
@@ -823,7 +874,9 @@ class WorkspaceService:
         return {
             "path": str(current),
             "parent": str(parent) if parent else None,
-            "roots": [{"name": root.name or str(root), "path": str(root)} for root in roots],
+            "roots": [
+                {"name": root.name or str(root), "path": str(root)} for root in roots
+            ],
             "directories": directories,
         }
 
@@ -832,7 +885,8 @@ class WorkspaceService:
         roots = get_workspace_roots()
         initial = (
             resolve_workspace_directory(initial_path)
-            if initial_path else (roots[0] if roots else Path.cwd().resolve())
+            if initial_path
+            else (roots[0] if roots else Path.cwd().resolve())
         )
         if sys.platform == "win32":
             script = (
@@ -844,17 +898,30 @@ class WorkspaceService:
             command = ["powershell", "-NoProfile", "-Command", script]
         elif sys.platform == "darwin":
             command = [
-                "osascript", "-e",
+                "osascript",
+                "-e",
                 f'POSIX path of (choose folder with prompt "Choose Cowork folder" default location POSIX file "{initial}")',
             ]
         elif shutil.which("zenity"):
-            command = [shutil.which("zenity") or "zenity", "--file-selection", "--directory",
-                       "--title=Choose Cowork folder", f"--filename={initial}/"]
+            command = [
+                shutil.which("zenity") or "zenity",
+                "--file-selection",
+                "--directory",
+                "--title=Choose Cowork folder",
+                f"--filename={initial}/",
+            ]
         elif shutil.which("kdialog"):
-            command = ["kdialog", "--getexistingdirectory", str(initial),
-                       "--title", "Choose Cowork folder"]
+            command = [
+                "kdialog",
+                "--getexistingdirectory",
+                str(initial),
+                "--title",
+                "Choose Cowork folder",
+            ]
         else:
-            raise RuntimeError("A native folder chooser is not installed; use the in-app folder list")
+            raise RuntimeError(
+                "A native folder chooser is not installed; use the in-app folder list"
+            )
         chooser_environment = None
         if sys.platform.startswith("linux"):
             # Dabba is commonly launched from the Snap build of VS Code. Snap
@@ -862,14 +929,25 @@ class WorkspaceService:
             # load incompatible libraries and exit before showing a window.
             # Pass only the desktop-session values needed by the host chooser.
             desktop_keys = (
-                "HOME", "USER", "LOGNAME", "DISPLAY", "WAYLAND_DISPLAY",
-                "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY",
-                "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
+                "HOME",
+                "USER",
+                "LOGNAME",
+                "DISPLAY",
+                "WAYLAND_DISPLAY",
+                "XDG_RUNTIME_DIR",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "XAUTHORITY",
+                "LANG",
+                "LANGUAGE",
+                "LC_ALL",
+                "LC_CTYPE",
             )
             chooser_environment = {
                 key: os.environ[key] for key in desktop_keys if os.environ.get(key)
             }
-            chooser_environment["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            chooser_environment["PATH"] = (
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            )
         try:
             result = subprocess.run(
                 command,
@@ -896,7 +974,9 @@ class WorkspaceService:
             raise PermissionError("Path escapes the registered workspace")
         return candidate
 
-    def instructions_for(self, workspace_id: str, relative_path: str = "") -> list[Dict[str, str]]:
+    def instructions_for(
+        self, workspace_id: str, relative_path: str = ""
+    ) -> list[Dict[str, str]]:
         workspace = self.get(workspace_id)
         root = Path(workspace["rootPath"]).resolve()
         target = self.resolve_path(workspace_id, relative_path)
@@ -915,7 +995,9 @@ class WorkspaceService:
                     result.append(
                         {
                             "path": str(path),
-                            "content": path.read_text(encoding="utf-8", errors="replace"),
+                            "content": path.read_text(
+                                encoding="utf-8", errors="replace"
+                            ),
                         }
                     )
         return result
@@ -958,7 +1040,14 @@ class WorkspaceService:
                     (id, workspace_id, task_id, label, manifest_json, created_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (checkpoint_id, workspace_id, task_id, label, json_dumps(manifest), utc_ms()),
+                (
+                    checkpoint_id,
+                    workspace_id,
+                    task_id,
+                    label,
+                    json_dumps(manifest),
+                    utc_ms(),
+                ),
             )
         return {
             "id": checkpoint_id,
@@ -978,14 +1067,22 @@ class WorkspaceService:
         for relative in manifest:
             before_path = snapshot_root / relative
             after_path = root / relative
-            before = before_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            before = before_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
             after = (
                 after_path.read_text(encoding="utf-8", errors="replace").splitlines()
                 if after_path.exists()
                 else []
             )
             patch = "\n".join(
-                difflib.unified_diff(before, after, fromfile=f"a/{relative}", tofile=f"b/{relative}", lineterm="")
+                difflib.unified_diff(
+                    before,
+                    after,
+                    fromfile=f"a/{relative}",
+                    tofile=f"b/{relative}",
+                    lineterm="",
+                )
             )
             if patch:
                 changes.append({"path": relative, "diff": patch})
@@ -1014,7 +1111,9 @@ class WorkspaceService:
         return {"checkpointId": checkpoint_id, "restored": restored}
 
     def checkpoint_info(self, checkpoint_id: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM checkpoints WHERE id=?", (checkpoint_id,))
+        row = self.store.fetchone(
+            "SELECT * FROM checkpoints WHERE id=?", (checkpoint_id,)
+        )
         if not row:
             raise KeyError(f"Checkpoint not found: {checkpoint_id}")
         return row
@@ -1048,7 +1147,11 @@ class ArtifactService:
         destination.parent.mkdir(parents=True, exist_ok=False)
         destination.write_bytes(content)
         checksum = hashlib.sha256(content).hexdigest()
-        resolved_type = media_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        resolved_type = (
+            media_type
+            or mimetypes.guess_type(safe_name)[0]
+            or "application/octet-stream"
+        )
         version_row = self.store.fetchone(
             """
             SELECT MAX(version) AS version FROM artifacts
@@ -1114,26 +1217,49 @@ class ArtifactService:
         with self.store.transaction() as conn:
             conn.execute(
                 "INSERT INTO published_artifacts (slug,artifact_id,user_id,title,created_at) VALUES (?,?,?,?,?)",
-                (slug, artifact_id, user_id, title.strip() or artifact["name"], utc_ms()),
+                (
+                    slug,
+                    artifact_id,
+                    user_id,
+                    title.strip() or artifact["name"],
+                    utc_ms(),
+                ),
             )
         return self.get_published(slug)
 
     def get_published(self, slug: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM published_artifacts WHERE slug=?", (slug,))
+        row = self.store.fetchone(
+            "SELECT * FROM published_artifacts WHERE slug=?", (slug,)
+        )
         if not row:
             raise KeyError(f"No published artifact at slug: {slug}")
         artifact = self.get(row["artifact_id"])
-        return {"slug": row["slug"], "title": row["title"], "createdAt": row["created_at"], "artifact": artifact}
+        return {
+            "slug": row["slug"],
+            "title": row["title"],
+            "createdAt": row["created_at"],
+            "artifact": artifact,
+        }
 
     def list_published(self, user_id: str) -> list[Dict[str, Any]]:
         rows = self.store.fetchall(
-            "SELECT * FROM published_artifacts WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+            "SELECT * FROM published_artifacts WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,),
         )
-        return [{"slug": r["slug"], "title": r["title"], "artifactId": r["artifact_id"],
-                 "createdAt": r["created_at"]} for r in rows]
+        return [
+            {
+                "slug": r["slug"],
+                "title": r["title"],
+                "artifactId": r["artifact_id"],
+                "createdAt": r["created_at"],
+            }
+            for r in rows
+        ]
 
     def unpublish(self, slug: str, user_id: str) -> None:
-        row = self.store.fetchone("SELECT * FROM published_artifacts WHERE slug=?", (slug,))
+        row = self.store.fetchone(
+            "SELECT * FROM published_artifacts WHERE slug=?", (slug,)
+        )
         if not row:
             raise KeyError(f"No published artifact at slug: {slug}")
         if row["user_id"] != user_id:
@@ -1299,7 +1425,9 @@ class ConnectorRuntime:
         return self.get(name)
 
     def get(self, name: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM connector_status WHERE name=?", (name,))
+        row = self.store.fetchone(
+            "SELECT * FROM connector_status WHERE name=?", (name,)
+        )
         if not row:
             raise KeyError(f"Connector has not been verified: {name}")
         return {
@@ -1316,9 +1444,12 @@ class ConnectorRuntime:
         }
 
     def list(self) -> list[Dict[str, Any]]:
-        return [self.get(row["name"]) for row in self.store.fetchall(
-            "SELECT name FROM connector_status ORDER BY name"
-        )]
+        return [
+            self.get(row["name"])
+            for row in self.store.fetchall(
+                "SELECT name FROM connector_status ORDER BY name"
+            )
+        ]
 
     def begin_oauth(
         self,
@@ -1331,9 +1462,11 @@ class ConnectorRuntime:
     ) -> Dict[str, Any]:
         state = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
-        challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode("ascii")).digest()
-        ).decode("ascii").rstrip("=")
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            .decode("ascii")
+            .rstrip("=")
+        )
         now = utc_ms()
         with self.store.transaction() as conn:
             conn.execute(
@@ -1381,7 +1514,9 @@ class ConnectorRuntime:
             metadata={"scopes": json_loads(row["scopes_json"], [])},
         )
         with self.store.transaction() as conn:
-            conn.execute("UPDATE oauth_states SET used_at=? WHERE state=?", (utc_ms(), state))
+            conn.execute(
+                "UPDATE oauth_states SET used_at=? WHERE state=?", (utc_ms(), state)
+            )
         return {
             "connector": row["connector"],
             "scopes": json_loads(row["scopes_json"], []),
@@ -1435,7 +1570,9 @@ class EvaluationService:
         return self.get(evaluation_id)
 
     def get(self, evaluation_id: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM evaluations WHERE id=?", (evaluation_id,))
+        row = self.store.fetchone(
+            "SELECT * FROM evaluations WHERE id=?", (evaluation_id,)
+        )
         if not row:
             raise KeyError(f"Evaluation not found: {evaluation_id}")
         return {
@@ -1482,7 +1619,9 @@ class TelemetryService:
         if not endpoint:
             return
         try:
-            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+                OTLPSpanExporter,
+            )
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -1490,8 +1629,12 @@ class TelemetryService:
             current = trace_module.get_tracer_provider()
             if current.__class__.__module__.startswith("opentelemetry.sdk"):
                 return
-            provider = TracerProvider(resource=Resource.create({"service.name": "dabba"}))
-            provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
+            provider = TracerProvider(
+                resource=Resource.create({"service.name": "dabba"})
+            )
+            provider.add_span_processor(
+                BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint))
+            )
             trace_module.set_tracer_provider(provider)
         except (ImportError, ValueError):
             return
@@ -1520,7 +1663,9 @@ class TelemetryService:
                 details={"name": name, "durationMs": elapsed, "attributes": attributes},
             )
 
-    def record_http(self, method: str, route: str, status: int, duration_ms: float) -> None:
+    def record_http(
+        self, method: str, route: str, status: int, duration_ms: float
+    ) -> None:
         attributes = {
             "http.request.method": method,
             "http.route": route,
@@ -1555,7 +1700,11 @@ class DocumentWorkspace:
         destination.parent.mkdir(parents=True, exist_ok=False)
         destination.write_bytes(content)
         version_id = new_id("docver")
-        resolved_type = media_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        resolved_type = (
+            media_type
+            or mimetypes.guess_type(safe_name)[0]
+            or "application/octet-stream"
+        )
         with self.store.transaction() as conn:
             conn.execute(
                 """
@@ -1667,7 +1816,9 @@ class DocumentWorkspace:
         return [self.get_version(row["id"]) for row in rows]
 
     def get_version(self, version_id: str) -> Dict[str, Any]:
-        row = self.store.fetchone("SELECT * FROM document_versions WHERE id=?", (version_id,))
+        row = self.store.fetchone(
+            "SELECT * FROM document_versions WHERE id=?", (version_id,)
+        )
         if not row:
             raise KeyError(f"Document version not found: {version_id}")
         path = Path(row["source_path"])
@@ -1722,14 +1873,27 @@ class CoworkService:
                    (id,user_id,title,description,status,priority,assignee,due_at,
                     tags_json,conversation_id,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (item_id, user_id, title, description.strip(), status, priority,
-                 assignee.strip() if assignee else None, due_at,
-                 json_dumps(self._clean_tags(tags)), conversation_id, now, now),
+                (
+                    item_id,
+                    user_id,
+                    title,
+                    description.strip(),
+                    status,
+                    priority,
+                    assignee.strip() if assignee else None,
+                    due_at,
+                    json_dumps(self._clean_tags(tags)),
+                    conversation_id,
+                    now,
+                    now,
+                ),
             )
             self._activity(conn, item_id, user_id, "created", {"status": status}, now)
         return self.get(item_id, user_id)
 
-    def list(self, user_id: str, *, status: Optional[str] = None) -> list[Dict[str, Any]]:
+    def list(
+        self, user_id: str, *, status: Optional[str] = None
+    ) -> list[Dict[str, Any]]:
         params: list[Any] = [user_id]
         where = "user_id=?"
         if status:
@@ -1753,20 +1917,32 @@ class CoworkService:
             raise KeyError(item_id)
         return self._decode(row)
 
-    def update(self, item_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update(
+        self, item_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self.get(item_id, user_id)
         allowed = {
-            "title", "description", "status", "priority", "assignee", "dueAt",
-            "tags", "conversationId",
+            "title",
+            "description",
+            "status",
+            "priority",
+            "assignee",
+            "dueAt",
+            "tags",
+            "conversationId",
         }
         changes = {key: value for key, value in changes.items() if key in allowed}
         if not changes:
             return current
         values = {
-            "title": current["title"], "description": current["description"],
-            "status": current["status"], "priority": current["priority"],
-            "assignee": current["assignee"], "dueAt": current["dueAt"],
-            "tags": current["tags"], "conversationId": current["conversationId"],
+            "title": current["title"],
+            "description": current["description"],
+            "status": current["status"],
+            "priority": current["priority"],
+            "assignee": current["assignee"],
+            "dueAt": current["dueAt"],
+            "tags": current["tags"],
+            "conversationId": current["conversationId"],
             **changes,
         }
         values["title"] = str(values["title"]).strip()
@@ -1779,10 +1955,19 @@ class CoworkService:
                 """UPDATE cowork_items SET title=?,description=?,status=?,priority=?,
                    assignee=?,due_at=?,tags_json=?,conversation_id=?,updated_at=?
                    WHERE id=? AND user_id=?""",
-                (values["title"], str(values["description"] or "").strip(),
-                 values["status"], values["priority"], values["assignee"],
-                 values["dueAt"], json_dumps(self._clean_tags(values["tags"])),
-                 values["conversationId"], now, item_id, user_id),
+                (
+                    values["title"],
+                    str(values["description"] or "").strip(),
+                    values["status"],
+                    values["priority"],
+                    values["assignee"],
+                    values["dueAt"],
+                    json_dumps(self._clean_tags(values["tags"])),
+                    values["conversationId"],
+                    now,
+                    item_id,
+                    user_id,
+                ),
             )
             self._activity(conn, item_id, user_id, "updated", changes, now)
         return self.get(item_id, user_id)
@@ -1796,7 +1981,9 @@ class CoworkService:
         if active:
             raise ValueError("Cancel the active Cowork run before deleting this item")
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM cowork_items WHERE id=? AND user_id=?", (item_id, user_id))
+            conn.execute(
+                "DELETE FROM cowork_items WHERE id=? AND user_id=?", (item_id, user_id)
+            )
 
     def activity(self, item_id: str, user_id: str) -> list[Dict[str, Any]]:
         self.get(item_id, user_id)
@@ -1804,13 +1991,24 @@ class CoworkService:
             "SELECT * FROM cowork_activity WHERE item_id=? ORDER BY id DESC LIMIT 100",
             (item_id,),
         )
-        return [{"id": row["id"], "eventType": row["event_type"],
-                 "detail": json_loads(row["detail_json"], {}),
-                 "createdAt": row["created_at"]} for row in rows]
+        return [
+            {
+                "id": row["id"],
+                "eventType": row["event_type"],
+                "detail": json_loads(row["detail_json"], {}),
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def dispatch(
-        self, item_id: str, user_id: str, *, mode: str = "safe",
-        workspace_path: Optional[str] = None, model: Optional[str] = None,
+        self,
+        item_id: str,
+        user_id: str,
+        *,
+        mode: str = "safe",
+        workspace_path: Optional[str] = None,
+        model: Optional[str] = None,
         effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         item = self.get(item_id, user_id)
@@ -1828,9 +2026,14 @@ class CoworkService:
             resolved_workspace = str(resolve_workspace_directory(workspace_path))
         task = self.tasks.create(
             "cowork_agent",
-            {"itemId": item_id, "title": item["title"],
-             "description": item["description"], "mode": mode,
-             "workspacePath": resolved_workspace, "effort": effort},
+            {
+                "itemId": item_id,
+                "title": item["title"],
+                "description": item["description"],
+                "mode": mode,
+                "workspacePath": resolved_workspace,
+                "effort": effort,
+            },
             user_id=user_id,
             model=model,
         )
@@ -1840,15 +2043,29 @@ class CoworkService:
                 """INSERT INTO cowork_runs
                    (id,item_id,user_id,task_id,mode,workspace_path,status,started_at)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                (run_id, item_id, user_id, task["id"], mode, resolved_workspace,
-                 "queued", now),
+                (
+                    run_id,
+                    item_id,
+                    user_id,
+                    task["id"],
+                    mode,
+                    resolved_workspace,
+                    "queued",
+                    now,
+                ),
             )
             conn.execute(
                 "UPDATE cowork_items SET status='in_progress',assignee='Dabba',updated_at=? WHERE id=?",
                 (now, item_id),
             )
-            self._activity(conn, item_id, user_id, "run.queued",
-                           {"runId": run_id, "mode": mode}, now)
+            self._activity(
+                conn,
+                item_id,
+                user_id,
+                "run.queued",
+                {"runId": run_id, "mode": mode},
+                now,
+            )
         return self.get_run(run_id, user_id)
 
     def execute(
@@ -1858,7 +2075,10 @@ class CoworkService:
         executor: Callable[[Dict[str, Any], Dict[str, Any]], Any],
     ) -> Dict[str, Any]:
         run = self.get_run(run_id, user_id)
-        if run["status"] != "queued" or self.tasks.get(run["taskId"])["status"] == "cancelled":
+        if (
+            run["status"] != "queued"
+            or self.tasks.get(run["taskId"])["status"] == "cancelled"
+        ):
             return run
         item = self.get(run["itemId"], user_id)
         with self.store.transaction() as conn:
@@ -1867,31 +2087,53 @@ class CoworkService:
                 (run_id, user_id),
             )
 
-        def handler(_request: Dict[str, Any], progress: Callable[[float, str], None]) -> Dict[str, Any]:
+        def handler(
+            _request: Dict[str, Any], progress: Callable[[float, str], None]
+        ) -> Dict[str, Any]:
             progress(0.1, "Dabba is reviewing the work item")
             execution = executor(item, run)
             progress(0.9, "Saving Cowork result")
-            details = execution if isinstance(execution, dict) else {"content": str(execution)}
+            details = (
+                execution
+                if isinstance(execution, dict)
+                else {"content": str(execution)}
+            )
             return {**details, "itemId": item["id"], "runId": run_id}
 
         task = self.tasks.run(run["taskId"], handler)
         status = task["status"]
         error = (task.get("error") or {}).get("message") if task.get("error") else None
-        item_status = "done" if status == "completed" else ("planned" if status == "cancelled" else "blocked")
+        item_status = (
+            "done"
+            if status == "completed"
+            else ("planned" if status == "cancelled" else "blocked")
+        )
         now = utc_ms()
         with self.store.transaction() as conn:
             conn.execute(
                 """UPDATE cowork_runs SET status=?,output_json=?,error=?,completed_at=?
                    WHERE id=? AND user_id=?""",
-                (status, json_dumps(task.get("result")) if task.get("result") else None,
-                 error, now, run_id, user_id),
+                (
+                    status,
+                    json_dumps(task.get("result")) if task.get("result") else None,
+                    error,
+                    now,
+                    run_id,
+                    user_id,
+                ),
             )
             conn.execute(
                 "UPDATE cowork_items SET status=?,updated_at=? WHERE id=? AND user_id=?",
                 (item_status, now, item["id"], user_id),
             )
-            self._activity(conn, item["id"], user_id, f"run.{status}",
-                           {"runId": run_id, "taskId": task["id"]}, now)
+            self._activity(
+                conn,
+                item["id"],
+                user_id,
+                f"run.{status}",
+                {"runId": run_id, "taskId": task["id"]},
+                now,
+            )
         return self.get_run(run_id, user_id)
 
     def runs(self, item_id: str, user_id: str, limit: int = 50) -> list[Dict[str, Any]]:
@@ -1911,7 +2153,9 @@ class CoworkService:
             raise KeyError(run_id)
         return self._decode_run(row)
 
-    def previous_summary(self, item_id: str, user_id: str, exclude_run_id: str) -> Optional[str]:
+    def previous_summary(
+        self, item_id: str, user_id: str, exclude_run_id: str
+    ) -> Optional[str]:
         """
         Return the final summary text from this item's most recent prior run
         that produced output, so a follow-up run can continue from what was
@@ -1950,8 +2194,9 @@ class CoworkService:
                 "UPDATE cowork_items SET status='planned',updated_at=? WHERE id=? AND user_id=?",
                 (now, run["itemId"], user_id),
             )
-            self._activity(conn, run["itemId"], user_id, "run.cancelled",
-                           {"runId": run_id}, now)
+            self._activity(
+                conn, run["itemId"], user_id, "run.cancelled", {"runId": run_id}, now
+            )
         return self.get_run(run_id, user_id)
 
     def recover_orphaned_runs(self) -> int:
@@ -1973,7 +2218,8 @@ class CoworkService:
             task_status = row["task_status"]
             if task_status not in TERMINAL_TASK_STATES:
                 self.tasks.transition(
-                    row["task_id"], "failed",
+                    row["task_id"],
+                    "failed",
                     current_step="Interrupted by Dabba server restart",
                     error={
                         "code": "cowork_interrupted",
@@ -1985,8 +2231,11 @@ class CoworkService:
                 conn.execute(
                     """UPDATE cowork_runs SET status='failed',
                        error=?, completed_at=? WHERE id=?""",
-                    ("Cowork was interrupted by a server restart. Continue the task to resume.",
-                     now, row["id"]),
+                    (
+                        "Cowork was interrupted by a server restart. Continue the task to resume.",
+                        now,
+                        row["id"],
+                    ),
                 )
                 conn.execute(
                     """UPDATE cowork_items SET status='planned',updated_at=?
@@ -1994,8 +2243,12 @@ class CoworkService:
                     (now, row["item_id"], row["user_id"]),
                 )
                 self._activity(
-                    conn, row["item_id"], row["user_id"], "run.interrupted",
-                    {"runId": row["id"], "taskId": row["task_id"]}, now,
+                    conn,
+                    row["item_id"],
+                    row["user_id"],
+                    "run.interrupted",
+                    {"runId": row["id"], "taskId": row["task_id"]},
+                    now,
                 )
             recovered += 1
         return recovered
@@ -2029,7 +2282,9 @@ class CoworkService:
             )
         return self._get_subtask(sub_id, user_id)
 
-    def update_subtask(self, subtask_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update_subtask(
+        self, subtask_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self._get_subtask(subtask_id, user_id)
         title = str(changes.get("title", current["title"])).strip() or current["title"]
         status = changes.get("status", current["status"])
@@ -2046,12 +2301,14 @@ class CoworkService:
         self._get_subtask(subtask_id, user_id)
         with self.store.transaction() as conn:
             conn.execute(
-                "DELETE FROM cowork_subtasks WHERE id=? AND user_id=?", (subtask_id, user_id)
+                "DELETE FROM cowork_subtasks WHERE id=? AND user_id=?",
+                (subtask_id, user_id),
             )
 
     def _get_subtask(self, subtask_id: str, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone(
-            "SELECT * FROM cowork_subtasks WHERE id=? AND user_id=?", (subtask_id, user_id)
+            "SELECT * FROM cowork_subtasks WHERE id=? AND user_id=?",
+            (subtask_id, user_id),
         )
         if not row:
             raise KeyError(subtask_id)
@@ -2059,9 +2316,15 @@ class CoworkService:
 
     @staticmethod
     def _decode_subtask(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "itemId": row["item_id"], "title": row["title"],
-                "status": row["status"], "position": row["position"],
-                "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "itemId": row["item_id"],
+            "title": row["title"],
+            "status": row["status"],
+            "position": row["position"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
     # ── Schedules (recurring automatic runs) ─────────────────────────────
 
@@ -2074,61 +2337,129 @@ class CoworkService:
         return [self._decode_schedule(row) for row in rows]
 
     def create_schedule(
-        self, item_id: str, user_id: str, *, cadence: str = "daily",
-        interval_minutes: Optional[int] = None, time_of_day: Optional[str] = None,
-        weekdays: Optional[list[int]] = None, mode: str = "agent",
-        workspace_path: Optional[str] = None, model: Optional[str] = None,
-        effort: Optional[str] = None, enabled: bool = True,
+        self,
+        item_id: str,
+        user_id: str,
+        *,
+        cadence: str = "daily",
+        interval_minutes: Optional[int] = None,
+        time_of_day: Optional[str] = None,
+        weekdays: Optional[list[int]] = None,
+        mode: str = "agent",
+        workspace_path: Optional[str] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
+        enabled: bool = True,
     ) -> Dict[str, Any]:
         self.get(item_id, user_id)
         validate_cadence(cadence, interval_minutes, time_of_day, weekdays)
         if mode not in {"safe", "agent"}:
             raise ValueError("Schedule mode must be safe or agent")
-        resolved_workspace = str(resolve_workspace_directory(workspace_path)) if workspace_path else None
+        resolved_workspace = (
+            str(resolve_workspace_directory(workspace_path)) if workspace_path else None
+        )
         now, sched_id = utc_ms(), new_id("coworksched")
-        next_at = compute_next_run(cadence, now, interval_minutes, time_of_day, weekdays)
+        next_at = compute_next_run(
+            cadence, now, interval_minutes, time_of_day, weekdays
+        )
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO cowork_schedules
                    (id,item_id,user_id,cadence,interval_minutes,time_of_day,weekdays_json,
                     mode,workspace_path,model,effort,enabled,next_run_at,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (sched_id, item_id, user_id, cadence, interval_minutes, time_of_day,
-                 json_dumps(weekdays or []), mode, resolved_workspace, model, effort,
-                 int(enabled), next_at, now, now),
+                (
+                    sched_id,
+                    item_id,
+                    user_id,
+                    cadence,
+                    interval_minutes,
+                    time_of_day,
+                    json_dumps(weekdays or []),
+                    mode,
+                    resolved_workspace,
+                    model,
+                    effort,
+                    int(enabled),
+                    next_at,
+                    now,
+                    now,
+                ),
             )
         return self._get_schedule(sched_id, user_id)
 
-    def update_schedule(self, schedule_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update_schedule(
+        self, schedule_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self._get_schedule(schedule_id, user_id)
-        allowed = {"cadence", "intervalMinutes", "timeOfDay", "weekdays", "mode",
-                   "workspacePath", "model", "effort", "enabled"}
+        allowed = {
+            "cadence",
+            "intervalMinutes",
+            "timeOfDay",
+            "weekdays",
+            "mode",
+            "workspacePath",
+            "model",
+            "effort",
+            "enabled",
+        }
         values = {key: current[key] for key in allowed}
         values.update({k: v for k, v in changes.items() if k in allowed})
-        validate_cadence(values["cadence"], values["intervalMinutes"], values["timeOfDay"], values["weekdays"])
+        validate_cadence(
+            values["cadence"],
+            values["intervalMinutes"],
+            values["timeOfDay"],
+            values["weekdays"],
+        )
         if values["mode"] not in {"safe", "agent"}:
             raise ValueError("Schedule mode must be safe or agent")
-        workspace = str(resolve_workspace_directory(values["workspacePath"])) if values["workspacePath"] else None
+        workspace = (
+            str(resolve_workspace_directory(values["workspacePath"]))
+            if values["workspacePath"]
+            else None
+        )
         next_at = current["nextRunAt"]
-        if any(k in changes for k in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")):
-            next_at = compute_next_run(values["cadence"], utc_ms(), values["intervalMinutes"],
-                                       values["timeOfDay"], values["weekdays"])
+        if any(
+            k in changes
+            for k in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")
+        ):
+            next_at = compute_next_run(
+                values["cadence"],
+                utc_ms(),
+                values["intervalMinutes"],
+                values["timeOfDay"],
+                values["weekdays"],
+            )
         with self.store.transaction() as conn:
             conn.execute(
                 """UPDATE cowork_schedules SET cadence=?,interval_minutes=?,time_of_day=?,
                    weekdays_json=?,mode=?,workspace_path=?,model=?,effort=?,enabled=?,
                    next_run_at=?,updated_at=? WHERE id=? AND user_id=?""",
-                (values["cadence"], values["intervalMinutes"], values["timeOfDay"],
-                 json_dumps(values["weekdays"] or []), values["mode"], workspace,
-                 values["model"], values["effort"], int(values["enabled"]),
-                 next_at, utc_ms(), schedule_id, user_id),
+                (
+                    values["cadence"],
+                    values["intervalMinutes"],
+                    values["timeOfDay"],
+                    json_dumps(values["weekdays"] or []),
+                    values["mode"],
+                    workspace,
+                    values["model"],
+                    values["effort"],
+                    int(values["enabled"]),
+                    next_at,
+                    utc_ms(),
+                    schedule_id,
+                    user_id,
+                ),
             )
         return self._get_schedule(schedule_id, user_id)
 
     def delete_schedule(self, schedule_id: str, user_id: str) -> None:
         self._get_schedule(schedule_id, user_id)
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM cowork_schedules WHERE id=? AND user_id=?", (schedule_id, user_id))
+            conn.execute(
+                "DELETE FROM cowork_schedules WHERE id=? AND user_id=?",
+                (schedule_id, user_id),
+            )
 
     def dispatch_due_schedules(self, limit: int = 25) -> list[Dict[str, Any]]:
         """
@@ -2144,12 +2475,20 @@ class CoworkService:
         dispatched: list[Dict[str, Any]] = []
         for row in rows:
             sched = self._decode_schedule(row)
-            next_at = compute_next_run(sched["cadence"], now, sched["intervalMinutes"],
-                                       sched["timeOfDay"], sched["weekdays"])
+            next_at = compute_next_run(
+                sched["cadence"],
+                now,
+                sched["intervalMinutes"],
+                sched["timeOfDay"],
+                sched["weekdays"],
+            )
             try:
                 run = self.dispatch(
-                    sched["itemId"], sched["userId"], mode=sched["mode"],
-                    workspace_path=sched["workspacePath"], model=sched["model"],
+                    sched["itemId"],
+                    sched["userId"],
+                    mode=sched["mode"],
+                    workspace_path=sched["workspacePath"],
+                    model=sched["model"],
                     effort=sched["effort"],
                 )
                 dispatched.append(run)
@@ -2166,7 +2505,8 @@ class CoworkService:
 
     def _get_schedule(self, schedule_id: str, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone(
-            "SELECT * FROM cowork_schedules WHERE id=? AND user_id=?", (schedule_id, user_id)
+            "SELECT * FROM cowork_schedules WHERE id=? AND user_id=?",
+            (schedule_id, user_id),
         )
         if not row:
             raise KeyError(schedule_id)
@@ -2174,14 +2514,25 @@ class CoworkService:
 
     @staticmethod
     def _decode_schedule(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "itemId": row["item_id"], "userId": row["user_id"],
-                "cadence": row["cadence"], "intervalMinutes": row["interval_minutes"],
-                "timeOfDay": row["time_of_day"], "weekdays": json_loads(row["weekdays_json"], []),
-                "mode": row["mode"], "workspacePath": row["workspace_path"],
-                "model": row["model"], "effort": row["effort"], "enabled": bool(row["enabled"]),
-                "nextRunAt": row["next_run_at"], "lastRunAt": row["last_run_at"],
-                "lastStatus": row["last_status"], "createdAt": row["created_at"],
-                "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "itemId": row["item_id"],
+            "userId": row["user_id"],
+            "cadence": row["cadence"],
+            "intervalMinutes": row["interval_minutes"],
+            "timeOfDay": row["time_of_day"],
+            "weekdays": json_loads(row["weekdays_json"], []),
+            "mode": row["mode"],
+            "workspacePath": row["workspace_path"],
+            "model": row["model"],
+            "effort": row["effort"],
+            "enabled": bool(row["enabled"]),
+            "nextRunAt": row["next_run_at"],
+            "lastRunAt": row["last_run_at"],
+            "lastStatus": row["last_status"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
     @staticmethod
     def _validate(status: str, priority: str) -> None:
@@ -2192,11 +2543,19 @@ class CoworkService:
 
     @staticmethod
     def _clean_tags(tags: Optional[list[str]]) -> list[str]:
-        return list(dict.fromkeys(str(tag).strip() for tag in (tags or []) if str(tag).strip()))[:20]
+        return list(
+            dict.fromkeys(str(tag).strip() for tag in (tags or []) if str(tag).strip())
+        )[:20]
 
     @staticmethod
-    def _activity(conn: Any, item_id: str, user_id: str, event_type: str,
-                  detail: Dict[str, Any], created_at: int) -> None:
+    def _activity(
+        conn: Any,
+        item_id: str,
+        user_id: str,
+        event_type: str,
+        detail: Dict[str, Any],
+        created_at: int,
+    ) -> None:
         conn.execute(
             "INSERT INTO cowork_activity (item_id,user_id,event_type,detail_json,created_at) VALUES (?,?,?,?,?)",
             (item_id, user_id, event_type, json_dumps(detail), created_at),
@@ -2204,21 +2563,35 @@ class CoworkService:
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "title": row["title"],
-                "description": row["description"], "status": row["status"],
-                "priority": row["priority"], "assignee": row["assignee"],
-                "dueAt": row["due_at"], "tags": json_loads(row["tags_json"], []),
-                "conversationId": row["conversation_id"],
-                "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "title": row["title"],
+            "description": row["description"],
+            "status": row["status"],
+            "priority": row["priority"],
+            "assignee": row["assignee"],
+            "dueAt": row["due_at"],
+            "tags": json_loads(row["tags_json"], []),
+            "conversationId": row["conversation_id"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
     @staticmethod
     def _decode_run(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "itemId": row["item_id"],
-                "userId": row["user_id"], "taskId": row["task_id"],
-                "mode": row["mode"], "workspacePath": row["workspace_path"],
-                "status": row["status"], "output": json_loads(row["output_json"]),
-                "error": row["error"], "startedAt": row["started_at"],
-                "completedAt": row["completed_at"]}
+        return {
+            "id": row["id"],
+            "itemId": row["item_id"],
+            "userId": row["user_id"],
+            "taskId": row["task_id"],
+            "mode": row["mode"],
+            "workspacePath": row["workspace_path"],
+            "status": row["status"],
+            "output": json_loads(row["output_json"]),
+            "error": row["error"],
+            "startedAt": row["started_at"],
+            "completedAt": row["completed_at"],
+        }
 
 
 class SkillPackageService:
@@ -2233,8 +2606,13 @@ class SkillPackageService:
         self.store = store or get_platform_store()
 
     def create(
-        self, user_id: str, name: str, instructions: str, *,
-        description: str = "", script: Optional[str] = None,
+        self,
+        user_id: str,
+        name: str,
+        instructions: str,
+        *,
+        description: str = "",
+        script: Optional[str] = None,
     ) -> Dict[str, Any]:
         name = name.strip()
         instructions = instructions.strip()
@@ -2246,14 +2624,23 @@ class SkillPackageService:
                 """INSERT INTO skill_packages
                    (id,user_id,name,description,instructions,script,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?)""",
-                (skill_id, user_id, name, description.strip(), instructions,
-                 script.strip() if script else None, now, now),
+                (
+                    skill_id,
+                    user_id,
+                    name,
+                    description.strip(),
+                    instructions,
+                    script.strip() if script else None,
+                    now,
+                    now,
+                ),
             )
         return self.get(skill_id, user_id)
 
     def list(self, user_id: str) -> list[Dict[str, Any]]:
         rows = self.store.fetchall(
-            "SELECT * FROM skill_packages WHERE user_id=? ORDER BY updated_at DESC", (user_id,)
+            "SELECT * FROM skill_packages WHERE user_id=? ORDER BY updated_at DESC",
+            (user_id,),
         )
         return [self._decode(row) for row in rows]
 
@@ -2265,7 +2652,9 @@ class SkillPackageService:
             raise KeyError(skill_id)
         return self._decode(row)
 
-    def update(self, skill_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update(
+        self, skill_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self.get(skill_id, user_id)
         allowed_keys = {"name", "description", "instructions", "script"}
         values = {key: current[key] for key in allowed_keys}
@@ -2278,18 +2667,33 @@ class SkillPackageService:
             conn.execute(
                 """UPDATE skill_packages SET name=?,description=?,instructions=?,script=?,
                    updated_at=? WHERE id=? AND user_id=?""",
-                (name, str(values["description"] or "").strip(), instructions,
-                 (str(values["script"]).strip() or None) if values["script"] else None,
-                 utc_ms(), skill_id, user_id),
+                (
+                    name,
+                    str(values["description"] or "").strip(),
+                    instructions,
+                    (
+                        (str(values["script"]).strip() or None)
+                        if values["script"]
+                        else None
+                    ),
+                    utc_ms(),
+                    skill_id,
+                    user_id,
+                ),
             )
         return self.get(skill_id, user_id)
 
     def delete(self, skill_id: str, user_id: str) -> None:
         self.get(skill_id, user_id)
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM skill_packages WHERE id=? AND user_id=?", (skill_id, user_id))
+            conn.execute(
+                "DELETE FROM skill_packages WHERE id=? AND user_id=?",
+                (skill_id, user_id),
+            )
 
-    def find_matching(self, user_id: str, message: str, min_score: int = 2) -> Optional[Dict[str, Any]]:
+    def find_matching(
+        self, user_id: str, message: str, min_score: int = 2
+    ) -> Optional[Dict[str, Any]]:
         """
         Best-matching skill for a free-text message, by word-overlap scoring
         against each skill's name + description (same lightweight approach as
@@ -2314,10 +2718,16 @@ class SkillPackageService:
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "userId": row["user_id"], "name": row["name"],
-                "description": row["description"], "instructions": row["instructions"],
-                "script": row["script"], "createdAt": row["created_at"],
-                "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "userId": row["user_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "instructions": row["instructions"],
+            "script": row["script"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
 
 class AgentDefinitionService:
@@ -2332,9 +2742,15 @@ class AgentDefinitionService:
         self.store = store or get_platform_store()
 
     def create(
-        self, user_id: str, name: str, system_prompt: str, *,
-        description: str = "", allowed_tools: Optional[list[str]] = None,
-        model: Optional[str] = None, effort: Optional[str] = None,
+        self,
+        user_id: str,
+        name: str,
+        system_prompt: str,
+        *,
+        description: str = "",
+        allowed_tools: Optional[list[str]] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> Dict[str, Any]:
         name = name.strip()
         system_prompt = system_prompt.strip()
@@ -2347,32 +2763,56 @@ class AgentDefinitionService:
                    (id,user_id,name,description,system_prompt,allowed_tools_json,
                     model,effort,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (def_id, user_id, name, description.strip(), system_prompt,
-                 json_dumps(list(allowed_tools or [])), model, effort, now, now),
+                (
+                    def_id,
+                    user_id,
+                    name,
+                    description.strip(),
+                    system_prompt,
+                    json_dumps(list(allowed_tools or [])),
+                    model,
+                    effort,
+                    now,
+                    now,
+                ),
             )
         return self.get(def_id, user_id)
 
     def list(self, user_id: str) -> list[Dict[str, Any]]:
         rows = self.store.fetchall(
-            "SELECT * FROM agent_definitions WHERE user_id=? ORDER BY updated_at DESC", (user_id,)
+            "SELECT * FROM agent_definitions WHERE user_id=? ORDER BY updated_at DESC",
+            (user_id,),
         )
         return [self._decode(row) for row in rows]
 
     def get(self, definition_id: str, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone(
-            "SELECT * FROM agent_definitions WHERE id=? AND user_id=?", (definition_id, user_id)
+            "SELECT * FROM agent_definitions WHERE id=? AND user_id=?",
+            (definition_id, user_id),
         )
         if not row:
             raise KeyError(definition_id)
         return self._decode(row)
 
-    def update(self, definition_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update(
+        self, definition_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self.get(definition_id, user_id)
-        allowed_keys = {"name", "description", "systemPrompt", "allowedTools", "model", "effort"}
+        allowed_keys = {
+            "name",
+            "description",
+            "systemPrompt",
+            "allowedTools",
+            "model",
+            "effort",
+        }
         values = {
-            "name": current["name"], "description": current["description"],
-            "systemPrompt": current["systemPrompt"], "allowedTools": current["allowedTools"],
-            "model": current["model"], "effort": current["effort"],
+            "name": current["name"],
+            "description": current["description"],
+            "systemPrompt": current["systemPrompt"],
+            "allowedTools": current["allowedTools"],
+            "model": current["model"],
+            "effort": current["effort"],
         }
         values.update({k: v for k, v in changes.items() if k in allowed_keys})
         name = str(values["name"]).strip()
@@ -2383,16 +2823,27 @@ class AgentDefinitionService:
             conn.execute(
                 """UPDATE agent_definitions SET name=?,description=?,system_prompt=?,
                    allowed_tools_json=?,model=?,effort=?,updated_at=? WHERE id=? AND user_id=?""",
-                (name, str(values["description"] or "").strip(), system_prompt,
-                 json_dumps(list(values["allowedTools"] or [])), values["model"], values["effort"],
-                 utc_ms(), definition_id, user_id),
+                (
+                    name,
+                    str(values["description"] or "").strip(),
+                    system_prompt,
+                    json_dumps(list(values["allowedTools"] or [])),
+                    values["model"],
+                    values["effort"],
+                    utc_ms(),
+                    definition_id,
+                    user_id,
+                ),
             )
         return self.get(definition_id, user_id)
 
     def delete(self, definition_id: str, user_id: str) -> None:
         self.get(definition_id, user_id)
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM agent_definitions WHERE id=? AND user_id=?", (definition_id, user_id))
+            conn.execute(
+                "DELETE FROM agent_definitions WHERE id=? AND user_id=?",
+                (definition_id, user_id),
+            )
 
     def dispatch_parallel(
         self,
@@ -2425,16 +2876,25 @@ class AgentDefinitionService:
         # unused here since resolved[] already carries the real prompt; pass
         # the role as both the dict key and value to satisfy its signature.
         return SubagentCoordinator().run(
-            {role: role for role in assignments}, runner, max_workers=max_workers,
+            {role: role for role in assignments},
+            runner,
+            max_workers=max_workers,
         )
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "userId": row["user_id"], "name": row["name"],
-                "description": row["description"], "systemPrompt": row["system_prompt"],
-                "allowedTools": json_loads(row["allowed_tools_json"], []),
-                "model": row["model"], "effort": row["effort"],
-                "createdAt": row["created_at"], "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "userId": row["user_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "systemPrompt": row["system_prompt"],
+            "allowedTools": json_loads(row["allowed_tools_json"], []),
+            "model": row["model"],
+            "effort": row["effort"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
 
 class ScheduledSkillService:
@@ -2444,86 +2904,177 @@ class ScheduledSkillService:
         self.store = store or get_platform_store()
         self.tasks = TaskOrchestrator(self.store)
 
-    def create(self, user_id: str, name: str, skill_name: str, instructions: str,
-               *, cadence: str = "daily", interval_minutes: Optional[int] = None,
-               time_of_day: Optional[str] = None, weekdays: Optional[list[int]] = None,
-               enabled: bool = True, next_run_at: Optional[int] = None) -> Dict[str, Any]:
-        self._validate(name, instructions, cadence, interval_minutes, time_of_day, weekdays)
+    def create(
+        self,
+        user_id: str,
+        name: str,
+        skill_name: str,
+        instructions: str,
+        *,
+        cadence: str = "daily",
+        interval_minutes: Optional[int] = None,
+        time_of_day: Optional[str] = None,
+        weekdays: Optional[list[int]] = None,
+        enabled: bool = True,
+        next_run_at: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        self._validate(
+            name, instructions, cadence, interval_minutes, time_of_day, weekdays
+        )
         now, schedule_id = utc_ms(), new_id("schedule")
-        next_at = next_run_at or self._next_run(cadence, now, interval_minutes, time_of_day, weekdays)
+        next_at = next_run_at or self._next_run(
+            cadence, now, interval_minutes, time_of_day, weekdays
+        )
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO scheduled_skills
                    (id,user_id,name,skill_name,instructions,cadence,interval_minutes,
                     time_of_day,weekdays_json,enabled,next_run_at,created_at,updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (schedule_id, user_id, name.strip(), skill_name.strip() or name.strip(),
-                 instructions.strip(), cadence, interval_minutes, time_of_day,
-                 json_dumps(weekdays or []), int(enabled), next_at, now, now),
+                (
+                    schedule_id,
+                    user_id,
+                    name.strip(),
+                    skill_name.strip() or name.strip(),
+                    instructions.strip(),
+                    cadence,
+                    interval_minutes,
+                    time_of_day,
+                    json_dumps(weekdays or []),
+                    int(enabled),
+                    next_at,
+                    now,
+                    now,
+                ),
             )
         return self.get(schedule_id, user_id)
 
     def list(self, user_id: str) -> list[Dict[str, Any]]:
         rows = self.store.fetchall(
-            "SELECT * FROM scheduled_skills WHERE user_id=? ORDER BY updated_at DESC", (user_id,)
+            "SELECT * FROM scheduled_skills WHERE user_id=? ORDER BY updated_at DESC",
+            (user_id,),
         )
         return [self._decode(row) for row in rows]
 
     def get(self, schedule_id: str, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone(
-            "SELECT * FROM scheduled_skills WHERE id=? AND user_id=?", (schedule_id, user_id)
+            "SELECT * FROM scheduled_skills WHERE id=? AND user_id=?",
+            (schedule_id, user_id),
         )
         if not row:
             raise KeyError(schedule_id)
         return self._decode(row)
 
-    def update(self, schedule_id: str, user_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+    def update(
+        self, schedule_id: str, user_id: str, changes: Dict[str, Any]
+    ) -> Dict[str, Any]:
         current = self.get(schedule_id, user_id)
-        allowed = {"name", "skillName", "instructions", "cadence", "intervalMinutes",
-                   "timeOfDay", "weekdays", "enabled", "nextRunAt"}
+        allowed = {
+            "name",
+            "skillName",
+            "instructions",
+            "cadence",
+            "intervalMinutes",
+            "timeOfDay",
+            "weekdays",
+            "enabled",
+            "nextRunAt",
+        }
         changes = {key: value for key, value in changes.items() if key in allowed}
         values = {key: current[key] for key in allowed}
         values.update(changes)
-        self._validate(values["name"], values["instructions"], values["cadence"],
-                       values["intervalMinutes"], values["timeOfDay"], values["weekdays"])
-        if any(key in changes for key in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")):
-            values["nextRunAt"] = self._next_run(values["cadence"], utc_ms(),
-                values["intervalMinutes"], values["timeOfDay"], values["weekdays"])
+        self._validate(
+            values["name"],
+            values["instructions"],
+            values["cadence"],
+            values["intervalMinutes"],
+            values["timeOfDay"],
+            values["weekdays"],
+        )
+        if any(
+            key in changes
+            for key in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")
+        ):
+            values["nextRunAt"] = self._next_run(
+                values["cadence"],
+                utc_ms(),
+                values["intervalMinutes"],
+                values["timeOfDay"],
+                values["weekdays"],
+            )
         with self.store.transaction() as conn:
             conn.execute(
                 """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,cadence=?,
                    interval_minutes=?,time_of_day=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
                    WHERE id=? AND user_id=?""",
-                (str(values["name"]).strip(), str(values["skillName"]).strip(),
-                 str(values["instructions"]).strip(), values["cadence"],
-                 values["intervalMinutes"], values["timeOfDay"],
-                 json_dumps(values["weekdays"] or []), int(values["enabled"]),
-                 values["nextRunAt"], utc_ms(), schedule_id, user_id),
+                (
+                    str(values["name"]).strip(),
+                    str(values["skillName"]).strip(),
+                    str(values["instructions"]).strip(),
+                    values["cadence"],
+                    values["intervalMinutes"],
+                    values["timeOfDay"],
+                    json_dumps(values["weekdays"] or []),
+                    int(values["enabled"]),
+                    values["nextRunAt"],
+                    utc_ms(),
+                    schedule_id,
+                    user_id,
+                ),
             )
         return self.get(schedule_id, user_id)
 
     def delete(self, schedule_id: str, user_id: str) -> None:
         self.get(schedule_id, user_id)
         with self.store.transaction() as conn:
-            conn.execute("DELETE FROM scheduled_skills WHERE id=? AND user_id=?", (schedule_id, user_id))
+            conn.execute(
+                "DELETE FROM scheduled_skills WHERE id=? AND user_id=?",
+                (schedule_id, user_id),
+            )
 
-    def dispatch(self, schedule_id: str, user_id: str, triggered_by: str = "manual") -> Dict[str, Any]:
+    def dispatch(
+        self, schedule_id: str, user_id: str, triggered_by: str = "manual"
+    ) -> Dict[str, Any]:
         schedule = self.get(schedule_id, user_id)
-        task = self.tasks.create("scheduled_skill", {
-            "scheduleId": schedule_id, "skillName": schedule["skillName"],
-            "instructions": schedule["instructions"], "triggeredBy": triggered_by,
-        }, user_id=user_id, idempotency_key=(f"schedule:{schedule_id}:{schedule['nextRunAt']}"
-            if triggered_by == "schedule" else None))
+        task = self.tasks.create(
+            "scheduled_skill",
+            {
+                "scheduleId": schedule_id,
+                "skillName": schedule["skillName"],
+                "instructions": schedule["instructions"],
+                "triggeredBy": triggered_by,
+            },
+            user_id=user_id,
+            idempotency_key=(
+                f"schedule:{schedule_id}:{schedule['nextRunAt']}"
+                if triggered_by == "schedule"
+                else None
+            ),
+        )
         now, run_id = utc_ms(), new_id("run")
-        next_at = self._next_run(schedule["cadence"], now, schedule["intervalMinutes"],
-                                 schedule["timeOfDay"], schedule["weekdays"])
+        next_at = self._next_run(
+            schedule["cadence"],
+            now,
+            schedule["intervalMinutes"],
+            schedule["timeOfDay"],
+            schedule["weekdays"],
+        )
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO scheduled_skill_runs
                    (id,schedule_id,user_id,task_id,status,triggered_by,output_json,started_at,completed_at)
                    VALUES (?,?,?,?,?,?,?,?,?)""",
-                (run_id, schedule_id, user_id, task["id"], "queued", triggered_by,
-                 json_dumps({"message": "Dispatched to durable task queue"}), now, now),
+                (
+                    run_id,
+                    schedule_id,
+                    user_id,
+                    task["id"],
+                    "queued",
+                    triggered_by,
+                    json_dumps({"message": "Dispatched to durable task queue"}),
+                    now,
+                    now,
+                ),
             )
             conn.execute(
                 "UPDATE scheduled_skills SET last_run_at=?,last_status='queued',next_run_at=?,updated_at=? WHERE id=?",
@@ -2546,7 +3097,9 @@ class ScheduledSkillService:
         run = self.get_run(run_id, user_id)
         schedule = self.get(run["scheduleId"], user_id)
 
-        def handler(_request: Dict[str, Any], progress: Callable[[float, str], None]) -> Dict[str, Any]:
+        def handler(
+            _request: Dict[str, Any], progress: Callable[[float, str], None]
+        ) -> Dict[str, Any]:
             progress(0.2, "Running scheduled skill")
             content = executor(schedule["instructions"])
             progress(0.9, "Saving result")
@@ -2559,8 +3112,18 @@ class ScheduledSkillService:
             conn.execute(
                 """UPDATE scheduled_skill_runs SET status=?,output_json=?,error=?,completed_at=?
                    WHERE id=? AND user_id=?""",
-                (status, json_dumps(task.get("result")) if task.get("result") is not None else None,
-                 error, utc_ms(), run_id, user_id),
+                (
+                    status,
+                    (
+                        json_dumps(task.get("result"))
+                        if task.get("result") is not None
+                        else None
+                    ),
+                    error,
+                    utc_ms(),
+                    run_id,
+                    user_id,
+                ),
             )
             conn.execute(
                 "UPDATE scheduled_skills SET last_status=?,updated_at=? WHERE id=? AND user_id=?",
@@ -2568,7 +3131,9 @@ class ScheduledSkillService:
             )
         return self.get_run(run_id, user_id)
 
-    def runs(self, user_id: str, schedule_id: Optional[str] = None, limit: int = 50) -> list[Dict[str, Any]]:
+    def runs(
+        self, user_id: str, schedule_id: Optional[str] = None, limit: int = 50
+    ) -> list[Dict[str, Any]]:
         if schedule_id:
             self.get(schedule_id, user_id)
             rows = self.store.fetchall(
@@ -2584,16 +3149,22 @@ class ScheduledSkillService:
 
     def get_run(self, run_id: str, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone(
-            "SELECT * FROM scheduled_skill_runs WHERE id=? AND user_id=?", (run_id, user_id)
+            "SELECT * FROM scheduled_skill_runs WHERE id=? AND user_id=?",
+            (run_id, user_id),
         )
         if not row:
             raise KeyError(run_id)
         return self._decode_run(row)
 
     @staticmethod
-    def _validate(name: str, instructions: str, cadence: str,
-                  interval_minutes: Optional[int], time_of_day: Optional[str],
-                  weekdays: Optional[list[int]]) -> None:
+    def _validate(
+        name: str,
+        instructions: str,
+        cadence: str,
+        interval_minutes: Optional[int],
+        time_of_day: Optional[str],
+        weekdays: Optional[list[int]],
+    ) -> None:
         if not str(name).strip() or not str(instructions).strip():
             raise ValueError("Name and instructions are required")
         if cadence not in {"interval", "daily", "weekly"}:
@@ -2611,11 +3182,18 @@ class ScheduledSkillService:
             raise ValueError("Weekdays must be between 0 and 6")
 
     @staticmethod
-    def _next_run(cadence: str, after_ms: int, interval_minutes: Optional[int],
-                  time_of_day: Optional[str], weekdays: Optional[list[int]]) -> int:
+    def _next_run(
+        cadence: str,
+        after_ms: int,
+        interval_minutes: Optional[int],
+        time_of_day: Optional[str],
+        weekdays: Optional[list[int]],
+    ) -> int:
         after = datetime.fromtimestamp(after_ms / 1000, tz=timezone.utc)
         if cadence == "interval":
-            return int((after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000)
+            return int(
+                (after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000
+            )
         hour, minute = map(int, (time_of_day or "09:00").split(":"))
         candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if candidate <= after:
@@ -2628,19 +3206,34 @@ class ScheduledSkillService:
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "name": row["name"], "skillName": row["skill_name"],
-                "instructions": row["instructions"], "cadence": row["cadence"],
-                "intervalMinutes": row["interval_minutes"], "timeOfDay": row["time_of_day"],
-                "weekdays": json_loads(row["weekdays_json"], []), "enabled": bool(row["enabled"]),
-                "nextRunAt": row["next_run_at"], "lastRunAt": row["last_run_at"],
-                "lastStatus": row["last_status"], "createdAt": row["created_at"],
-                "updatedAt": row["updated_at"]}
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "skillName": row["skill_name"],
+            "instructions": row["instructions"],
+            "cadence": row["cadence"],
+            "intervalMinutes": row["interval_minutes"],
+            "timeOfDay": row["time_of_day"],
+            "weekdays": json_loads(row["weekdays_json"], []),
+            "enabled": bool(row["enabled"]),
+            "nextRunAt": row["next_run_at"],
+            "lastRunAt": row["last_run_at"],
+            "lastStatus": row["last_status"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+        }
 
     @staticmethod
     def _decode_run(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {"id": row["id"], "scheduleId": row["schedule_id"],
-                "userId": row["user_id"],
-                "taskId": row["task_id"], "status": row["status"],
-                "triggeredBy": row["triggered_by"],
-                "output": json_loads(row["output_json"], None), "error": row["error"],
-                "startedAt": row["started_at"], "completedAt": row["completed_at"]}
+        return {
+            "id": row["id"],
+            "scheduleId": row["schedule_id"],
+            "userId": row["user_id"],
+            "taskId": row["task_id"],
+            "status": row["status"],
+            "triggeredBy": row["triggered_by"],
+            "output": json_loads(row["output_json"], None),
+            "error": row["error"],
+            "startedAt": row["started_at"],
+            "completedAt": row["completed_at"],
+        }

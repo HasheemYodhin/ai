@@ -218,12 +218,16 @@ class BPETokenizer:
 
             merges_done += 1
             if verbose and merges_done % 1000 == 0:
-                print(f"  Merge {merges_done}: '{best_pair[0]}' + '{best_pair[1]}' "
-                      f"-> '{merged}' (freq={best_freq})")
+                print(
+                    f"  Merge {merges_done}: '{best_pair[0]}' + '{best_pair[1]}' "
+                    f"-> '{merged}' (freq={best_freq})"
+                )
 
         if verbose:
-            print(f"Training complete. Vocabulary: {len(self.vocab)} tokens "
-                  f"({merges_done} merges performed)")
+            print(
+                f"Training complete. Vocabulary: {len(self.vocab)} tokens "
+                f"({merges_done} merges performed)"
+            )
 
     def encode(self, text: str) -> List[int]:
         """
@@ -425,7 +429,9 @@ class BPETokenizer:
             },
             "vocab": self.vocab,
             "merges": {f"{k[0]} {k[1]}": v for k, v in self.merges.items()},
-            "merge_priority": {f"{k[0]} {k[1]}": v for k, v in self.merge_priority.items()},
+            "merge_priority": {
+                f"{k[0]} {k[1]}": v for k, v in self.merge_priority.items()
+            },
         }
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -455,9 +461,7 @@ class BPETokenizer:
         )
 
         tokenizer.vocab = data["vocab"]
-        tokenizer.merges = {
-            tuple(k.split(" ")): v for k, v in data["merges"].items()
-        }
+        tokenizer.merges = {tuple(k.split(" ")): v for k, v in data["merges"].items()}
         tokenizer.merge_priority = {
             tuple(k.split(" ")): v for k, v in data["merge_priority"].items()
         }

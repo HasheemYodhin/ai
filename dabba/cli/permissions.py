@@ -20,17 +20,45 @@ PERMISSIONS_FILE = get_dabba_config_dir() / "permissions.json"
 
 
 DANGEROUS_COMMANDS: Set[str] = {
-    "sudo", "su", "chown", "chmod", "passwd", "kill", "pkill",
-    "shutdown", "reboot", "init", "systemctl", "journalctl",
-    "dd", "mkfs", "fdisk", "mount", "umount", "rm -rf", "rm -r /",
-    "> /dev", "> /etc", "| sudo", "| su",
+    "sudo",
+    "su",
+    "chown",
+    "chmod",
+    "passwd",
+    "kill",
+    "pkill",
+    "shutdown",
+    "reboot",
+    "init",
+    "systemctl",
+    "journalctl",
+    "dd",
+    "mkfs",
+    "fdisk",
+    "mount",
+    "umount",
+    "rm -rf",
+    "rm -r /",
+    "> /dev",
+    "> /etc",
+    "| sudo",
+    "| su",
 }
 
 DANGEROUS_TOOLS: Set[str] = {
-    "shell_exec", "file_write", "file_edit", "execute_command",
-    "powershell_exec", "process_start", "process_stop",
-    "ssh_exec", "scp_copy", "docker_exec", "docker_run",
-    "markdown_to_pdf", "markdown_to_docx",
+    "shell_exec",
+    "file_write",
+    "file_edit",
+    "execute_command",
+    "powershell_exec",
+    "process_start",
+    "process_stop",
+    "ssh_exec",
+    "scp_copy",
+    "docker_exec",
+    "docker_run",
+    "markdown_to_pdf",
+    "markdown_to_docx",
 }
 
 # Shell tools whose "command" argument is actually run — the only ones a git
@@ -91,7 +119,10 @@ class PermissionManager:
         try:
             result = subprocess.run(
                 ["git", "branch", "--show-current"],
-                cwd=cwd or os.getcwd(), capture_output=True, text=True, timeout=5,
+                cwd=cwd or os.getcwd(),
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout.strip() or None
@@ -99,7 +130,9 @@ class PermissionManager:
             pass
         return None
 
-    def classify_git_command(self, command: str, cwd: Optional[str] = None) -> Optional[Tuple[bool, str]]:
+    def classify_git_command(
+        self, command: str, cwd: Optional[str] = None
+    ) -> Optional[Tuple[bool, str]]:
         """
         Inspect a shell command for git safety issues, mirroring the
         protected-branch / force-push rules a human operator should follow.
@@ -116,8 +149,14 @@ class PermissionManager:
         if _FORCE_PUSH_RE.search(lowered):
             branch = self._current_git_branch(cwd)
             if branch and branch in PROTECTED_BRANCHES:
-                return True, f"Force-push to protected branch '{branch}' is never allowed."
-            return False, "Force-push requires explicit confirmation — it can overwrite remote history."
+                return (
+                    True,
+                    f"Force-push to protected branch '{branch}' is never allowed.",
+                )
+            return (
+                False,
+                "Force-push requires explicit confirmation — it can overwrite remote history.",
+            )
 
         if re.search(r"\bgit\s+commit\b", lowered):
             branch = self._current_git_branch(cwd)
@@ -131,12 +170,17 @@ class PermissionManager:
         if re.search(r"\bgit\s+push\b", lowered):
             branch = self._current_git_branch(cwd)
             if branch and branch in PROTECTED_BRANCHES:
-                return False, f"Pushing to protected branch '{branch}' requires confirmation."
+                return (
+                    False,
+                    f"Pushing to protected branch '{branch}' requires confirmation.",
+                )
             return None
 
         return None
 
-    def _git_risk(self, tool_name: str, arguments: Optional[Dict[str, Any]]) -> Optional[Tuple[bool, str]]:
+    def _git_risk(
+        self, tool_name: str, arguments: Optional[Dict[str, Any]]
+    ) -> Optional[Tuple[bool, str]]:
         if tool_name not in _SHELL_TOOLS or not arguments:
             return None
         command = str(arguments.get("command") or "")
@@ -174,7 +218,9 @@ class PermissionManager:
             ValueError: If the mode is not recognized.
         """
         if mode not in ("allow", "deny", "ask"):
-            raise ValueError(f"Unknown permission mode: '{mode}'. Use 'allow', 'deny', or 'ask'.")
+            raise ValueError(
+                f"Unknown permission mode: '{mode}'. Use 'allow', 'deny', or 'ask'."
+            )
         self.mode = mode
 
     def is_dangerous_command(self, command: str) -> bool:

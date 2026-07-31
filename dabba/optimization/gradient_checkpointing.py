@@ -37,6 +37,7 @@ class CheckpointPolicy(Enum):
         LAST_HALF: Checkpoint the last half of layers.
         CUSTOM: Use a user-provided selection function.
     """
+
     NONE = "none"
     ALL = "all"
     EVEN = "even"
@@ -72,7 +73,9 @@ class GradientCheckpointing:
     ):
         self.model = model
         self.num_layers = len(model.layers)
-        self._original_forward = model.layers[0].forward if self.num_layers > 0 else None
+        self._original_forward = (
+            model.layers[0].forward if self.num_layers > 0 else None
+        )
 
         self._policy = policy
         self._num_checkpointed = num_checkpointed_layers
@@ -164,11 +167,11 @@ class GradientCheckpointing:
         # Apply count limit
         if self._num_checkpointed is not None and self._num_checkpointed < len(indices):
             if self._policy in (CheckpointPolicy.FIRST_HALF, CheckpointPolicy.EVEN):
-                indices = indices[:self._num_checkpointed]
+                indices = indices[: self._num_checkpointed]
             elif self._policy in (CheckpointPolicy.LAST_HALF, CheckpointPolicy.ODD):
-                indices = indices[-self._num_checkpointed:]
+                indices = indices[-self._num_checkpointed :]
             else:
-                indices = indices[:self._num_checkpointed]
+                indices = indices[: self._num_checkpointed]
 
         return indices
 
@@ -190,6 +193,7 @@ class GradientCheckpointing:
         Returns:
             Checkpointed forward function.
         """
+
         def checkpointed_forward(
             hidden_states: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
@@ -206,6 +210,7 @@ class GradientCheckpointing:
                 position_ids,
                 use_reentrant,
             )
+
         # We'll use a simpler approach - patch directly
         return self._build_checkpoint_wrapper(layer)
 
@@ -293,7 +298,9 @@ class GradientCheckpointing:
         attn_scores = batch_size * num_heads * seq_length * seq_length * bytes_per_elem
         attn_output = batch_size * seq_length * hidden_size * bytes_per_elem
         attn_residual = batch_size * seq_length * hidden_size * bytes_per_elem
-        attn_total = attn_q + attn_k + attn_v + attn_scores + attn_output + attn_residual
+        attn_total = (
+            attn_q + attn_k + attn_v + attn_scores + attn_output + attn_residual
+        )
 
         ffn_gate = batch_size * seq_length * intermediate_size * bytes_per_elem
         ffn_up = batch_size * seq_length * intermediate_size * bytes_per_elem
@@ -303,7 +310,7 @@ class GradientCheckpointing:
 
         norm_total = 2 * batch_size * seq_length * hidden_size * bytes_per_elem
 
-        per_layer_mb = (attn_total + ffn_total + norm_total) / (1024 ** 2)
+        per_layer_mb = (attn_total + ffn_total + norm_total) / (1024**2)
 
         baseline_mb = per_layer_mb * num_layers
 
@@ -312,7 +319,9 @@ class GradientCheckpointing:
         num_active = num_layers - num_checkpointed
 
         # Checkpointed layers only store input (1 activation vs ~7)
-        checkpointed_mb = (per_layer_mb * num_active) + (per_layer_mb * num_checkpointed / 7)
+        checkpointed_mb = (per_layer_mb * num_active) + (
+            per_layer_mb * num_checkpointed / 7
+        )
         saved_mb = baseline_mb - checkpointed_mb
         saved_pct = (saved_mb / baseline_mb * 100) if baseline_mb > 0 else 0
 
@@ -354,7 +363,8 @@ class GradientCheckpointing:
 
         device = next(self.model.parameters()).device
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, seq_length),
             device=device,
         )
@@ -379,7 +389,7 @@ class GradientCheckpointing:
             torch.cuda.synchronize()
 
             no_gc_times.append(start_event.elapsed_time(end_event))
-            peak = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            peak = torch.cuda.max_memory_allocated() / (1024**2)
             no_gc_peak = max(no_gc_peak, peak)
 
         # Measure WITH checkpointing
@@ -402,7 +412,7 @@ class GradientCheckpointing:
             torch.cuda.synchronize()
 
             gc_times.append(start_event.elapsed_time(end_event))
-            peak = torch.cuda.max_memory_allocated() / (1024 ** 2)
+            peak = torch.cuda.max_memory_allocated() / (1024**2)
             gc_peak = max(gc_peak, peak)
 
         avg_no_gc_time = sum(no_gc_times) / len(no_gc_times)
@@ -412,10 +422,16 @@ class GradientCheckpointing:
             "no_checkpoint_peak_memory_mb": no_gc_peak,
             "checkpoint_peak_memory_mb": gc_peak,
             "memory_saved_mb": no_gc_peak - gc_peak,
-            "memory_saved_pct": ((no_gc_peak - gc_peak) / no_gc_peak * 100) if no_gc_peak > 0 else 0,
+            "memory_saved_pct": (
+                ((no_gc_peak - gc_peak) / no_gc_peak * 100) if no_gc_peak > 0 else 0
+            ),
             "no_checkpoint_avg_time_ms": avg_no_gc_time,
             "checkpoint_avg_time_ms": avg_gc_time,
-            "time_overhead_pct": ((avg_gc_time - avg_no_gc_time) / avg_no_gc_time * 100) if avg_no_gc_time > 0 else 0,
+            "time_overhead_pct": (
+                ((avg_gc_time - avg_no_gc_time) / avg_no_gc_time * 100)
+                if avg_no_gc_time > 0
+                else 0
+            ),
             "num_checkpointed_layers": len(self._select_layers()),
             "total_layers": self.num_layers,
             "batch_size": batch_size,
@@ -442,9 +458,8 @@ class GradientCheckpointing:
             f"  Checkpointed layers: {len(indices)}",
             f"  Active layers:       {self.num_layers - len(indices)}",
             "",
-            "  Checkpointed layer indices: " + (
-                ", ".join(str(i) for i in indices) if indices else "None"
-            ),
+            "  Checkpointed layer indices: "
+            + (", ".join(str(i) for i in indices) if indices else "None"),
             "",
             "Memory Savings Estimate:",
             f"  Baseline activation memory:  {savings['baseline_mb']:.2f} MiB",

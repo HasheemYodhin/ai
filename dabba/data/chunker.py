@@ -167,7 +167,7 @@ class TextChunker:
         chunks = []
         step = max(1, self.chunk_size - self.chunk_overlap)
         for i in range(0, len(tokens), step):
-            chunk_tokens = tokens[i:i + self.chunk_size]
+            chunk_tokens = tokens[i : i + self.chunk_size]
             if chunk_tokens:
                 chunks.append(" ".join(chunk_tokens))
         return chunks

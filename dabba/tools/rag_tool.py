@@ -17,6 +17,7 @@ logger = get_logger("dabba.tools.rag_tool")
 
 try:
     from dabba.rag.rag_pipeline import RagPipeline
+
     HAS_RAG = True
 except ImportError:
     HAS_RAG = False
@@ -108,15 +109,11 @@ def query_knowledge_base(
         elif hasattr(pipeline, "search"):
             raw_results = pipeline.search(query=query, top_k=top_k)
         else:
-            raise RagToolError(
-                "RAG pipeline has no query/retrieve/search method"
-            )
+            raise RagToolError("RAG pipeline has no query/retrieve/search method")
 
         results = _normalize_rag_results(raw_results)
 
-        logger.info(
-            "RAG query '%s': retrieved %d results", query, len(results)
-        )
+        logger.info("RAG query '%s': retrieved %d results", query, len(results))
         return {
             "query": query,
             "results": results,
@@ -144,26 +141,38 @@ def _normalize_rag_results(raw_results: Any) -> List[Dict[str, object]]:
         for item in raw_results:
             if isinstance(item, dict):
                 if "content" in item or "text" in item or "document" in item:
-                    normalized.append({
-                        "content": item.get("content") or item.get("text") or item.get("document", ""),
-                        "score": item.get("score") or item.get("similarity") or item.get("relevance", 0.0),
-                        "source": item.get("source") or item.get("path") or item.get("url", ""),
-                        "metadata": item.get("metadata", {}),
-                    })
+                    normalized.append(
+                        {
+                            "content": item.get("content")
+                            or item.get("text")
+                            or item.get("document", ""),
+                            "score": item.get("score")
+                            or item.get("similarity")
+                            or item.get("relevance", 0.0),
+                            "source": item.get("source")
+                            or item.get("path")
+                            or item.get("url", ""),
+                            "metadata": item.get("metadata", {}),
+                        }
+                    )
                 else:
-                    normalized.append({
+                    normalized.append(
+                        {
+                            "content": str(item),
+                            "score": 0.0,
+                            "source": "",
+                            "metadata": {},
+                        }
+                    )
+            else:
+                normalized.append(
+                    {
                         "content": str(item),
                         "score": 0.0,
                         "source": "",
                         "metadata": {},
-                    })
-            else:
-                normalized.append({
-                    "content": str(item),
-                    "score": 0.0,
-                    "source": "",
-                    "metadata": {},
-                })
+                    }
+                )
     elif isinstance(raw_results, dict):
         docs = (
             raw_results.get("documents")
@@ -187,18 +196,24 @@ def _normalize_rag_results(raw_results: Any) -> List[Dict[str, object]]:
 
         if isinstance(docs, list):
             for i, doc in enumerate(docs):
-                score = scores[i] if isinstance(scores, list) and i < len(scores) else 0.0
-                source = sources[i] if isinstance(sources, list) and i < len(sources) else ""
+                score = (
+                    scores[i] if isinstance(scores, list) and i < len(scores) else 0.0
+                )
+                source = (
+                    sources[i] if isinstance(sources, list) and i < len(sources) else ""
+                )
                 meta = {}
                 if isinstance(source, dict):
                     meta = source
                     source = str(source.get("source", source.get("path", "")))
-                normalized.append({
-                    "content": str(doc),
-                    "score": float(score) if score is not None else 0.0,
-                    "source": str(source) if source else "",
-                    "metadata": meta,
-                })
+                normalized.append(
+                    {
+                        "content": str(doc),
+                        "score": float(score) if score is not None else 0.0,
+                        "source": str(source) if source else "",
+                        "metadata": meta,
+                    }
+                )
 
     return normalized
 
@@ -219,9 +234,7 @@ def _simulate_rag_query(
     Returns:
         Simulated response directing the user to configure RAG.
     """
-    logger.warning(
-        "RAG pipeline not available. Returning simulated results."
-    )
+    logger.warning("RAG pipeline not available. Returning simulated results.")
     return {
         "query": query,
         "results": [
@@ -258,8 +271,18 @@ def register_rag_tools(registry: ToolRegistry) -> None:
             name="rag_query",
             description="Query the RAG knowledge base for documents relevant to the query.",
             parameters=[
-                ToolParameter(name="query", type="string", description="The search query or question."),
-                ToolParameter(name="top_k", type="integer", description="Number of results to retrieve (1-20).", required=False, default=5),
+                ToolParameter(
+                    name="query",
+                    type="string",
+                    description="The search query or question.",
+                ),
+                ToolParameter(
+                    name="top_k",
+                    type="integer",
+                    description="Number of results to retrieve (1-20).",
+                    required=False,
+                    default=5,
+                ),
             ],
             handler=query_knowledge_base,
             handler_sync=True,

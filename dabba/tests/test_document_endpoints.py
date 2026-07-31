@@ -69,13 +69,14 @@ def test_decode_data_url_round_trip():
 
 
 def test_extract_xlsx_includes_sheet_name_and_rows():
-    content = _office_package({
-        "xl/workbook.xml": """
+    content = _office_package(
+        {
+            "xl/workbook.xml": """
             <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
               <sheets><sheet name="Inventory" sheetId="1"/></sheets>
             </workbook>
         """,
-        "xl/worksheets/sheet1.xml": """
+            "xl/worksheets/sheet1.xml": """
             <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
               <sheetData>
                 <row r="1">
@@ -89,7 +90,8 @@ def test_extract_xlsx_includes_sheet_name_and_rows():
               </sheetData>
             </worksheet>
         """,
-    })
+        }
+    )
 
     text = extract_document_bytes("inventory.docx", content)
 
@@ -99,11 +101,12 @@ def test_extract_xlsx_includes_sheet_name_and_rows():
 
 
 def test_extract_pptx_includes_slide_text():
-    content = _office_package({
-        "ppt/presentation.xml": """
+    content = _office_package(
+        {
+            "ppt/presentation.xml": """
             <p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>
         """,
-        "ppt/slides/slide1.xml": """
+            "ppt/slides/slide1.xml": """
             <p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"
                    xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
               <p:cSld><p:spTree><p:sp><p:txBody>
@@ -112,7 +115,8 @@ def test_extract_pptx_includes_slide_text():
               </p:txBody></p:sp></p:spTree></p:cSld>
             </p:sld>
         """,
-    })
+        }
+    )
 
     text = extract_document_bytes("slides.pdf", content)
 
@@ -140,11 +144,13 @@ def test_extremely_large_document_reports_exact_truncation():
 
 
 def test_extract_zip_reads_supported_members_without_unpacking():
-    content = _office_package({
-        "notes/readme.md": "Project overview\n\nThe launch date is Friday.",
-        "data/ignored.bin": "not a supported document",
-        "reports/status.csv": "owner,status\nAsha,ready",
-    })
+    content = _office_package(
+        {
+            "notes/readme.md": "Project overview\n\nThe launch date is Friday.",
+            "data/ignored.bin": "not a supported document",
+            "reports/status.csv": "owner,status\nAsha,ready",
+        }
+    )
 
     text, truncated = extract_zip_file("workspace.zip", io.BytesIO(content))
 
@@ -157,11 +163,13 @@ def test_extract_zip_reads_supported_members_without_unpacking():
 
 
 def test_extract_zip_ignores_unsafe_member_paths():
-    content = _office_package({
-        "../../secret.txt": "must not be read",
-        "/absolute.md": "must not be read either",
-        "safe/notes.txt": "safe archive content",
-    })
+    content = _office_package(
+        {
+            "../../secret.txt": "must not be read",
+            "/absolute.md": "must not be read either",
+            "safe/notes.txt": "safe archive content",
+        }
+    )
 
     text, _ = extract_zip_file("paths.zip", io.BytesIO(content))
 

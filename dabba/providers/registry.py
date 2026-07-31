@@ -1,6 +1,7 @@
 """
 Provider registry — resolves a model ID to the right provider + routes chat calls.
 """
+
 from __future__ import annotations
 from typing import Dict, Iterator, List, Optional, TYPE_CHECKING
 
@@ -20,13 +21,13 @@ if TYPE_CHECKING:
 
 
 # Build catalog once
-_ANTHROPIC    = AnthropicProvider()
-_OPENAI       = OpenAIProvider()
-_GOOGLE       = GoogleProvider()
-_OLLAMA       = OllamaProvider()
-_NVIDIA       = NvidiaProvider()
-_HUGGINGFACE  = HuggingFaceProvider()
-_LOCAL        = LocalOpenAIProvider()
+_ANTHROPIC = AnthropicProvider()
+_OPENAI = OpenAIProvider()
+_GOOGLE = GoogleProvider()
+_OLLAMA = OllamaProvider()
+_NVIDIA = NvidiaProvider()
+_HUGGINGFACE = HuggingFaceProvider()
+_LOCAL = LocalOpenAIProvider()
 
 
 def _make_dabba(endpoint: str) -> DabbaProvider:
@@ -61,18 +62,20 @@ class ProviderRegistry:
         provider_name = info.provider if info else self._guess_provider(model)
 
         provider_map: Dict[str, BaseProvider] = {
-            "anthropic":    _ANTHROPIC,
-            "openai":       _OPENAI,
-            "google":       _GOOGLE,
-            "ollama":       _OLLAMA,
-            "nvidia":       _NVIDIA,
-            "huggingface":  _HUGGINGFACE,
-            "local":        _LOCAL,
-            "dabba":        self._dabba,
+            "anthropic": _ANTHROPIC,
+            "openai": _OPENAI,
+            "google": _GOOGLE,
+            "ollama": _OLLAMA,
+            "nvidia": _NVIDIA,
+            "huggingface": _HUGGINGFACE,
+            "local": _LOCAL,
+            "dabba": self._dabba,
         }
         provider = provider_map.get(provider_name, self._dabba)
         # Check model-specific API key first, then fall back to provider key
-        api_key = self.config.api_keys.get(model, "") or self.config.api_keys.get(model.lower(), "")
+        api_key = self.config.api_keys.get(model, "") or self.config.api_keys.get(
+            model.lower(), ""
+        )
         if not api_key and provider_name != "local":
             api_key = self.config.api_keys.get(provider_name, "")
         return provider, api_key
@@ -96,7 +99,15 @@ class ProviderRegistry:
         # NVIDIA NIM models use namespace/model format: meta/, mistralai/, nvidia/, deepseek-ai/, qwen/
         if "/" in model_l:
             return "nvidia"
-        if ":" in model_l or model_l in ("llama", "mistral", "phi", "qwen", "deepseek", "gemma", "codellama"):
+        if ":" in model_l or model_l in (
+            "llama",
+            "mistral",
+            "phi",
+            "qwen",
+            "deepseek",
+            "gemma",
+            "codellama",
+        ):
             return "ollama"
         return "dabba"
 
@@ -146,7 +157,9 @@ class ProviderRegistry:
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
-        return provider.chat(messages, model, api_key=api_key, usage_out=usage_out, **params)
+        return provider.chat(
+            messages, model, api_key=api_key, usage_out=usage_out, **params
+        )
 
     def stream_chat(
         self,
@@ -192,10 +205,14 @@ class ProviderRegistry:
         provider, api_key = self._get_provider(model)
         stream_chat = getattr(provider, "stream_chat", None)
         if stream_chat is None:
-            yield provider.chat(messages, model, api_key=api_key, usage_out=usage_out, **params)
+            yield provider.chat(
+                messages, model, api_key=api_key, usage_out=usage_out, **params
+            )
             return
 
-        yield from stream_chat(messages, model, api_key=api_key, usage_out=usage_out, **params)
+        yield from stream_chat(
+            messages, model, api_key=api_key, usage_out=usage_out, **params
+        )
 
     def provider_name(self, model: str) -> str:
         info = _MODEL_MAP.get(model)

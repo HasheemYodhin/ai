@@ -1,27 +1,73 @@
 from __future__ import annotations
 from typing import Dict, List
 from dabba.providers.base import (
-    BaseProvider, ModelInfo,
-    tools_to_anthropic_schema, anthropic_tool_use_to_tags, remap_tool_role_for_provider,
+    BaseProvider,
+    ModelInfo,
+    tools_to_anthropic_schema,
+    anthropic_tool_use_to_tags,
+    remap_tool_role_for_provider,
 )
 
-
 MODELS = [
-    ModelInfo("claude-opus-4-8",        "Claude Opus 4.8",   "anthropic", "max",    "Most capable, best reasoning",     200000, 15.0,  75.0,  True,  True),
-    ModelInfo("claude-sonnet-4-6",      "Claude Sonnet 4.6", "anthropic", "high",   "Balanced power and speed",         200000, 3.0,   15.0,  True,  True),
-    ModelInfo("claude-haiku-4-5-20251001","Claude Haiku 4.5","anthropic", "medium", "Fast, lightweight",                200000, 0.8,   4.0,   False, True),
+    ModelInfo(
+        "claude-opus-4-8",
+        "Claude Opus 4.8",
+        "anthropic",
+        "max",
+        "Most capable, best reasoning",
+        200000,
+        15.0,
+        75.0,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "claude-sonnet-4-6",
+        "Claude Sonnet 4.6",
+        "anthropic",
+        "high",
+        "Balanced power and speed",
+        200000,
+        3.0,
+        15.0,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "claude-haiku-4-5-20251001",
+        "Claude Haiku 4.5",
+        "anthropic",
+        "medium",
+        "Fast, lightweight",
+        200000,
+        0.8,
+        4.0,
+        False,
+        True,
+    ),
 ]
 
 
 class AnthropicProvider(BaseProvider):
     name = "anthropic"
 
-    def chat(self, messages, model, max_tokens=4096, temperature=0.7, thinking=False, **kwargs) -> str:
+    def chat(
+        self,
+        messages,
+        model,
+        max_tokens=4096,
+        temperature=0.7,
+        thinking=False,
+        **kwargs,
+    ) -> str:
         import anthropic as sdk
+
         usage_out = kwargs.pop("usage_out", None)
         key = kwargs.get("api_key", "")
         if not key:
-            raise RuntimeError("Anthropic API key not set. Run: /keys set anthropic <key>")
+            raise RuntimeError(
+                "Anthropic API key not set. Run: /keys set anthropic <key>"
+            )
 
         # Explicit timeout so a hung connection fails predictably instead of
         # blocking (previously the SDK default applied, which is much longer
@@ -59,7 +105,10 @@ class AnthropicProvider(BaseProvider):
         if kwargs.get("stop"):
             params["stop_sequences"] = kwargs["stop"]
         if thinking and max_tokens >= 1024:
-            params["thinking"] = {"type": "enabled", "budget_tokens": min(max_tokens // 2, 8000)}
+            params["thinking"] = {
+                "type": "enabled",
+                "budget_tokens": min(max_tokens // 2, 8000),
+            }
             params.pop("temperature", None)  # thinking doesn't support temperature
 
         # Native function-calling — see openai_provider.py for why this
@@ -81,11 +130,13 @@ class AnthropicProvider(BaseProvider):
         if usage is not None and usage_out is not None:
             input_tokens = getattr(usage, "input_tokens", 0) or 0
             output_tokens = getattr(usage, "output_tokens", 0) or 0
-            usage_out.update({
-                "prompt_tokens": input_tokens,
-                "completion_tokens": output_tokens,
-                "total_tokens": input_tokens + output_tokens,
-            })
+            usage_out.update(
+                {
+                    "prompt_tokens": input_tokens,
+                    "completion_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                }
+            )
 
         tag_text = anthropic_tool_use_to_tags(resp.content)
         return (text + "\n" + tag_text).strip() if tag_text else text

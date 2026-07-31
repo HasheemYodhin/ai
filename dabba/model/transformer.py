@@ -52,34 +52,34 @@ class Transformer(nn.Module):
             dropout=config.embedding_dropout,
         )
 
-        self.layers = nn.ModuleList([
-            DecoderBlock(
-                hidden_size=config.hidden_size,
-                num_attention_heads=config.num_attention_heads,
-                num_key_value_heads=config.num_key_value_heads,
-                head_dim=config.head_dim,
-                intermediate_size=config.intermediate_size,
-                hidden_act=config.hidden_act,
-                rms_norm_eps=config.rms_norm_eps,
-                use_rms_norm=config.use_rms_norm,
-                pre_norm=config.pre_norm,
-                max_position_embeddings=config.max_position_embeddings,
-                rope_theta=config.rope_theta,
-                rope_scaling=config.rope_scaling,
-                partial_rotary_factor=config.partial_rotary_factor,
-                attention_dropout=config.attention_dropout,
-                ffn_dropout=config.ffn_dropout,
-                use_flash_attention=config.use_flash_attention,
-                sliding_window=config.sliding_window,
-                bias=False,
-                layer_idx=i,
-            )
-            for i in range(config.num_layers)
-        ])
-
-        NormClass = (
-            RMSNorm if config.use_rms_norm else LayerNorm
+        self.layers = nn.ModuleList(
+            [
+                DecoderBlock(
+                    hidden_size=config.hidden_size,
+                    num_attention_heads=config.num_attention_heads,
+                    num_key_value_heads=config.num_key_value_heads,
+                    head_dim=config.head_dim,
+                    intermediate_size=config.intermediate_size,
+                    hidden_act=config.hidden_act,
+                    rms_norm_eps=config.rms_norm_eps,
+                    use_rms_norm=config.use_rms_norm,
+                    pre_norm=config.pre_norm,
+                    max_position_embeddings=config.max_position_embeddings,
+                    rope_theta=config.rope_theta,
+                    rope_scaling=config.rope_scaling,
+                    partial_rotary_factor=config.partial_rotary_factor,
+                    attention_dropout=config.attention_dropout,
+                    ffn_dropout=config.ffn_dropout,
+                    use_flash_attention=config.use_flash_attention,
+                    sliding_window=config.sliding_window,
+                    bias=False,
+                    layer_idx=i,
+                )
+                for i in range(config.num_layers)
+            ]
         )
+
+        NormClass = RMSNorm if config.use_rms_norm else LayerNorm
         self.norm = NormClass(config.hidden_size, eps=config.rms_norm_eps)
 
         embed_weight = self.embed_tokens.weight if config.tie_word_embeddings else None
@@ -127,10 +127,16 @@ class Transformer(nn.Module):
 
         if position_ids is None:
             past_length = past_key_values[0].size if past_key_values else 0
-            position_ids = torch.arange(
-                past_length, past_length + seq_length,
-                dtype=torch.long, device=input_ids.device
-            ).unsqueeze(0).expand(batch_size, -1)
+            position_ids = (
+                torch.arange(
+                    past_length,
+                    past_length + seq_length,
+                    dtype=torch.long,
+                    device=input_ids.device,
+                )
+                .unsqueeze(0)
+                .expand(batch_size, -1)
+            )
 
         if inputs_embeds is None:
             hidden_states = self.embed_tokens(input_ids)
@@ -155,8 +161,13 @@ class Transformer(nn.Module):
 
             if self.gradient_checkpointing and self.training:
                 hidden_states, kv_cache = self._gradient_checkpointing_forward(
-                    layer, hidden_states, attention_mask, position_ids,
-                    past_key_values[i], use_cache, output_attentions
+                    layer,
+                    hidden_states,
+                    attention_mask,
+                    position_ids,
+                    past_key_values[i],
+                    use_cache,
+                    output_attentions,
                 )
             else:
                 hidden_states, kv_cache = layer(
@@ -235,6 +246,7 @@ class Transformer(nn.Module):
             Layer output.
         """
         from torch.utils.checkpoint import checkpoint
+
         return checkpoint(layer, *args, use_reentrant=False, **kwargs)
 
     def enable_gradient_checkpointing(self) -> None:
@@ -275,6 +287,7 @@ class Transformer(nn.Module):
             Generated token IDs including the prompt.
         """
         from dabba.inference.generator import Generator
+
         generator = Generator(self)
         return generator.generate(
             input_ids=input_ids,
@@ -298,10 +311,7 @@ class Transformer(nn.Module):
         """
         num_params = sum(p.numel() for p in self.parameters())
         if non_embedding:
-            num_params -= sum(
-                p.numel()
-                for p in self.embed_tokens.parameters()
-            )
+            num_params -= sum(p.numel() for p in self.embed_tokens.parameters())
         return num_params
 
     def get_memory_footprint(self) -> int:
@@ -311,15 +321,9 @@ class Transformer(nn.Module):
         Returns:
             Memory footprint in bytes.
         """
-        mem = sum(
-            p.numel() * p.element_size()
-            for p in self.parameters()
-        )
+        mem = sum(p.numel() * p.element_size() for p in self.parameters())
         if hasattr(self, "buffers"):
-            mem += sum(
-                b.numel() * b.element_size()
-                for b in self.buffers()
-            )
+            mem += sum(b.numel() * b.element_size() for b in self.buffers())
         return mem
 
 

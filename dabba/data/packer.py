@@ -34,9 +34,7 @@ class SequencePacker:
         """
         self.max_length = max_length
 
-    def pack(
-        self, sequences: List[Dict[str, torch.Tensor]]
-    ) -> Dict[str, torch.Tensor]:
+    def pack(self, sequences: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         """
         Pack a list of sequences into a single fixed-length sequence.
 
@@ -71,8 +69,8 @@ class SequencePacker:
         if not input_ids_list:
             return self._make_packed([], [])
 
-        input_ids = torch.cat(input_ids_list)[:self.max_length]
-        labels = torch.cat(labels_list)[:self.max_length]
+        input_ids = torch.cat(input_ids_list)[: self.max_length]
+        labels = torch.cat(labels_list)[: self.max_length]
         actual_length = input_ids.size(0)
 
         padding_length = self.max_length - actual_length
@@ -85,13 +83,17 @@ class SequencePacker:
             )
 
         attention_mask = torch.cat(
-            [torch.ones(actual_length, dtype=torch.long),
-             torch.zeros(padding_length, dtype=torch.long)]
+            [
+                torch.ones(actual_length, dtype=torch.long),
+                torch.zeros(padding_length, dtype=torch.long),
+            ]
         )
 
         position_ids = torch.cat(
-            [torch.arange(actual_length, dtype=torch.long),
-             torch.zeros(padding_length, dtype=torch.long)]
+            [
+                torch.arange(actual_length, dtype=torch.long),
+                torch.zeros(padding_length, dtype=torch.long),
+            ]
         )
 
         doc_mask = torch.zeros(self.max_length, dtype=torch.long)
@@ -149,10 +151,7 @@ class SequencePacker:
             Batch of packed sequences with added batch dimension.
         """
         packed = [self.pack(seqs) for seqs in batch_sequences]
-        return {
-            key: torch.stack([p[key] for p in packed])
-            for key in packed[0]
-        }
+        return {key: torch.stack([p[key] for p in packed]) for key in packed[0]}
 
     def get_causal_mask(
         self, attention_mask: torch.Tensor, document_ids: torch.Tensor
@@ -172,9 +171,11 @@ class SequencePacker:
             Causal mask of shape (batch, 1, seq_len, seq_len).
         """
         batch_size, seq_len = attention_mask.shape
-        causal_mask = torch.tril(
-            torch.ones(seq_len, seq_len, dtype=torch.bool)
-        ).unsqueeze(0).unsqueeze(0)
+        causal_mask = (
+            torch.tril(torch.ones(seq_len, seq_len, dtype=torch.bool))
+            .unsqueeze(0)
+            .unsqueeze(0)
+        )
 
         doc_boundaries = document_ids.cumsum(dim=1)
         same_doc = doc_boundaries.unsqueeze(2) == doc_boundaries.unsqueeze(1)

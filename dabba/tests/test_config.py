@@ -82,7 +82,9 @@ class TestModelConfig:
         assert cfg.head_dim == 64
 
     def test_gqa_head_dim(self):
-        cfg = ModelConfig(hidden_size=1024, num_attention_heads=16, num_key_value_heads=4)
+        cfg = ModelConfig(
+            hidden_size=1024, num_attention_heads=16, num_key_value_heads=4
+        )
         assert cfg.head_dim == 64
         assert cfg.num_key_value_groups == 4
 
@@ -164,6 +166,7 @@ class TestConfigYAML:
     def test_save_and_load_yaml(self):
         from dabba.utils.config_loader import save_config, load_yaml
         import tempfile
+
         cfg = ModelConfig.from_preset("tiny")
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
             tmp_path = f.name
@@ -177,12 +180,21 @@ class TestConfigYAML:
 
     def test_load_full_config(self):
         from dabba.utils.config_loader import load_config
+
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
-            f.write(yaml.dump({
-                "model": {"hidden_size": 512, "num_layers": 8, "num_attention_heads": 8},
-                "training": {"batch_size": 16},
-                "data": {"chunk_size": 1024},
-            }))
+            f.write(
+                yaml.dump(
+                    {
+                        "model": {
+                            "hidden_size": 512,
+                            "num_layers": 8,
+                            "num_attention_heads": 8,
+                        },
+                        "training": {"batch_size": 16},
+                        "data": {"chunk_size": 1024},
+                    }
+                )
+            )
             tmp_path = f.name
         try:
             model_cfg, train_cfg, data_cfg, optional = load_config(tmp_path)
@@ -195,14 +207,21 @@ class TestConfigYAML:
 
     def test_load_config_with_preset(self):
         from dabba.utils.config_loader import load_config
+
         with tempfile.NamedTemporaryFile(suffix=".yaml", mode="w", delete=False) as f:
-            f.write(yaml.dump({
-                "training": {"batch_size": 64},
-                "data": {},
-            }))
+            f.write(
+                yaml.dump(
+                    {
+                        "training": {"batch_size": 64},
+                        "data": {},
+                    }
+                )
+            )
             tmp_path = f.name
         try:
-            model_cfg, train_cfg, data_cfg, _ = load_config(tmp_path, model_preset="tiny")
+            model_cfg, train_cfg, data_cfg, _ = load_config(
+                tmp_path, model_preset="tiny"
+            )
             assert model_cfg.hidden_size == 256
             assert train_cfg.batch_size == 64
         finally:

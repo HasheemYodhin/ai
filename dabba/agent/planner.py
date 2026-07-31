@@ -23,6 +23,7 @@ logger = get_logger("dabba.agent.planner")
 
 class StepStatus(Enum):
     """Status of a plan step during execution."""
+
     PENDING = "pending"
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -116,7 +117,8 @@ class ExecutionPlan:
     def completed_steps(self) -> int:
         """Number of steps that have been completed."""
         return sum(
-            1 for s in self.steps
+            1
+            for s in self.steps
             if s.status in (StepStatus.SUCCEEDED, StepStatus.SKIPPED)
         )
 
@@ -146,7 +148,8 @@ class ExecutionPlan:
             List of PlanStep instances ready for execution.
         """
         completed_ids = {
-            s.step_id for s in self.steps
+            s.step_id
+            for s in self.steps
             if s.status in (StepStatus.SUCCEEDED, StepStatus.SKIPPED)
         }
         ready = []
@@ -232,15 +235,70 @@ class Planner:
     def _is_meaningful_word(word: str) -> bool:
         """Check if a word is meaningful for matching (not a stop word)."""
         stop_words = {
-            "a", "an", "the", "of", "in", "to", "for", "with", "on", "at",
-            "by", "is", "it", "as", "be", "are", "was", "were", "been",
-            "have", "has", "had", "do", "does", "did", "will", "would",
-            "could", "should", "may", "might", "can", "shall", "or", "and",
-            "not", "no", "but", "if", "so", "than", "that", "this", "these",
-            "those", "all", "each", "every", "both", "few", "more", "most",
-            "other", "some", "such", "only", "own", "same", "too", "very",
+            "a",
+            "an",
+            "the",
+            "of",
+            "in",
+            "to",
+            "for",
+            "with",
+            "on",
+            "at",
+            "by",
+            "is",
+            "it",
+            "as",
+            "be",
+            "are",
+            "was",
+            "were",
+            "been",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "can",
+            "shall",
+            "or",
+            "and",
+            "not",
+            "no",
+            "but",
+            "if",
+            "so",
+            "than",
+            "that",
+            "this",
+            "these",
+            "those",
+            "all",
+            "each",
+            "every",
+            "both",
+            "few",
+            "more",
+            "most",
+            "other",
+            "some",
+            "such",
+            "only",
+            "own",
+            "same",
+            "too",
+            "very",
         }
-        return len(word) > 2 and word not in stop_words and word.replace(".", "").isalpha()
+        return (
+            len(word) > 2 and word not in stop_words and word.replace(".", "").isalpha()
+        )
 
     def _generate_template_plan(
         self,
@@ -275,8 +333,12 @@ class Planner:
             desc = tool_def.get("description", "").lower()
             desc_words = set(desc.split())
 
-            meaningful_desc_words = {w for w in desc_words if self._is_meaningful_word(w)}
-            meaningful_obj_words = {w for w in objective_words if self._is_meaningful_word(w)}
+            meaningful_desc_words = {
+                w for w in desc_words if self._is_meaningful_word(w)
+            }
+            meaningful_obj_words = {
+                w for w in objective_words if self._is_meaningful_word(w)
+            }
 
             if meaningful_desc_words & meaningful_obj_words:
                 params_schema = tool_def.get("parameters", {})
@@ -309,7 +371,7 @@ class Planner:
 
         return ExecutionPlan(
             objective=objective,
-            steps=steps[:self.max_steps],
+            steps=steps[: self.max_steps],
         )
 
     @staticmethod
@@ -359,25 +421,28 @@ class Planner:
         failed_step.status = StepStatus.FAILED
 
         for step in original_plan.steps:
-            if failed_step.step_id in step.depends_on and step.status == StepStatus.PENDING:
+            if (
+                failed_step.step_id in step.depends_on
+                and step.status == StepStatus.PENDING
+            ):
                 step.status = StepStatus.SKIPPED
                 logger.info("Skipping step '%s' (depends on failed step)", step.step_id)
 
-        remaining = [
-            s for s in original_plan.steps
-            if s.status == StepStatus.PENDING
-        ]
+        remaining = [s for s in original_plan.steps if s.status == StepStatus.PENDING]
 
         if not remaining:
             logger.info("No remaining steps after failure; returning empty plan")
             return ExecutionPlan(
                 objective=original_plan.objective,
-                metadata={"replan_of": original_plan.plan_id, "reason": "all steps blocked"},
+                metadata={
+                    "replan_of": original_plan.plan_id,
+                    "reason": "all steps blocked",
+                },
             )
 
         new_plan = ExecutionPlan(
             objective=original_plan.objective,
-            steps=remaining[:self.max_steps],
+            steps=remaining[: self.max_steps],
             metadata={
                 "replan_of": original_plan.plan_id,
                 "reason": f"Step '{failed_step.step_id}' failed: {failed_step.error}",

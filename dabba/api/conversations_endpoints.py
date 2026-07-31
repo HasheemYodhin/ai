@@ -10,6 +10,7 @@ caller who knows a user_id can read/write that user's conversations. That
 matches the frontend's "local-only profile" design (no server-side account
 system) — do not reuse this pattern if real multi-user security is needed.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,9 @@ def _get_db() -> sqlite3.Connection:
             project_id TEXT
         )
     """)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)"
+    )
     return conn
 
 
@@ -90,7 +93,9 @@ def create_conversations_router() -> APIRouter:
     ):
         user = authenticated_user(authorization)
         if user_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Cannot read another user's conversations")
+            raise HTTPException(
+                status_code=403, detail="Cannot read another user's conversations"
+            )
         conn = _get_db()
         try:
             rows = conn.execute(
@@ -109,7 +114,9 @@ def create_conversations_router() -> APIRouter:
     ):
         user = authenticated_user(authorization)
         if body.userId != user["id"]:
-            raise HTTPException(status_code=403, detail="Cannot write another user's conversations")
+            raise HTTPException(
+                status_code=403, detail="Cannot write another user's conversations"
+            )
         if conversation_id != body.id:
             raise HTTPException(status_code=400, detail="URL id and body id must match")
 
@@ -130,8 +137,15 @@ def create_conversations_router() -> APIRouter:
                 WHERE conversations.user_id = excluded.user_id
                 """,
                 (
-                    body.id, body.userId, body.title, json.dumps(body.messages),
-                    body.createdAt, body.updatedAt, int(body.pinned), int(body.customTitle), body.projectId,
+                    body.id,
+                    body.userId,
+                    body.title,
+                    json.dumps(body.messages),
+                    body.createdAt,
+                    body.updatedAt,
+                    int(body.pinned),
+                    int(body.customTitle),
+                    body.projectId,
                 ),
             )
             conn.commit()
@@ -147,7 +161,9 @@ def create_conversations_router() -> APIRouter:
     ):
         user = authenticated_user(authorization)
         if user_id != user["id"]:
-            raise HTTPException(status_code=403, detail="Cannot delete another user's conversations")
+            raise HTTPException(
+                status_code=403, detail="Cannot delete another user's conversations"
+            )
         conn = _get_db()
         try:
             cur = conn.execute(

@@ -17,6 +17,7 @@ def test_save_command_writes_checkpoint_without_crashing(tmp_path):
     always raised AttributeError, silently caught and reported as
     "Save failed: ...". Fixed to use AgentProxy.checkpoint_context().
     """
+
     async def run():
         config = CliConfig()
         config.history_file = str(tmp_path / "history.jsonl")

@@ -1,4 +1,5 @@
 """Text extraction endpoints for documents attached in the web chat."""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,7 +16,6 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from dabba.data.document_parser import DocumentParser
-
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 25 * 1024 * 1024
@@ -35,8 +35,16 @@ MAX_ZIP_DOCUMENTS = 100
 MAX_DOCUMENT_CHARS = 250_000
 MAX_TOTAL_CHARS = 500_000
 SUPPORTED_SUFFIXES = {
-    ".pdf", ".docx", ".xlsx", ".pptx",
-    ".txt", ".md", ".markdown", ".json", ".jsonl", ".csv",
+    ".pdf",
+    ".docx",
+    ".xlsx",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".json",
+    ".jsonl",
+    ".csv",
 }
 TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".json", ".jsonl", ".csv"}
 
@@ -114,7 +122,9 @@ def _read_zip_text_member(
             characters += len(decoded)
         else:
             truncated = True
-        if bytes_read < info.file_size and (characters > char_limit or bytes_read >= byte_limit):
+        if bytes_read < info.file_size and (
+            characters > char_limit or bytes_read >= byte_limit
+        ):
             truncated = True
     return "".join(pieces)[:char_limit], bytes_read, truncated
 
@@ -134,7 +144,9 @@ def _parse_zip_document_member(
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
                 tmp_path = tmp.name
                 while bytes_read <= MAX_ZIP_MEMBER_BYTES:
-                    chunk = source.read(min(1024 * 1024, MAX_ZIP_MEMBER_BYTES + 1 - bytes_read))
+                    chunk = source.read(
+                        min(1024 * 1024, MAX_ZIP_MEMBER_BYTES + 1 - bytes_read)
+                    )
                     if not chunk:
                         break
                     tmp.write(chunk)
@@ -186,7 +198,10 @@ def extract_zip_file(name: str, file_obj: BinaryIO) -> tuple[str, bool]:
                 if info.flag_bits & 0x1:
                     truncated = True
                     continue
-                if documents >= MAX_ZIP_DOCUMENTS or scanned_bytes >= MAX_ZIP_SCAN_BYTES:
+                if (
+                    documents >= MAX_ZIP_DOCUMENTS
+                    or scanned_bytes >= MAX_ZIP_SCAN_BYTES
+                ):
                     truncated = True
                     break
 
@@ -207,7 +222,10 @@ def extract_zip_file(name: str, file_obj: BinaryIO) -> tuple[str, bool]:
                         truncated = truncated or member_truncated
                     else:
                         text, consumed = _parse_zip_document_member(
-                            archive, info, suffix, remaining,
+                            archive,
+                            info,
+                            suffix,
+                            remaining,
                         )
                         if not text and info.file_size > MAX_ZIP_MEMBER_BYTES:
                             truncated = True
@@ -240,7 +258,7 @@ def extract_zip_file(name: str, file_obj: BinaryIO) -> tuple[str, bool]:
             "\n\n[Archive extraction was limited for safety or to fit the chat context. "
             "Ask about a smaller archive or a specific extracted file for complete contents.]"
         )
-        text = text[:max(0, MAX_DOCUMENT_CHARS - len(marker))] + marker
+        text = text[: max(0, MAX_DOCUMENT_CHARS - len(marker))] + marker
     return text, truncated
 
 
@@ -255,7 +273,9 @@ def extract_document_bytes(name: str, content: bytes) -> str:
         return extract_zip_file(name, io.BytesIO(content))[0]
     if suffix not in SUPPORTED_SUFFIXES:
         supported = ", ".join(sorted(SUPPORTED_SUFFIXES))
-        raise ValueError(f'Unsupported document type for "{name}". Supported: {supported}.')
+        raise ValueError(
+            f'Unsupported document type for "{name}". Supported: {supported}.'
+        )
 
     tmp_path = ""
     try:
@@ -269,7 +289,9 @@ def extract_document_bytes(name: str, content: bytes) -> str:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
 
-    text = "\n\n".join(section.strip() for section in sections if section.strip()).strip()
+    text = "\n\n".join(
+        section.strip() for section in sections if section.strip()
+    ).strip()
     if not text:
         if suffix == ".pdf":
             raise ValueError(
@@ -305,7 +327,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = tmp.name
             while copied <= MAX_MULTIPART_FILE_BYTES:
-                chunk = upload.file.read(min(1024 * 1024, MAX_MULTIPART_FILE_BYTES + 1 - copied))
+                chunk = upload.file.read(
+                    min(1024 * 1024, MAX_MULTIPART_FILE_BYTES + 1 - copied)
+                )
                 if not chunk:
                     break
                 tmp.write(chunk)
@@ -318,7 +342,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
         detected = _detected_suffix(name, signature)
         if detected not in SUPPORTED_SUFFIXES:
             supported = ", ".join(sorted(SUPPORTED_SUFFIXES | {".zip"}))
-            raise ValueError(f'Unsupported document type for "{name}". Supported: {supported}.')
+            raise ValueError(
+                f'Unsupported document type for "{name}". Supported: {supported}.'
+            )
         sections = DocumentParser(max_file_size_mb=100).parse_file(tmp_path)
     except ValueError:
         raise
@@ -328,7 +354,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
         if tmp_path:
             Path(tmp_path).unlink(missing_ok=True)
 
-    text = "\n\n".join(section.strip() for section in sections if section.strip()).strip()
+    text = "\n\n".join(
+        section.strip() for section in sections if section.strip()
+    ).strip()
     if not text:
         raise ValueError(f'No readable text was found in "{name}".')
     return text, False
@@ -342,7 +370,7 @@ def _bounded_document_text(text: str, limit: int) -> tuple[str, bool]:
         f"\n\n[Document text truncated after {limit:,} of "
         f"{len(text):,} extracted characters to fit the chat context.]"
     )
-    return text[:max(0, limit - len(marker))] + marker, True
+    return text[: max(0, limit - len(marker))] + marker, True
 
 
 def create_document_router() -> APIRouter:
@@ -359,10 +387,15 @@ def create_document_router() -> APIRouter:
             try:
                 content = _decode_data_url(upload.data_url)
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=f'{upload.name}: {exc}') from exc
+                raise HTTPException(
+                    status_code=400, detail=f"{upload.name}: {exc}"
+                ) from exc
             total_bytes += len(content)
             if total_bytes > MAX_TOTAL_BYTES:
-                raise HTTPException(status_code=413, detail="Attachments exceed the 25 MB combined limit.")
+                raise HTTPException(
+                    status_code=413,
+                    detail="Attachments exceed the 25 MB combined limit.",
+                )
             decoded.append((upload.name, content))
 
         documents = []
@@ -378,12 +411,14 @@ def create_document_router() -> APIRouter:
                 break
             extracted, truncated = _bounded_document_text(text, limit)
             remaining_chars -= len(extracted)
-            documents.append({
-                "name": name,
-                "text": extracted,
-                "characters": len(text),
-                "truncated": truncated,
-            })
+            documents.append(
+                {
+                    "name": name,
+                    "text": extracted,
+                    "characters": len(text),
+                    "truncated": truncated,
+                }
+            )
 
         return {"documents": documents}
 
@@ -398,7 +433,9 @@ def create_document_router() -> APIRouter:
             for upload in files:
                 name = Path(upload.filename or "attachment").name
                 try:
-                    text, source_truncated = await asyncio.to_thread(extract_uploaded_file, upload)
+                    text, source_truncated = await asyncio.to_thread(
+                        extract_uploaded_file, upload
+                    )
                 except ValueError as exc:
                     raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -407,12 +444,14 @@ def create_document_router() -> APIRouter:
                     break
                 extracted, context_truncated = _bounded_document_text(text, limit)
                 remaining_chars -= len(extracted)
-                documents.append({
-                    "name": name,
-                    "text": extracted,
-                    "characters": len(text),
-                    "truncated": source_truncated or context_truncated,
-                })
+                documents.append(
+                    {
+                        "name": name,
+                        "text": extracted,
+                        "characters": len(text),
+                        "truncated": source_truncated or context_truncated,
+                    }
+                )
         finally:
             for upload in files:
                 await upload.close()

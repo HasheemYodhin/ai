@@ -1,16 +1,62 @@
 from __future__ import annotations
 from typing import Dict, List
 from dabba.providers.base import (
-    BaseProvider, ModelInfo,
-    tools_to_openai_schema, openai_tool_calls_to_tags, remap_tool_role_for_provider,
+    BaseProvider,
+    ModelInfo,
+    tools_to_openai_schema,
+    openai_tool_calls_to_tags,
+    remap_tool_role_for_provider,
 )
 
-
 MODELS = [
-    ModelInfo("gpt-5.5",      "GPT-5.5",      "openai", "max",    "Flagship multimodal model",      256000, 5.0,  20.0,  False, True),
-    ModelInfo("gpt-5.4",      "GPT-5.4",      "openai", "high",   "Balanced multimodal model",      256000, 3.0,  12.0,  False, True),
-    ModelInfo("gpt-5.3",      "GPT-5.3",      "openai", "medium", "Fast and affordable",             128000, 1.0,  4.0,   False, True),
-    ModelInfo("o3",           "o3",           "openai", "max",    "Best reasoning model",           200000, 10.0, 40.0,  True,  True),
+    ModelInfo(
+        "gpt-5.5",
+        "GPT-5.5",
+        "openai",
+        "max",
+        "Flagship multimodal model",
+        256000,
+        5.0,
+        20.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "gpt-5.4",
+        "GPT-5.4",
+        "openai",
+        "high",
+        "Balanced multimodal model",
+        256000,
+        3.0,
+        12.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "gpt-5.3",
+        "GPT-5.3",
+        "openai",
+        "medium",
+        "Fast and affordable",
+        128000,
+        1.0,
+        4.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "o3",
+        "o3",
+        "openai",
+        "max",
+        "Best reasoning model",
+        200000,
+        10.0,
+        40.0,
+        True,
+        True,
+    ),
 ]
 
 
@@ -19,6 +65,7 @@ class OpenAIProvider(BaseProvider):
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
         from openai import OpenAI
+
         usage_out = kwargs.pop("usage_out", None)
         key = kwargs.get("api_key", "")
         if not key:
@@ -66,11 +113,13 @@ class OpenAIProvider(BaseProvider):
 
         usage = getattr(resp, "usage", None)
         if usage is not None and usage_out is not None:
-            usage_out.update({
-                "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
-                "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
-                "total_tokens": getattr(usage, "total_tokens", 0) or 0,
-            })
+            usage_out.update(
+                {
+                    "prompt_tokens": getattr(usage, "prompt_tokens", 0) or 0,
+                    "completion_tokens": getattr(usage, "completion_tokens", 0) or 0,
+                    "total_tokens": getattr(usage, "total_tokens", 0) or 0,
+                }
+            )
 
         tag_text = openai_tool_calls_to_tags(message)
         return (text + "\n" + tag_text).strip() if tag_text else text

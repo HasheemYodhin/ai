@@ -9,7 +9,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 _LOG_LEVELS = {
     "debug": logging.DEBUG,
     "info": logging.INFO,

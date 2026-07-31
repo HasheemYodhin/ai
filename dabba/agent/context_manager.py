@@ -142,7 +142,7 @@ class ContextManager:
         """Conversation history as a list of role/content dicts (excludes system prompt)."""
         entries = self._entries
         if self.max_history is not None:
-            entries = entries[-self.max_history:]
+            entries = entries[-self.max_history :]
         return [{"role": e.role, "content": e.content} for e in entries]
 
     def add_message(self, role: str, content: str) -> None:
@@ -304,10 +304,7 @@ class ContextManager:
         Preserves the most recent entries.
         """
         original_count = len(self._entries)
-        while (
-            self._total_tokens > self.max_context_length * 0.9
-            and self._entries
-        ):
+        while self._total_tokens > self.max_context_length * 0.9 and self._entries:
             removed = self._entries.pop(0)
             self._total_tokens -= removed.token_count
             if self._total_tokens < 0:
@@ -331,8 +328,8 @@ class ContextManager:
         """
         if self._system_prompt:
             logger.info(
-                "Truncation (drop_system): removing system prompt "
-                "(%d tokens)", self._system_token_count
+                "Truncation (drop_system): removing system prompt " "(%d tokens)",
+                self._system_token_count,
             )
             self._total_tokens -= self._system_token_count
             self._system_prompt = None
@@ -362,7 +359,11 @@ class ContextManager:
         loop build the summarization prompt without reaching into internals.
         """
         keep = self.compaction_keep_recent if keep_recent is None else keep_recent
-        start = 1 if (self._entries and self._entries[0].metadata.get("type") == "summary") else 0
+        start = (
+            1
+            if (self._entries and self._entries[0].metadata.get("type") == "summary")
+            else 0
+        )
         older = self._entries[start:-keep] if keep > 0 else self._entries[start:]
         return [{"role": e.role, "content": e.content} for e in older]
 
@@ -385,7 +386,9 @@ class ContextManager:
             Number of entries that were compacted away (0 if nothing to do).
         """
         keep = self.compaction_keep_recent if keep_recent is None else keep_recent
-        has_prior_summary = bool(self._entries) and self._entries[0].metadata.get("type") == "summary"
+        has_prior_summary = (
+            bool(self._entries) and self._entries[0].metadata.get("type") == "summary"
+        )
         start = 1 if has_prior_summary else 0
 
         old_entries = self._entries[start:-keep] if keep > 0 else self._entries[start:]
@@ -432,8 +435,11 @@ class ContextManager:
         logger.info(
             "Compaction: folded %d entries (%d tokens) into a summary "
             "(%d tokens). Total now %d/%d",
-            len(old_entries), old_tokens, summary_tokens,
-            self._total_tokens, self.max_context_length,
+            len(old_entries),
+            old_tokens,
+            summary_tokens,
+            self._total_tokens,
+            self.max_context_length,
         )
         return len(old_entries)
 

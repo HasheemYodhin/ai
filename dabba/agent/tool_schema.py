@@ -140,6 +140,7 @@ class ToolCall:
     def __post_init__(self) -> None:
         if not self.call_id:
             import uuid
+
             self.call_id = uuid.uuid4().hex[:12]
 
 
@@ -194,6 +195,7 @@ class ToolResult:
             return output
         if isinstance(output, (list, dict)):
             import json
+
             try:
                 text = json.dumps(output, indent=2, default=str)
                 if len(text) > 100_000:

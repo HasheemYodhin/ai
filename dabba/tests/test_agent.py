@@ -54,8 +54,12 @@ class TestToolRegistry:
     def test_list_tools(self):
         registry = ToolRegistry()
 
-        def tool1(): pass
-        def tool2(): pass
+        def tool1():
+            pass
+
+        def tool2():
+            pass
+
         registry.register(tool1, name="tool1")
         registry.register(tool2, name="tool2")
         tools = registry.list_tools()
@@ -65,7 +69,9 @@ class TestToolRegistry:
     def test_unregister_tool(self):
         registry = ToolRegistry()
 
-        def tool(): pass
+        def tool():
+            pass
+
         registry.register(tool, name="test")
         assert "test" in registry.list_tools()
         registry.unregister("test")
@@ -106,7 +112,9 @@ class TestToolRegistry:
     def test_tool_registration_twice(self):
         registry = ToolRegistry()
 
-        def tool(): pass
+        def tool():
+            pass
+
         registry.register(tool, name="mytool")
         try:
             registry.register(tool, name="mytool")
@@ -235,7 +243,11 @@ class TestExecutor:
 
     def test_execute_step_failure(self):
         executor = Mock(spec=Executor)
-        executor.execute_step.return_value = {"result": None, "status": "failed", "error": "Something went wrong"}
+        executor.execute_step.return_value = {
+            "result": None,
+            "status": "failed",
+            "error": "Something went wrong",
+        }
         result = executor.execute_step({"action": "fail", "params": {}})
         assert result["status"] == "failed"
 
@@ -250,7 +262,11 @@ class TestAgentLoop:
 
     def test_run_max_iterations(self):
         loop = Mock(spec=AgentLoop)
-        loop.run.return_value = {"response": "Too complex", "steps_taken": 10, "truncated": True}
+        loop.run.return_value = {
+            "response": "Too complex",
+            "steps_taken": 10,
+            "truncated": True,
+        }
         result = loop.run("Complex task")
         assert result["truncated"] is True
 

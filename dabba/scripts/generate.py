@@ -31,29 +31,49 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate text using a trained dabba model"
     )
-    parser.add_argument("--checkpoint", type=str, required=True,
-                        help="Path to checkpoint directory")
-    parser.add_argument("--config", type=str,
-                        help="Path to model config file (optional)")
-    parser.add_argument("--prompt", type=str, default=None,
-                        help="Text prompt for generation")
-    parser.add_argument("--interactive", action="store_true",
-                        help="Run in interactive chat mode")
-    parser.add_argument("--max-tokens", type=int, default=100,
-                        help="Maximum tokens to generate")
-    parser.add_argument("--temperature", type=float, default=0.7,
-                        help="Sampling temperature")
-    parser.add_argument("--top-k", type=int, default=None,
-                        help="Top-K sampling parameter")
-    parser.add_argument("--top-p", type=float, default=0.9,
-                        help="Top-P (nucleus) sampling parameter")
-    parser.add_argument("--do-sample", action="store_true", default=True,
-                        help="Use sampling (vs greedy)")
-    parser.add_argument("--beam-size", type=int, default=None,
-                        help="Beam search beam size (overrides sampling)")
-    parser.add_argument("--device", type=str, default="auto",
-                        choices=["auto", "cpu", "cuda"],
-                        help="Device to run on")
+    parser.add_argument(
+        "--checkpoint", type=str, required=True, help="Path to checkpoint directory"
+    )
+    parser.add_argument(
+        "--config", type=str, help="Path to model config file (optional)"
+    )
+    parser.add_argument(
+        "--prompt", type=str, default=None, help="Text prompt for generation"
+    )
+    parser.add_argument(
+        "--interactive", action="store_true", help="Run in interactive chat mode"
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=100, help="Maximum tokens to generate"
+    )
+    parser.add_argument(
+        "--temperature", type=float, default=0.7, help="Sampling temperature"
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=None, help="Top-K sampling parameter"
+    )
+    parser.add_argument(
+        "--top-p", type=float, default=0.9, help="Top-P (nucleus) sampling parameter"
+    )
+    parser.add_argument(
+        "--do-sample",
+        action="store_true",
+        default=True,
+        help="Use sampling (vs greedy)",
+    )
+    parser.add_argument(
+        "--beam-size",
+        type=int,
+        default=None,
+        help="Beam search beam size (overrides sampling)",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="auto",
+        choices=["auto", "cpu", "cuda"],
+        help="Device to run on",
+    )
     return parser.parse_args()
 
 
@@ -75,6 +95,7 @@ def load_model(checkpoint_path: str, config_path: Optional[str] = None) -> Trans
         model_config, _, _, _ = load_config(config_path)
     else:
         import json
+
         config_file = checkpoint_dir.parent / "config.json"
         if config_file.exists():
             with open(config_file) as f:
@@ -114,16 +135,24 @@ def main():
     model = load_model(args.checkpoint, args.config)
     model = model.to(device)
     model.eval()
-    logger.info(f"Model loaded: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M params")
+    logger.info(
+        f"Model loaded: {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M params"
+    )
 
     generator = Generator(model=model)
 
     def generate(prompt: str) -> str:
         """Generate text from a prompt string."""
-        dummy_tokenizer = type('DummyTokenizer', (), {
-            'encode': lambda self, s: [ord(c) for c in s[:100]],
-            'decode': lambda self, ids: ''.join(chr(i) if 32 <= i <= 126 else '?' for i in ids),
-        })()
+        dummy_tokenizer = type(
+            "DummyTokenizer",
+            (),
+            {
+                "encode": lambda self, s: [ord(c) for c in s[:100]],
+                "decode": lambda self, ids: "".join(
+                    chr(i) if 32 <= i <= 126 else "?" for i in ids
+                ),
+            },
+        )()
 
         input_ids = torch.tensor(
             dummy_tokenizer.encode(prompt),
@@ -147,9 +176,7 @@ def main():
                 do_sample=args.do_sample,
             )
 
-        response = dummy_tokenizer.decode(
-            output_ids[0][len(input_ids[0]):].tolist()
-        )
+        response = dummy_tokenizer.decode(output_ids[0][len(input_ids[0]) :].tolist())
         return response
 
     if args.prompt:

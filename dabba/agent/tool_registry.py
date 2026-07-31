@@ -96,14 +96,13 @@ class ToolRegistry:
             definition.name = name
         definition.handler = actual_handler
         self.tools[definition.name] = definition
-        logger.info(
-            "Registered tool '%s' (%s)", definition.name, definition.category
-        )
+        logger.info("Registered tool '%s' (%s)", definition.name, definition.category)
         return definition
 
     def get_tool_schema(self, name: str) -> Dict[str, Any]:
         """Return a JSON-schema dict for the named tool (fn-tools or ToolDefinition)."""
         import inspect
+
         if name in self._fn_tools:
             fn = self._fn_tools[name]
             sig = inspect.signature(fn)
@@ -115,7 +114,10 @@ class ToolRegistry:
             return {"name": name, "parameters": params}
         definition = self.tools.get(name)
         if definition is not None:
-            return {"name": definition.name, "parameters": definition.parameters_to_json_schema()}
+            return {
+                "name": definition.name,
+                "parameters": definition.parameters_to_json_schema(),
+            }
         raise ValueError(f"Unknown tool: '{name}'")
 
     def get(self, name: str) -> Optional[ToolDefinition]:
@@ -171,14 +173,16 @@ class ToolRegistry:
             haystack = f"{definition.name} {definition.description}".lower()
             score = sum(haystack.count(w) for w in words)
             if any(w in definition.name.lower() for w in words):
-                score += 3  # name match is a much stronger signal than a description hit
+                score += (
+                    3  # name match is a much stronger signal than a description hit
+                )
             if score > 0:
                 scored.append((score, definition.name))
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
         return [
             {"name": name, "description": self.tools[name].description}
-            for _, name in scored[:max(1, limit)]
+            for _, name in scored[: max(1, limit)]
         ]
 
     def unregister(self, name: str) -> bool:
@@ -237,8 +241,10 @@ class ToolRegistry:
                 raise ValueError(f"Unknown tool: '{name}'")
             import asyncio
             from dabba.agent.tool_schema import ToolCall as _TC
+
             call_or_name = _TC(tool_name=name, arguments=args)
         import asyncio
+
         loop = asyncio.new_event_loop()
         try:
             return loop.run_until_complete(self._execute_async(call_or_name))
@@ -258,7 +264,7 @@ class ToolRegistry:
             ToolResult with execution output or error details.
         """
         start = time.monotonic()
-        definition = self.get(call.tool_name) if hasattr(call, 'tool_name') else None
+        definition = self.get(call.tool_name) if hasattr(call, "tool_name") else None
         if definition is None:
             elapsed = (time.monotonic() - start) * 1000
             return ToolResult(
@@ -304,9 +310,7 @@ class ToolRegistry:
         except Exception as exc:
             elapsed = (time.monotonic() - start) * 1000
             tb = traceback.format_exc()
-            logger.error(
-                "Tool '%s' failed: %s\n%s", call.tool_name, exc, tb
-            )
+            logger.error("Tool '%s' failed: %s\n%s", call.tool_name, exc, tb)
             return ToolResult(
                 tool_name=call.tool_name,
                 call_id=call.call_id,
@@ -339,6 +343,7 @@ class ToolRegistry:
             return results
 
         import asyncio
+
         tasks = [self.execute(call) for call in calls]
         return await asyncio.gather(*tasks)
 
@@ -418,24 +423,32 @@ class ToolRegistry:
         )
         for fn_name, fn in members:
             if fn_name.startswith("register_tool_"):
-                tool_name = fn_name[len("register_tool_"):].replace("_", "-")
+                tool_name = fn_name[len("register_tool_") :].replace("_", "-")
                 sig = inspect.signature(fn)
                 params = []
                 for param_name, param in sig.parameters.items():
                     if param_name in ("self", "cls"):
                         continue
                     p_type = self._type_to_json_schema(param.annotation)
-                    p_default = param.default if param.default is not inspect.Parameter.empty else None
+                    p_default = (
+                        param.default
+                        if param.default is not inspect.Parameter.empty
+                        else None
+                    )
                     p_required = p_default is None
-                    params.append({
-                        "name": param_name,
-                        "type": p_type,
-                        "description": "",
-                        "required": p_required,
-                        "default": p_default,
-                    })
+                    params.append(
+                        {
+                            "name": param_name,
+                            "type": p_type,
+                            "description": "",
+                            "required": p_required,
+                            "default": p_default,
+                        }
+                    )
                 doc = inspect.getdoc(fn) or ""
-                description = doc.split("\n")[0] if doc else f"Auto-discovered {tool_name}"
+                description = (
+                    doc.split("\n")[0] if doc else f"Auto-discovered {tool_name}"
+                )
                 definition = ToolDefinition(
                     name=tool_name,
                     description=description,

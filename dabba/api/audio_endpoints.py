@@ -9,6 +9,7 @@ webview sandbox either. So recording happens on the extension host
 (plain Node, full OS access) via `arecord`, and the resulting WAV is
 shipped here for local transcription — no cloud audio API involved.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -33,7 +34,9 @@ _model_lock = threading.Lock()
 
 class TranscribeRequest(BaseModel):
     audio_base64: str  # WAV file bytes, base64-encoded
-    model: Optional[str] = "base"  # tiny/base/small/medium/large — see openai-whisper docs
+    model: Optional[str] = (
+        "base"  # tiny/base/small/medium/large — see openai-whisper docs
+    )
 
 
 def _get_whisper_model(model_name: str):
@@ -46,6 +49,7 @@ def _get_whisper_model(model_name: str):
         cached = _whisper_models.get(model_name)
         if cached is None:
             import whisper
+
             cached = whisper.load_model(model_name)
             _whisper_models[model_name] = cached
     return cached
@@ -73,7 +77,8 @@ def create_audio_router() -> APIRouter:
                 "loadedModels": sorted(_whisper_models),
             },
             "speech": {
-                "available": importlib.util.find_spec("piper") is not None and voice_path.exists(),
+                "available": importlib.util.find_spec("piper") is not None
+                and voice_path.exists(),
                 "piperInstalled": importlib.util.find_spec("piper") is not None,
                 "defaultVoice": DEFAULT_VOICE,
                 "voiceDownloaded": voice_path.exists(),
@@ -105,10 +110,14 @@ def create_audio_router() -> APIRouter:
         try:
             audio_bytes = base64.b64decode(req.audio_base64, validate=True)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid audio data: {exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"Invalid audio data: {exc}"
+            ) from exc
 
         if len(audio_bytes) == 0:
-            raise HTTPException(status_code=400, detail="No audio recorded - check your microphone.")
+            raise HTTPException(
+                status_code=400, detail="No audio recorded - check your microphone."
+            )
 
         tmp_path = None
         try:
@@ -126,7 +135,9 @@ def create_audio_router() -> APIRouter:
                 detail="Whisper is not installed. Install the openai-whisper package to enable voice input.",
             ) from exc
         except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"Transcription failed: {exc}") from exc
+            raise HTTPException(
+                status_code=422, detail=f"Transcription failed: {exc}"
+            ) from exc
         finally:
             if tmp_path:
                 Path(tmp_path).unlink(missing_ok=True)

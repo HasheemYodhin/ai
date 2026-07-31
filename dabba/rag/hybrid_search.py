@@ -97,7 +97,9 @@ class BM25SparseRetriever:
                 self._term_doc_freq[token] += 1
 
         self._total_docs = len(documents)
-        self._avg_doc_length = total_length / self._total_docs if self._total_docs > 0 else 0.0
+        self._avg_doc_length = (
+            total_length / self._total_docs if self._total_docs > 0 else 0.0
+        )
         self._fitted = True
 
         logger.debug(
@@ -141,16 +143,14 @@ class BM25SparseRetriever:
                     continue
 
                 tf = doc_freq.get(token, 0)
-                idf = math.log(
-                    (self._total_docs + 1) / (self._term_doc_freq[token] + 1)
-                ) + 1.0
+                idf = (
+                    math.log((self._total_docs + 1) / (self._term_doc_freq[token] + 1))
+                    + 1.0
+                )
 
-                tf_saturated = (
-                    tf * (self.k1 + 1.0)
-                ) / (
+                tf_saturated = (tf * (self.k1 + 1.0)) / (
                     tf
-                    + self.k1
-                    * (1.0 - self.b + self.b * doc_len / self._avg_doc_length)
+                    + self.k1 * (1.0 - self.b + self.b * doc_len / self._avg_doc_length)
                 )
 
                 score += idf * (tf_saturated + self.delta)
@@ -276,10 +276,7 @@ class HybridSearch:
             max_s = max(scores_dict.values())
             if max_s - min_s < 1e-12:
                 return {k: 1.0 for k in scores_dict}
-            return {
-                k: (v - min_s) / (max_s - min_s)
-                for k, v in scores_dict.items()
-            }
+            return {k: (v - min_s) / (max_s - min_s) for k, v in scores_dict.items()}
 
         dense_norm = _normalize(dense_results)
         sparse_norm = _normalize(sparse_results)
@@ -364,9 +361,7 @@ class HybridSearch:
         if fusion_method == "rrf":
             fused = self._rrf_score(dense_results, sparse_results, k=rrf_k)
         else:
-            fused = self._linear_combination(
-                dense_results, sparse_results, alpha=alpha
-            )
+            fused = self._linear_combination(dense_results, sparse_results, alpha=alpha)
 
         # Reconstruct result objects with fused scores
         doc_map: Dict[str, SearchResult] = {}

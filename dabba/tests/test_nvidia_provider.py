@@ -8,9 +8,7 @@ def test_glm_disables_thinking_by_default():
         max_tokens=256,
     )
 
-    assert params["extra_body"] == {
-        "chat_template_kwargs": {"enable_thinking": False}
-    }
+    assert params["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
 
 
 def test_glm_enables_thinking_when_requested():
@@ -38,14 +36,16 @@ def test_degraded_model_raises_user_friendly_error():
 
     provider = NvidiaProvider()
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = Exception("Error: DEGRADED function cannot be invoked")
+    mock_client.chat.completions.create.side_effect = Exception(
+        "Error: DEGRADED function cannot be invoked"
+    )
 
     with patch.object(provider, "_client", return_value=mock_client):
         with pytest.raises(RuntimeError) as exc_info:
             provider.chat(
                 [{"role": "user", "content": "Hello"}],
                 "thinkingmachines/inkling",
-                api_key="dummy_key"
+                api_key="dummy_key",
             )
         assert "temporarily degraded/unavailable" in str(exc_info.value)
 
@@ -53,7 +53,7 @@ def test_degraded_model_raises_user_friendly_error():
 def test_gemma_converts_system_role():
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": "Hello"}
+        {"role": "user", "content": "Hello"},
     ]
     params = NvidiaProvider()._build_params(
         messages,
@@ -74,7 +74,10 @@ def test_deepseek_v4_uses_slow_model_timeout():
 
     provider = NvidiaProvider()
 
-    assert provider._timeout_for_model("deepseek-ai/deepseek-v4-flash") == SLOW_REASONING_TIMEOUT_SECONDS
+    assert (
+        provider._timeout_for_model("deepseek-ai/deepseek-v4-flash")
+        == SLOW_REASONING_TIMEOUT_SECONDS
+    )
 
 
 def test_stream_chat_retries_nvidia_worker_capacity_errors():
@@ -83,19 +86,23 @@ def test_stream_chat_retries_nvidia_worker_capacity_errors():
 
     provider = NvidiaProvider()
     mock_client = MagicMock()
-    successful_stream = iter([
-        SimpleNamespace(
-            usage=None,
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content="Hello"),
-                    finish_reason="stop",
-                )
-            ],
-        )
-    ])
+    successful_stream = iter(
+        [
+            SimpleNamespace(
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="Hello"),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+        ]
+    )
     mock_client.chat.completions.create.side_effect = [
-        Exception("503 ResourceExhausted: Worker local total request limit reached (48/48)"),
+        Exception(
+            "503 ResourceExhausted: Worker local total request limit reached (48/48)"
+        ),
         successful_stream,
     ]
 
@@ -103,11 +110,13 @@ def test_stream_chat_retries_nvidia_worker_capacity_errors():
         patch.object(provider, "_client", return_value=mock_client),
         patch("time.sleep") as sleep,
     ):
-        chunks = list(provider.stream_chat(
-            [{"role": "user", "content": "Hello"}],
-            "deepseek-ai/deepseek-v4-flash",
-            api_key="dummy_key",
-        ))
+        chunks = list(
+            provider.stream_chat(
+                [{"role": "user", "content": "Hello"}],
+                "deepseek-ai/deepseek-v4-flash",
+                api_key="dummy_key",
+            )
+        )
 
     assert chunks == ["Hello"]
     assert mock_client.chat.completions.create.call_count == 2
@@ -151,7 +160,10 @@ def test_deepseek_v4_falls_back_after_capacity_retries():
 
     assert "used `qwen/qwen2.5-coder-32b-instruct`" in result
     assert result.endswith("Fallback answer")
-    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "qwen/qwen2.5-coder-32b-instruct"
+    assert (
+        mock_client.chat.completions.create.call_args.kwargs["model"]
+        == "qwen/qwen2.5-coder-32b-instruct"
+    )
 
 
 def test_stream_chat_recovers_when_lazy_stream_fails_before_first_token():
@@ -159,20 +171,24 @@ def test_stream_chat_recovers_when_lazy_stream_fails_before_first_token():
     from unittest.mock import MagicMock, patch
 
     def capacity_stream():
-        raise Exception("ResourceExhausted: Worker local total request limit reached (367/48)")
+        raise Exception(
+            "ResourceExhausted: Worker local total request limit reached (367/48)"
+        )
         yield  # pragma: no cover
 
-    successful_stream = iter([
-        SimpleNamespace(
-            usage=None,
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content="Fallback answer"),
-                    finish_reason="stop",
-                )
-            ],
-        )
-    ])
+    successful_stream = iter(
+        [
+            SimpleNamespace(
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content="Fallback answer"),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+        ]
+    )
     provider = NvidiaProvider()
     mock_client = MagicMock()
     mock_client.chat.completions.create.side_effect = [
@@ -186,15 +202,20 @@ def test_stream_chat_recovers_when_lazy_stream_fails_before_first_token():
         patch.object(provider, "_client", return_value=mock_client),
         patch("time.sleep"),
     ):
-        chunks = list(provider.stream_chat(
-            [{"role": "user", "content": "Hello"}],
-            "deepseek-ai/deepseek-v4-flash",
-            api_key="dummy_key",
-        ))
+        chunks = list(
+            provider.stream_chat(
+                [{"role": "user", "content": "Hello"}],
+                "deepseek-ai/deepseek-v4-flash",
+                api_key="dummy_key",
+            )
+        )
 
     assert chunks == ["Fallback answer"]
     assert mock_client.chat.completions.create.call_count == 4
-    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "qwen/qwen2.5-coder-32b-instruct"
+    assert (
+        mock_client.chat.completions.create.call_args.kwargs["model"]
+        == "qwen/qwen2.5-coder-32b-instruct"
+    )
 
 
 def test_stream_chat_continues_partial_answer_on_capacity_fallback():
@@ -211,39 +232,54 @@ def test_stream_chat_continues_partial_answer_on_capacity_fallback():
                 )
             ],
         )
-        raise Exception("ResourceExhausted: Worker local total request limit reached (367/48)")
-
-    fallback_stream = iter([
-        SimpleNamespace(
-            usage=None,
-            choices=[
-                SimpleNamespace(
-                    delta=SimpleNamespace(content=" and second half"),
-                    finish_reason="stop",
-                )
-            ],
+        raise Exception(
+            "ResourceExhausted: Worker local total request limit reached (367/48)"
         )
-    ])
+
+    fallback_stream = iter(
+        [
+            SimpleNamespace(
+                usage=None,
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content=" and second half"),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+        ]
+    )
     provider = NvidiaProvider()
     mock_client = MagicMock()
-    mock_client.chat.completions.create.side_effect = [partial_stream(), fallback_stream]
+    mock_client.chat.completions.create.side_effect = [
+        partial_stream(),
+        fallback_stream,
+    ]
 
     with (
         patch.object(provider, "_client", return_value=mock_client),
         patch("time.sleep") as sleep,
     ):
-        chunks = list(provider.stream_chat(
-            [{"role": "user", "content": "Explain this"}],
-            "deepseek-ai/deepseek-v4-flash",
-            api_key="dummy_key",
-        ))
+        chunks = list(
+            provider.stream_chat(
+                [{"role": "user", "content": "Explain this"}],
+                "deepseek-ai/deepseek-v4-flash",
+                api_key="dummy_key",
+            )
+        )
 
     assert chunks == ["First half", " and second half"]
     sleep.assert_not_called()
     fallback_call = mock_client.chat.completions.create.call_args.kwargs
     assert fallback_call["model"] == "qwen/qwen2.5-coder-32b-instruct"
-    assert fallback_call["messages"][-2] == {"role": "assistant", "content": "First half"}
-    assert fallback_call["messages"][-1] == {"role": "user", "content": _CONTINUE_PROMPT}
+    assert fallback_call["messages"][-2] == {
+        "role": "assistant",
+        "content": "First half",
+    }
+    assert fallback_call["messages"][-1] == {
+        "role": "user",
+        "content": _CONTINUE_PROMPT,
+    }
 
 
 def test_capacity_cooldown_skips_repeated_deepseek_probe():
@@ -272,7 +308,10 @@ def test_capacity_cooldown_skips_repeated_deepseek_probe():
 
     assert result.endswith("Immediate fallback")
     assert mock_client.chat.completions.create.call_count == 1
-    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "qwen/qwen2.5-coder-32b-instruct"
+    assert (
+        mock_client.chat.completions.create.call_args.kwargs["model"]
+        == "qwen/qwen2.5-coder-32b-instruct"
+    )
 
 
 def test_nemotron_ultra_capacity_uses_default_fallback():
@@ -312,4 +351,7 @@ def test_nemotron_ultra_capacity_uses_default_fallback():
 
     assert "`nvidia/nemotron-3-ultra-550b-a55b` is at capacity" in result
     assert result.endswith("Updated document")
-    assert mock_client.chat.completions.create.call_args.kwargs["model"] == "qwen/qwen2.5-coder-32b-instruct"
+    assert (
+        mock_client.chat.completions.create.call_args.kwargs["model"]
+        == "qwen/qwen2.5-coder-32b-instruct"
+    )

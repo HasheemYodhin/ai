@@ -156,7 +156,11 @@ class ChatCompletionResponse:
                     "message": {
                         "role": c.message.role,
                         "content": c.message.content,
-                        **({"tool_calls": c.message.tool_calls} if c.message.tool_calls else {}),
+                        **(
+                            {"tool_calls": c.message.tool_calls}
+                            if c.message.tool_calls
+                            else {}
+                        ),
                     },
                     "finish_reason": c.finish_reason,
                 }
@@ -197,6 +201,7 @@ class ChatCompletionChunk:
         if self.usage is not None:
             data["usage"] = self.usage
         import json
+
         return f"data: {json.dumps(data)}\n\n"
 
     @classmethod

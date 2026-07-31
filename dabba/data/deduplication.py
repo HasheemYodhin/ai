@@ -81,6 +81,7 @@ class Deduplicator:
             Normalized text.
         """
         import re
+
         text = text.lower().strip()
         text = re.sub(r"\s+", " ", text)
         return text
@@ -130,7 +131,7 @@ class Deduplicator:
         normalized = self._normalize(text)
         shingles = set()
         for i in range(len(normalized) - self.shingle_size + 1):
-            shingle = normalized[i:i + self.shingle_size]
+            shingle = normalized[i : i + self.shingle_size]
             shingle_hash = hashlib.md5(shingle.encode("utf-8")).hexdigest()
             shingles.add(int(shingle_hash[:8], 16))
         return shingles
@@ -147,11 +148,14 @@ class Deduplicator:
         """
         rng = random.Random(self.seed)
         mod = (1 << 61) - 1  # Large Mersenne prime
-        return [(rng.randint(1, mod - 1), rng.randint(0, mod - 1))
-                for _ in range(self.num_perm)]
+        return [
+            (rng.randint(1, mod - 1), rng.randint(0, mod - 1))
+            for _ in range(self.num_perm)
+        ]
 
-    def _compute_signature(self, shingles: Set[int],
-                           hash_funcs: List[Tuple[int, int]]) -> List[int]:
+    def _compute_signature(
+        self, shingles: Set[int], hash_funcs: List[Tuple[int, int]]
+    ) -> List[int]:
         """
         Compute MinHash signature for a set of shingles.
 

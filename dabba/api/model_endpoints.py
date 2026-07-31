@@ -37,10 +37,7 @@ def create_model_router(
         Returns a list of model objects in OpenAI-compatible format.
         """
         model_list = ModelList(
-            data=[
-                ModelInfo(id=name, owned_by="dabba")
-                for name in models
-            ]
+            data=[ModelInfo(id=name, owned_by="dabba") for name in models]
         )
         return model_list.to_dict()
 

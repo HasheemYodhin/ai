@@ -94,7 +94,9 @@ def test_encrypted_secret_vault_and_oauth_state(store, tmp_path, monkeypatch):
 
 
 def test_provider_gateway_opens_circuit_and_normalizes_capacity(store):
-    gateway = ProviderGateway(store, max_attempts=1, failure_threshold=2, cooldown_seconds=60)
+    gateway = ProviderGateway(
+        store, max_attempts=1, failure_threshold=2, cooldown_seconds=60
+    )
 
     def fail(_model):
         raise RuntimeError("ResourceExhausted: worker request limit reached")
@@ -106,7 +108,9 @@ def test_provider_gateway_opens_circuit_and_normalizes_capacity(store):
 
     health = gateway.health()[0]
     assert health["state"] == "open"
-    assert health["lastErrorMessage"] == "The selected model is temporarily at capacity."
+    assert (
+        health["lastErrorMessage"] == "The selected model is temporarily at capacity."
+    )
 
 
 def test_transactional_multi_file_edit_and_preflight_rollback(tmp_path):
@@ -116,16 +120,22 @@ def test_transactional_multi_file_edit_and_preflight_rollback(tmp_path):
     second.write_text("value = 'keep'\n")
 
     with pytest.raises(ValueError):
-        transactional_edit(str(tmp_path), [
-            {"path": "first.py", "old_string": "old", "new_string": "new"},
-            {"path": "second.py", "old_string": "missing", "new_string": "new"},
-        ])
+        transactional_edit(
+            str(tmp_path),
+            [
+                {"path": "first.py", "old_string": "old", "new_string": "new"},
+                {"path": "second.py", "old_string": "missing", "new_string": "new"},
+            ],
+        )
     assert first.read_text() == "name = 'old'\n"
 
-    result = transactional_edit(str(tmp_path), [
-        {"path": "first.py", "old_string": "old", "new_string": "new"},
-        {"path": "second.py", "old_string": "keep", "new_string": "changed"},
-    ])
+    result = transactional_edit(
+        str(tmp_path),
+        [
+            {"path": "first.py", "old_string": "old", "new_string": "new"},
+            {"path": "second.py", "old_string": "keep", "new_string": "changed"},
+        ],
+    )
     assert result["files_changed"] == 2
     assert "new" in first.read_text()
 
@@ -137,17 +147,26 @@ def test_nested_repository_instructions_and_symbol_index(store, tmp_path):
     (root / "DABBA.md").write_text("Root rule")
     (root / "src" / "AGENTS.md").write_text("Nested rule")
     source = nested / "service.py"
-    source.write_text("import json\n\ndef execute(value):\n    return json.dumps(value)\n")
+    source.write_text(
+        "import json\n\ndef execute(value):\n    return json.dumps(value)\n"
+    )
 
     workspaces = WorkspaceService(store)
     workspace = workspaces.register(str(root), user_id="user")
-    instructions = workspaces.instructions_for(workspace["id"], "src/feature/service.py")
-    assert [Path(item["path"]).name for item in instructions] == ["DABBA.md", "AGENTS.md"]
+    instructions = workspaces.instructions_for(
+        workspace["id"], "src/feature/service.py"
+    )
+    assert [Path(item["path"]).name for item in instructions] == [
+        "DABBA.md",
+        "AGENTS.md",
+    ]
 
     index = CodeIndexService(store)
     summary = index.index(workspace["id"], str(root))
     assert summary["symbols"] == 1
-    assert index.search(workspace["id"], "execute")[0]["path"] == "src/feature/service.py"
+    assert (
+        index.search(workspace["id"], "execute")[0]["path"] == "src/feature/service.py"
+    )
 
 
 def test_docx_original_and_format_preserving_revision(store, tmp_path, monkeypatch):
@@ -181,33 +200,44 @@ def test_cowork_items_are_user_scoped_and_audited(store):
     second = identity.signup("Second", "second@example.com", "a-secure-password")
     cowork = CoworkService(store)
 
-    item = cowork.create(first["id"], "Prepare release", priority="high", tags=["release"])
+    item = cowork.create(
+        first["id"], "Prepare release", priority="high", tags=["release"]
+    )
     updated = cowork.update(item["id"], first["id"], {"status": "in_progress"})
 
     assert updated["status"] == "in_progress"
-    assert [event["eventType"] for event in cowork.activity(item["id"], first["id"])] == [
-        "updated", "created",
+    assert [
+        event["eventType"] for event in cowork.activity(item["id"], first["id"])
+    ] == [
+        "updated",
+        "created",
     ]
     assert cowork.list(second["id"]) == []
     with pytest.raises(KeyError):
         cowork.get(item["id"], second["id"])
 
 
-def test_cowork_agent_run_completes_item_and_persists_output(store, tmp_path, monkeypatch):
+def test_cowork_agent_run_completes_item_and_persists_output(
+    store, tmp_path, monkeypatch
+):
     monkeypatch.setenv("DABBA_WORKSPACE_ROOTS", str(tmp_path))
     identity = IdentityService(store)
     user = identity.signup("Cowork", "cowork@example.com", "a-secure-password")
     cowork = CoworkService(store)
     item = cowork.create(
-        user["id"], "Create a release note", description="Summarize version 2",
-        status="planned", assignee="Dabba",
+        user["id"],
+        "Create a release note",
+        description="Summarize version 2",
+        status="planned",
+        assignee="Dabba",
     )
 
     run = cowork.dispatch(
         item["id"], user["id"], mode="agent", workspace_path=str(tmp_path)
     )
     completed = cowork.execute(
-        run["id"], user["id"],
+        run["id"],
+        user["id"],
         lambda assignment, context: f"Completed {assignment['title']} in {context['workspacePath']}",
     )
 
@@ -222,15 +252,24 @@ def test_cowork_previous_summary_carries_forward(store, tmp_path, monkeypatch):
     identity = IdentityService(store)
     user = identity.signup("Cowork", "cowork@example.com", "a-secure-password")
     cowork = CoworkService(store)
-    item = cowork.create(user["id"], "Build the app", status="planned", assignee="Dabba")
+    item = cowork.create(
+        user["id"], "Build the app", status="planned", assignee="Dabba"
+    )
 
     # First run finishes with a summary.
-    run1 = cowork.dispatch(item["id"], user["id"], mode="agent", workspace_path=str(tmp_path))
-    cowork.execute(run1["id"], user["id"],
-                   lambda a, c: {"content": "Created models and API; tests not written yet."})
+    run1 = cowork.dispatch(
+        item["id"], user["id"], mode="agent", workspace_path=str(tmp_path)
+    )
+    cowork.execute(
+        run1["id"],
+        user["id"],
+        lambda a, c: {"content": "Created models and API; tests not written yet."},
+    )
 
     # A fresh run should see the previous run's summary, but not its own.
-    run2 = cowork.dispatch(item["id"], user["id"], mode="agent", workspace_path=str(tmp_path))
+    run2 = cowork.dispatch(
+        item["id"], user["id"], mode="agent", workspace_path=str(tmp_path)
+    )
     summary = cowork.previous_summary(item["id"], user["id"], run2["id"])
     assert summary == "Created models and API; tests not written yet."
 
@@ -247,7 +286,10 @@ def test_cowork_subtasks_crud_and_scoping(store):
 
     a = cowork.add_subtask(item["id"], owner["id"], "Write models")
     b = cowork.add_subtask(item["id"], owner["id"], "Write tests")
-    assert [s["title"] for s in cowork.list_subtasks(item["id"], owner["id"])] == ["Write models", "Write tests"]
+    assert [s["title"] for s in cowork.list_subtasks(item["id"], owner["id"])] == [
+        "Write models",
+        "Write tests",
+    ]
     assert a["position"] == 0 and b["position"] == 1
 
     done = cowork.update_subtask(a["id"], owner["id"], {"status": "done"})
@@ -267,18 +309,26 @@ def test_cowork_schedule_dispatches_when_due(store, tmp_path, monkeypatch):
     identity = IdentityService(store)
     user = identity.signup("Cowork", "cowork@example.com", "a-secure-password")
     cowork = CoworkService(store)
-    item = cowork.create(user["id"], "Nightly check", status="planned", assignee="Dabba")
+    item = cowork.create(
+        user["id"], "Nightly check", status="planned", assignee="Dabba"
+    )
 
     sched = cowork.create_schedule(
-        item["id"], user["id"], cadence="interval", interval_minutes=60,
-        mode="agent", workspace_path=str(tmp_path),
+        item["id"],
+        user["id"],
+        cadence="interval",
+        interval_minutes=60,
+        mode="agent",
+        workspace_path=str(tmp_path),
     )
     # Not due yet (next_run is ~60 min out).
     assert cowork.dispatch_due_schedules() == []
 
     # Force it due and confirm it dispatches a run and advances next_run_at.
     with store.transaction() as conn:
-        conn.execute("UPDATE cowork_schedules SET next_run_at=? WHERE id=?", (0, sched["id"]))
+        conn.execute(
+            "UPDATE cowork_schedules SET next_run_at=? WHERE id=?", (0, sched["id"])
+        )
     dispatched = cowork.dispatch_due_schedules()
     assert len(dispatched) == 1
     assert dispatched[0]["itemId"] == item["id"]
@@ -288,7 +338,9 @@ def test_cowork_schedule_dispatches_when_due(store, tmp_path, monkeypatch):
 
     # With a run already active, a second due tick is skipped (not errored).
     with store.transaction() as conn:
-        conn.execute("UPDATE cowork_schedules SET next_run_at=? WHERE id=?", (0, sched["id"]))
+        conn.execute(
+            "UPDATE cowork_schedules SET next_run_at=? WHERE id=?", (0, sched["id"])
+        )
     assert cowork.dispatch_due_schedules() == []
     assert cowork.list_schedules(item["id"], user["id"])[0]["lastStatus"] == "skipped"
 
@@ -302,14 +354,20 @@ def test_agent_definition_crud_and_scoping(store):
     defs = AgentDefinitionService(store)
 
     created = defs.create(
-        owner["id"], "Reviewer", "You are a strict code reviewer.",
-        description="Reviews diffs", allowed_tools=["file_read", "code_analyze"],
-        model="claude-sonnet-5", effort="high",
+        owner["id"],
+        "Reviewer",
+        "You are a strict code reviewer.",
+        description="Reviews diffs",
+        allowed_tools=["file_read", "code_analyze"],
+        model="claude-sonnet-5",
+        effort="high",
     )
     assert created["name"] == "Reviewer"
     assert created["allowedTools"] == ["file_read", "code_analyze"]
 
-    updated = defs.update(created["id"], owner["id"], {"effort": "max", "allowedTools": ["file_read"]})
+    updated = defs.update(
+        created["id"], owner["id"], {"effort": "max", "allowedTools": ["file_read"]}
+    )
     assert updated["effort"] == "max"
     assert updated["allowedTools"] == ["file_read"]
 
@@ -331,10 +389,15 @@ def test_agent_definition_dispatch_parallel_resolves_definitions_per_role(store)
     identity = IdentityService(store)
     owner = identity.signup("Owner", "owner3@example.com", "a-secure-password")
     defs = AgentDefinitionService(store)
-    reviewer = defs.create(owner["id"], "Reviewer", "Review code.", allowed_tools=["file_read"])
-    writer = defs.create(owner["id"], "Writer", "Write code.", allowed_tools=["file_write"])
+    reviewer = defs.create(
+        owner["id"], "Reviewer", "Review code.", allowed_tools=["file_read"]
+    )
+    writer = defs.create(
+        owner["id"], "Writer", "Write code.", allowed_tools=["file_write"]
+    )
 
     calls = []
+
     def run_one(definition, prompt):
         calls.append((definition["name"], prompt))
         return f"{definition['name']} did: {prompt}"
@@ -344,9 +407,13 @@ def test_agent_definition_dispatch_parallel_resolves_definitions_per_role(store)
             "review": {"definitionId": reviewer["id"], "prompt": "check auth.py"},
             "write": {"definitionId": writer["id"], "prompt": "add a test"},
         },
-        owner["id"], run_one,
+        owner["id"],
+        run_one,
     )
-    assert results["review"] == {"success": True, "result": "Reviewer did: check auth.py"}
+    assert results["review"] == {
+        "success": True,
+        "result": "Reviewer did: check auth.py",
+    }
     assert results["write"] == {"success": True, "result": "Writer did: add a test"}
     assert sorted(calls) == [("Reviewer", "check auth.py"), ("Writer", "add a test")]
 
@@ -360,8 +427,11 @@ def test_skill_package_crud_and_scoping(store):
     skills = SkillPackageService(store)
 
     created = skills.create(
-        owner["id"], "Release Notes", "Summarize commits into release notes.",
-        description="Writes release notes from a diff", script="git log --oneline",
+        owner["id"],
+        "Release Notes",
+        "Summarize commits into release notes.",
+        description="Writes release notes from a diff",
+        script="git log --oneline",
     )
     assert created["name"] == "Release Notes"
     assert created["script"] == "git log --oneline"
@@ -386,10 +456,16 @@ def test_skill_package_find_matching_auto_triggers_by_relevance(store):
     identity = IdentityService(store)
     owner = identity.signup("Owner", "owner5@example.com", "a-secure-password")
     skills = SkillPackageService(store)
-    skills.create(owner["id"], "Release Notes", "Summarize git commits into release notes.")
-    skills.create(owner["id"], "Bug Triage", "Classify and prioritize incoming bug reports.")
+    skills.create(
+        owner["id"], "Release Notes", "Summarize git commits into release notes."
+    )
+    skills.create(
+        owner["id"], "Bug Triage", "Classify and prioritize incoming bug reports."
+    )
 
-    match = skills.find_matching(owner["id"], "please write release notes from these commits")
+    match = skills.find_matching(
+        owner["id"], "please write release notes from these commits"
+    )
     assert match is not None and match["name"] == "Release Notes"
 
     match = skills.find_matching(owner["id"], "help me triage this bug report")
@@ -406,8 +482,10 @@ def test_artifact_publish_and_unpublish_flow(store):
     artifacts = ArtifactService(store)
 
     artifact = artifacts.store_bytes(
-        "page.html", b"<!doctype html><html><body>hi</body></html>",
-        media_type="text/html", user_id=owner["id"],
+        "page.html",
+        b"<!doctype html><html><body>hi</body></html>",
+        media_type="text/html",
+        user_id=owner["id"],
     )
 
     published = artifacts.publish(artifact["id"], owner["id"], "My Page")
@@ -417,7 +495,9 @@ def test_artifact_publish_and_unpublish_flow(store):
     fetched = artifacts.get_published(published["slug"])
     assert fetched["artifact"]["path"] == artifact["path"]
 
-    assert [p["slug"] for p in artifacts.list_published(owner["id"])] == [published["slug"]]
+    assert [p["slug"] for p in artifacts.list_published(owner["id"])] == [
+        published["slug"]
+    ]
     assert artifacts.list_published(other["id"]) == []
 
     with pytest.raises(PermissionError):
@@ -454,7 +534,9 @@ def test_memory_delete_enforces_ownership(store):
     assert memory.list(scope="preference", user_id=owner["id"]) == []
 
 
-def test_workspace_folder_browser_is_contained_to_configured_roots(store, tmp_path, monkeypatch):
+def test_workspace_folder_browser_is_contained_to_configured_roots(
+    store, tmp_path, monkeypatch
+):
     root = tmp_path / "allowed"
     child = root / "project"
     hidden = root / ".secret"
@@ -473,12 +555,17 @@ def test_workspace_folder_browser_is_contained_to_configured_roots(store, tmp_pa
         workspaces.browse_directories(str(tmp_path))
 
 
-def test_native_workspace_picker_returns_validated_selected_folder(store, tmp_path, monkeypatch):
+def test_native_workspace_picker_returns_validated_selected_folder(
+    store, tmp_path, monkeypatch
+):
     root = tmp_path / "allowed"
     selected = root / "chosen"
     selected.mkdir(parents=True)
     monkeypatch.setenv("DABBA_WORKSPACE_ROOTS", str(root))
-    monkeypatch.setattr("dabba.platform.services.shutil.which", lambda name: f"/usr/bin/{name}" if name == "zenity" else None)
+    monkeypatch.setattr(
+        "dabba.platform.services.shutil.which",
+        lambda name: f"/usr/bin/{name}" if name == "zenity" else None,
+    )
     monkeypatch.setattr(
         "dabba.platform.services.subprocess.run",
         lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=f"{selected}\n"),
@@ -491,7 +578,9 @@ def test_native_workspace_picker_returns_validated_selected_folder(store, tmp_pa
 
 def test_cowork_prevents_duplicate_active_runs_and_can_cancel(store):
     identity = IdentityService(store)
-    user = identity.signup("Cowork Cancel", "cowork-cancel@example.com", "a-secure-password")
+    user = identity.signup(
+        "Cowork Cancel", "cowork-cancel@example.com", "a-secure-password"
+    )
     cowork = CoworkService(store)
     item = cowork.create(user["id"], "Long assignment")
     run = cowork.dispatch(
@@ -509,14 +598,19 @@ def test_cowork_prevents_duplicate_active_runs_and_can_cancel(store):
     cancelled = cowork.cancel_run(run["id"], user["id"])
     assert cancelled["status"] == "cancelled"
     assert cowork.get(item["id"], user["id"])["status"] == "planned"
-    assert cowork.execute(
-        run["id"], user["id"], lambda *_: pytest.fail("cancelled run executed")
-    )["status"] == "cancelled"
+    assert (
+        cowork.execute(
+            run["id"], user["id"], lambda *_: pytest.fail("cancelled run executed")
+        )["status"]
+        == "cancelled"
+    )
 
 
 def test_cowork_releases_runs_orphaned_by_server_restart(store):
     identity = IdentityService(store)
-    user = identity.signup("Cowork Recovery", "cowork-recovery@example.com", "a-secure-password")
+    user = identity.signup(
+        "Cowork Recovery", "cowork-recovery@example.com", "a-secure-password"
+    )
     cowork = CoworkService(store)
     item = cowork.create(user["id"], "Fix the workspace", status="planned")
     run = cowork.dispatch(item["id"], user["id"], mode="agent")
@@ -537,12 +631,18 @@ def test_scheduled_skill_dispatch_and_execution_history(store):
     user = identity.signup("Scheduler", "scheduler@example.com", "a-secure-password")
     schedules = ScheduledSkillService(store)
     schedule = schedules.create(
-        user["id"], "Daily brief", "Brief", "Summarize project status",
-        cadence="interval", interval_minutes=5,
+        user["id"],
+        "Daily brief",
+        "Brief",
+        "Summarize project status",
+        cadence="interval",
+        interval_minutes=5,
     )
 
     run = schedules.dispatch(schedule["id"], user["id"])
-    completed = schedules.execute(run["id"], user["id"], lambda prompt: f"Done: {prompt}")
+    completed = schedules.execute(
+        run["id"], user["id"], lambda prompt: f"Done: {prompt}"
+    )
 
     assert completed["status"] == "completed"
     assert completed["output"]["content"] == "Done: Summarize project status"

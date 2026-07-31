@@ -2,7 +2,11 @@ import shutil
 
 import pytest
 
-from dabba.api.execution_endpoints import ExecutionRequest, execute_code, normalize_language
+from dabba.api.execution_endpoints import (
+    ExecutionRequest,
+    execute_code,
+    normalize_language,
+)
 
 
 def test_language_aliases_are_normalized():
@@ -18,11 +22,13 @@ def test_unknown_language_is_rejected():
 
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 not installed")
 def test_python_execution_captures_stdin_and_stdout():
-    result = execute_code(ExecutionRequest(
-        language="python",
-        code="name = input()\nprint(f'Hello, {name}!')",
-        stdin="Dabba\n",
-    ))
+    result = execute_code(
+        ExecutionRequest(
+            language="python",
+            code="name = input()\nprint(f'Hello, {name}!')",
+            stdin="Dabba\n",
+        )
+    )
 
     assert result["exitCode"] == 0
     assert result["stdout"] == "Hello, Dabba!\n"
@@ -31,11 +37,13 @@ def test_python_execution_captures_stdin_and_stdout():
 
 @pytest.mark.skipif(shutil.which("python3") is None, reason="python3 not installed")
 def test_execution_timeout_is_reported():
-    result = execute_code(ExecutionRequest(
-        language="python",
-        code="while True: pass",
-        timeout=1,
-    ))
+    result = execute_code(
+        ExecutionRequest(
+            language="python",
+            code="while True: pass",
+            timeout=1,
+        )
+    )
 
     assert result["timedOut"] is True
     assert result["exitCode"] is None
@@ -43,10 +51,12 @@ def test_execution_timeout_is_reported():
 
 @pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc not installed")
 def test_compiled_c_execution():
-    result = execute_code(ExecutionRequest(
-        language="c",
-        code='#include <stdio.h>\nint main(void) { puts("compiled"); return 0; }',
-    ))
+    result = execute_code(
+        ExecutionRequest(
+            language="c",
+            code='#include <stdio.h>\nint main(void) { puts("compiled"); return 0; }',
+        )
+    )
 
     assert result["exitCode"] == 0
     assert result["stdout"] == "compiled\n"

@@ -37,7 +37,8 @@ def _content_to_text(content) -> str:
         return content
     if isinstance(content, list):
         return " ".join(
-            p.get("text", "") for p in content
+            p.get("text", "")
+            for p in content
             if isinstance(p, dict) and p.get("type") == "text"
         )
     return str(content)
@@ -84,7 +85,9 @@ class ChatEndpoint:
     def chat(self, messages, temperature=1.0, max_tokens=None, **kwargs):
         if not messages:
             raise ValueError("Messages cannot be empty")
-        return _fallback_response(messages[-1].get("content", "") if isinstance(messages[-1], dict) else "")
+        return _fallback_response(
+            messages[-1].get("content", "") if isinstance(messages[-1], dict) else ""
+        )
 
 
 def create_chat_router(
@@ -166,7 +169,9 @@ def create_chat_router(
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
 
-        return await _handle_streaming_chat(req, model_engine, _create_chat_task(request, req))
+        return await _handle_streaming_chat(
+            req, model_engine, _create_chat_task(request, req)
+        )
 
     return router
 
@@ -205,11 +210,18 @@ async def _handle_nonstreaming_chat(
         tasks.transition(task_id, "running", current_step="Generating response")
     try:
         response_text = await asyncio.to_thread(
-            _generate_response, messages, model_engine, req.model, req.effort, _sampling_kwargs(req), usage_holder
+            _generate_response,
+            messages,
+            model_engine,
+            req.model,
+            req.effort,
+            _sampling_kwargs(req),
+            usage_holder,
         )
     except Exception as exc:
         if task_context:
             from dabba.platform.provider_gateway import normalize_provider_error
+
             failure = normalize_provider_error(exc, model=req.model)
             tasks.transition(task_id, "failed", error=failure.as_dict())
         raise
@@ -219,8 +231,12 @@ async def _handle_nonstreaming_chat(
     # usage yet) — word count is not token count, just the least-bad guess
     # available without a real tokenizer for every possible model.
     prompt_tokens = usage_holder.get("prompt_tokens") or len(last_message.split())
-    completion_tokens = usage_holder.get("completion_tokens") or len(response_text.split())
-    total_tokens = usage_holder.get("total_tokens") or (prompt_tokens + completion_tokens)
+    completion_tokens = usage_holder.get("completion_tokens") or len(
+        response_text.split()
+    )
+    total_tokens = usage_holder.get("total_tokens") or (
+        prompt_tokens + completion_tokens
+    )
 
     choice = ChatCompletionChoice(
         index=0,
@@ -246,7 +262,11 @@ async def _handle_nonstreaming_chat(
         tasks.transition(
             task_id,
             "completed",
-            result={"content": response_text, "usage": usage_holder, "model": req.model},
+            result={
+                "content": response_text,
+                "usage": usage_holder,
+                "model": req.model,
+            },
         )
         payload["dabba_task_id"] = task_id
     return payload
@@ -285,22 +305,34 @@ async def _handle_streaming_chat(
             complete_text = ""
             event_buffer = ""
             try:
-                async for token in _stream_provider_response(req, messages, model_engine, usage_holder):
+                async for token in _stream_provider_response(
+                    req, messages, model_engine, usage_holder
+                ):
                     complete_text += token
                     event_buffer += token
                     if tasks and len(event_buffer) >= 500:
-                        tasks.append_event(task_id, "task.output.delta", {"content": event_buffer})
+                        tasks.append_event(
+                            task_id, "task.output.delta", {"content": event_buffer}
+                        )
                         event_buffer = ""
                     yield handler.create_chunk(token, index=0)
                 if tasks:
                     if event_buffer:
-                        tasks.append_event(task_id, "task.output.delta", {"content": event_buffer})
+                        tasks.append_event(
+                            task_id, "task.output.delta", {"content": event_buffer}
+                        )
                     tasks.transition(
                         task_id,
                         "completed",
-                        result={"content": complete_text, "usage": usage_holder, "model": req.model},
+                        result={
+                            "content": complete_text,
+                            "usage": usage_holder,
+                            "model": req.model,
+                        },
                     )
-                yield handler.create_chunk("", index=0, finish_reason="stop", usage=usage_holder or None)
+                yield handler.create_chunk(
+                    "", index=0, finish_reason="stop", usage=usage_holder or None
+                )
                 yield "data: [DONE]\n\n"
             except asyncio.CancelledError:
                 if tasks:
@@ -308,6 +340,7 @@ async def _handle_streaming_chat(
                 raise
             except Exception as exc:
                 from dabba.platform.provider_gateway import normalize_provider_error
+
                 failure = normalize_provider_error(exc, model=req.model)
                 if tasks:
                     tasks.transition(task_id, "failed", error=failure.as_dict())
@@ -340,6 +373,7 @@ async def _handle_streaming_chat(
         except Exception as exc:
             if tasks:
                 from dabba.platform.provider_gateway import normalize_provider_error
+
                 tasks.transition(
                     task_id,
                     "failed",
@@ -380,9 +414,15 @@ async def _handle_streaming_chat(
             tasks.transition(
                 task_id,
                 "completed",
-                result={"content": response_text, "usage": usage_holder, "model": req.model},
+                result={
+                    "content": response_text,
+                    "usage": usage_holder,
+                    "model": req.model,
+                },
             )
-        yield handler.create_chunk("", index=0, finish_reason="stop", usage=usage_holder)
+        yield handler.create_chunk(
+            "", index=0, finish_reason="stop", usage=usage_holder
+        )
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(
@@ -441,7 +481,13 @@ async def _stream_provider_response(
     registry = proxy._get_provider_registry()
     resolved_effort = req.effort or getattr(proxy.cli_config, "effort", "medium")
     overrides = {k: v for k, v in _sampling_kwargs(req).items() if v is not None}
-    iterator = registry.stream_chat(messages, model=req.model, effort=resolved_effort, usage_out=usage_out, **overrides)
+    iterator = registry.stream_chat(
+        messages,
+        model=req.model,
+        effort=resolved_effort,
+        usage_out=usage_out,
+        **overrides,
+    )
 
     pending = asyncio.create_task(asyncio.to_thread(_next_stream_token, iterator))
     while True:
@@ -492,6 +538,7 @@ def _generate_response(
     if model_name and not model_name.startswith("dabba"):
         try:
             from dabba.api.agent_endpoints import _get_agent_proxy
+
             proxy = _get_agent_proxy()
             registry = proxy._get_provider_registry()
             # Per-request effort wins; fall back to the server's configured default.
@@ -502,13 +549,22 @@ def _generate_response(
             # effort tier's defaults — registry.chat() layers **kwargs on top
             # of EFFORT_PARAMS, so only non-None values should be forwarded.
             overrides = {k: v for k, v in (sampling or {}).items() if v is not None}
-            return registry.chat(messages, model=model_name, effort=resolved_effort, usage_out=usage_out, **overrides)
+            return registry.chat(
+                messages,
+                model=model_name,
+                effort=resolved_effort,
+                usage_out=usage_out,
+                **overrides,
+            )
         except Exception as exc:
             from dabba.platform.provider_gateway import normalize_provider_error
+
             raise normalize_provider_error(exc, model=model_name) from exc
 
     # Local dabba model is text-only — flatten any multimodal content to text.
-    local_messages = [{"role": m["role"], "content": _content_to_text(m["content"])} for m in messages]
+    local_messages = [
+        {"role": m["role"], "content": _content_to_text(m["content"])} for m in messages
+    ]
     last = local_messages[-1]["content"] if local_messages else ""
 
     # Do not send a one-word social greeting through the local generation
@@ -518,15 +574,22 @@ def _generate_response(
     # keeps chat health checks and first-use conversations responsive while all
     # substantive prompts still use the configured model.
     if isinstance(last, str) and last.strip().casefold() in {
-        "hi", "hello", "hey", "hi!", "hello!", "hey!",
+        "hi",
+        "hello",
+        "hey",
+        "hi!",
+        "hello!",
+        "hey!",
     }:
         return "Hi! How can I help you today?"
 
     if _has_images(messages):
         # The client should route image requests to a vision model or OCR them
         # client-side; if an image still reaches the local model, say so plainly.
-        note = ("\n\n[Note: an image was attached but the local dabba model can't "
-                "read images. Select a vision model, or the app will OCR it to text.]")
+        note = (
+            "\n\n[Note: an image was attached but the local dabba model can't "
+            "read images. Select a vision model, or the app will OCR it to text.]"
+        )
     else:
         note = ""
 
@@ -556,7 +619,7 @@ def _fallback_response(prompt: str) -> str:
         A placeholder response.
     """
     return (
-        f"I received your message: \"{prompt[:100]}\". "
+        f'I received your message: "{prompt[:100]}". '
         f"This is a placeholder response. To enable actual model responses, "
         f"configure a model engine when starting the server."
     )

@@ -69,7 +69,18 @@ class CliConfig:
     auto_save_interval: int = 120
     watch_files: bool = True
     watch_extensions: List[str] = field(
-        default_factory=lambda: [".py", ".js", ".ts", ".rs", ".go", ".md", ".txt", ".yaml", ".json", ".toml"]
+        default_factory=lambda: [
+            ".py",
+            ".js",
+            ".ts",
+            ".rs",
+            ".go",
+            ".md",
+            ".txt",
+            ".yaml",
+            ".json",
+            ".toml",
+        ]
     )
     # Remote/container execution allowlists — empty means "deny all" by
     # default, since these tools reach outside the local sandboxed cwd.

@@ -42,6 +42,7 @@ class LatencyStats:
         std_ms: Standard deviation in milliseconds.
         num_samples: Number of samples collected.
     """
+
     mean_ms: float = 0.0
     median_ms: float = 0.0
     p90_ms: float = 0.0
@@ -70,6 +71,7 @@ class LatencyReport:
         histogram: Latency histogram bins (bin_edges, counts).
         config_snapshot: Model configuration at profiling time.
     """
+
     layer_stats: Dict[int, LatencyStats] = field(default_factory=dict)
     attention_stats: Dict[int, LatencyStats] = field(default_factory=dict)
     ffn_stats: Dict[int, LatencyStats] = field(default_factory=dict)
@@ -79,7 +81,9 @@ class LatencyReport:
     total_stats: LatencyStats = field(default_factory=LatencyStats)
     overhead_stats: LatencyStats = field(default_factory=LatencyStats)
     histogram: Dict[str, List[float]] = field(default_factory=dict)
-    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(default_factory=dict)
+    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(
+        default_factory=dict
+    )
 
 
 class LatencyProfiler:
@@ -167,11 +171,13 @@ class LatencyProfiler:
 
     def _make_layer_hook(self, layer_idx: int):
         """Create a forward hook for a decoder block."""
+
         def hook(module, input_tensors, output_tensor):
             if self._cuda_available:
                 torch.cuda.synchronize()
             key = f"layer_{layer_idx}"
             self._layer_times[key].append(0.0)
+
         return hook
 
     def _make_attn_hook(self, layer_idx: int):
@@ -403,9 +409,11 @@ class LatencyProfiler:
         n = len(sorted_samples)
 
         mean = sum(sorted_samples) / n
-        median = sorted_samples[n // 2] if n % 2 == 1 else (
-            sorted_samples[n // 2 - 1] + sorted_samples[n // 2]
-        ) / 2
+        median = (
+            sorted_samples[n // 2]
+            if n % 2 == 1
+            else (sorted_samples[n // 2 - 1] + sorted_samples[n // 2]) / 2
+        )
         p90 = sorted_samples[int(n * 0.90)]
         p99 = sorted_samples[int(n * 0.99)]
         p999 = sorted_samples[min(int(n * 0.999), n - 1)]
@@ -581,13 +589,15 @@ class LatencyProfiler:
                 f"ffn: {report.ffn_stats.get(layer_idx, LatencyStats()).mean_ms:.3f} ms)"
             )
 
-        lines.extend([
-            "",
-            f"  Attention (overall mean): {sum(s.mean_ms for s in report.attention_stats.values()) / max(len(report.attention_stats), 1):.3f} ms",
-            f"  FFN (overall mean):       {sum(s.mean_ms for s in report.ffn_stats.values()) / max(len(report.ffn_stats), 1):.3f} ms",
-            "",
-            f"  Profiling overhead:       {report.overhead_stats.mean_ms:.6f} ms (mean)",
-            "-" * 60,
-        ])
+        lines.extend(
+            [
+                "",
+                f"  Attention (overall mean): {sum(s.mean_ms for s in report.attention_stats.values()) / max(len(report.attention_stats), 1):.3f} ms",
+                f"  FFN (overall mean):       {sum(s.mean_ms for s in report.ffn_stats.values()) / max(len(report.ffn_stats), 1):.3f} ms",
+                "",
+                f"  Profiling overhead:       {report.overhead_stats.mean_ms:.6f} ms (mean)",
+                "-" * 60,
+            ]
+        )
 
         return "\n".join(lines)

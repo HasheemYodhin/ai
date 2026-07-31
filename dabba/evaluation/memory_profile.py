@@ -41,6 +41,7 @@ class MemoryBreakdown:
         num_parameters: Number of trainable parameters.
         dtype: Data type of the component.
     """
+
     parameter_mb: float = 0.0
     buffer_mb: float = 0.0
     total_mb: float = 0.0
@@ -91,6 +92,7 @@ class MemoryReport:
 
         config_snapshot: Model configuration at profiling time.
     """
+
     total_parameter_mb: float = 0.0
     total_buffer_mb: float = 0.0
     total_model_mb: float = 0.0
@@ -125,7 +127,9 @@ class MemoryReport:
     model_size_mb: float = 0.0
     model_size_gb: float = 0.0
 
-    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(default_factory=dict)
+    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(
+        default_factory=dict
+    )
 
 
 class MemoryProfiler:
@@ -190,14 +194,14 @@ class MemoryProfiler:
         report.model_bytes = sum(
             p.numel() * p.element_size() for p in self.model.parameters()
         )
-        report.model_size_mb = report.model_bytes / (1024 ** 2)
-        report.model_size_gb = report.model_bytes / (1024 ** 3)
+        report.model_size_mb = report.model_bytes / (1024**2)
+        report.model_size_gb = report.model_bytes / (1024**3)
         report.total_parameter_mb = sum(
             p.numel() * p.element_size() for p in self.model.parameters()
-        ) / (1024 ** 2)
+        ) / (1024**2)
         report.total_buffer_mb = sum(
             b.numel() * b.element_size() for b in self.model.buffers()
-        ) / (1024 ** 2)
+        ) / (1024**2)
         report.total_model_mb = report.total_parameter_mb + report.total_buffer_mb
 
         return report
@@ -226,8 +230,14 @@ class MemoryProfiler:
             if isinstance(module, FeedForward):
                 total_ffn_params += sum(p.numel() for p in module.parameters())
 
-            if "layernorm" in name.lower() or "rmsnorm" in name.lower() or "norm" in name.lower():
-                if not isinstance(module, (MultiHeadAttention, GroupedQueryAttention, FeedForward)):
+            if (
+                "layernorm" in name.lower()
+                or "rmsnorm" in name.lower()
+                or "norm" in name.lower()
+            ):
+                if not isinstance(
+                    module, (MultiHeadAttention, GroupedQueryAttention, FeedForward)
+                ):
                     for p in module.parameters():
                         total_norm_params += p.numel()
                         total_norm_bytes += p.numel() * p.element_size()
@@ -235,21 +245,21 @@ class MemoryProfiler:
         # Embedding
         embed_params = sum(p.numel() for p in self.model.embed_tokens.parameters())
         embed_bytes = embed_params * self._element_size(self.model.embed_tokens)
-        report.embedding_mb = embed_bytes / (1024 ** 2)
+        report.embedding_mb = embed_bytes / (1024**2)
 
         # Output head
         head_params = sum(p.numel() for p in self.model.lm_head.parameters())
         head_bytes = head_params * self._element_size(self.model.lm_head)
-        report.output_head_mb = head_bytes / (1024 ** 2)
+        report.output_head_mb = head_bytes / (1024**2)
 
         # Normalization (overall)
-        report.normalization_mb = total_norm_bytes / (1024 ** 2)
+        report.normalization_mb = total_norm_bytes / (1024**2)
 
         # Attention and FFN totals
         attn_bytes = total_attn_params * 4  # assume float32
         ffn_bytes = total_ffn_params * 4
-        report.attention_parameters_mb = attn_bytes / (1024 ** 2)
-        report.ffn_parameters_mb = ffn_bytes / (1024 ** 2)
+        report.attention_parameters_mb = attn_bytes / (1024**2)
+        report.ffn_parameters_mb = ffn_bytes / (1024**2)
 
     def _estimate_activations(
         self,
@@ -297,12 +307,12 @@ class MemoryProfiler:
         attn_q = batch_size * seq_length * num_heads * head_dim * bytes_per_elem
         attn_k = batch_size * seq_length * kv_heads * head_dim * bytes_per_elem
         attn_v = batch_size * seq_length * kv_heads * head_dim * bytes_per_elem
-        attn_scores = (
-            batch_size * num_heads * seq_length * seq_length * bytes_per_elem
-        )
+        attn_scores = batch_size * num_heads * seq_length * seq_length * bytes_per_elem
         attn_output = batch_size * seq_length * hidden_size * bytes_per_elem
         attn_residual = batch_size * seq_length * hidden_size * bytes_per_elem
-        attn_total = attn_q + attn_k + attn_v + attn_scores + attn_output + attn_residual
+        attn_total = (
+            attn_q + attn_k + attn_v + attn_scores + attn_output + attn_residual
+        )
 
         # FFN activations
         ffn_gate = batch_size * seq_length * intermediate_size * bytes_per_elem
@@ -313,7 +323,7 @@ class MemoryProfiler:
 
         norm_total = 2 * batch_size * seq_length * hidden_size * bytes_per_elem
 
-        per_layer_mb = (attn_total + ffn_total + norm_total) / (1024 ** 2)
+        per_layer_mb = (attn_total + ffn_total + norm_total) / (1024**2)
 
         # Without gradient checkpointing: all layer activations are stored
         total_activations_mb = per_layer_mb * num_layers
@@ -347,14 +357,18 @@ class MemoryProfiler:
             if p.requires_grad:
                 total_grad_bytes += p.numel() * p.element_size()
 
-        report.gradient_estimation_mb = total_grad_bytes / (1024 ** 2)
+        report.gradient_estimation_mb = total_grad_bytes / (1024**2)
 
         # Per-layer gradient estimates (proportional to parameters)
-        total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total_params = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
+        )
         for layer_idx, br in report.per_layer_parameters.items():
             if total_params > 0:
                 ratio = br.num_parameters / total_params
-                report.per_layer_gradients[layer_idx] = report.gradient_estimation_mb * ratio
+                report.per_layer_gradients[layer_idx] = (
+                    report.gradient_estimation_mb * ratio
+                )
             else:
                 report.per_layer_gradients[layer_idx] = 0.0
 
@@ -372,7 +386,7 @@ class MemoryProfiler:
             p.numel() * p.element_size() for p in self.model.parameters()
         )
         # AdamW: 2 momentum buffers per parameter
-        report.optimizer_state_mb = (total_params_bytes * 2) / (1024 ** 2)
+        report.optimizer_state_mb = (total_params_bytes * 2) / (1024**2)
 
     def _estimate_kv_cache(
         self,
@@ -396,9 +410,14 @@ class MemoryProfiler:
         bytes_per_elem = 2  # FP16 KV cache (typical)
 
         per_layer_bytes = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * bytes_per_elem
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * bytes_per_elem
         )
-        per_layer_mb = per_layer_bytes / (1024 ** 2)
+        per_layer_mb = per_layer_bytes / (1024**2)
         total_mb = per_layer_mb * cfg.num_layers
 
         report.kv_cache_mb = total_mb
@@ -422,7 +441,8 @@ class MemoryProfiler:
         torch.cuda.empty_cache()
 
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, seq_length),
             device=self.device,
         )
@@ -439,10 +459,10 @@ class MemoryProfiler:
         reserved_peak = torch.cuda.max_memory_reserved(self._cuda_device)
         reserved_current = torch.cuda.memory_reserved(self._cuda_device)
 
-        report.peak_allocated_mb = peak_memory / (1024 ** 2)
-        report.current_allocated_mb = current_memory / (1024 ** 2)
-        report.peak_reserved_mb = reserved_peak / (1024 ** 2)
-        report.current_reserved_mb = reserved_current / (1024 ** 2)
+        report.peak_allocated_mb = peak_memory / (1024**2)
+        report.current_allocated_mb = current_memory / (1024**2)
+        report.peak_reserved_mb = reserved_peak / (1024**2)
+        report.current_reserved_mb = reserved_current / (1024**2)
 
     def estimate_kv_cache_size(
         self,
@@ -467,15 +487,20 @@ class MemoryProfiler:
         bytes_per_elem = dtype_bits / 8
 
         per_layer_bytes = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * bytes_per_elem
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * bytes_per_elem
         )
         total_bytes = per_layer_bytes * cfg.num_layers
 
         return {
-            "per_layer_kv_cache_mb": per_layer_bytes / (1024 ** 2),
-            "total_kv_cache_mb": total_bytes / (1024 ** 2),
-            "per_layer_kv_cache_gb": per_layer_bytes / (1024 ** 3),
-            "total_kv_cache_gb": total_bytes / (1024 ** 3),
+            "per_layer_kv_cache_mb": per_layer_bytes / (1024**2),
+            "total_kv_cache_mb": total_bytes / (1024**2),
+            "per_layer_kv_cache_gb": per_layer_bytes / (1024**3),
+            "total_kv_cache_gb": total_bytes / (1024**3),
             "batch_size": batch_size,
             "seq_length": seq_length,
             "dtype_bits": dtype_bits,
@@ -525,10 +550,14 @@ class MemoryProfiler:
             batch_size = 1
             hidden_size = cfg.hidden_size
             bytes_per_elem = 4
-            per_layer = batch_size * seq_length * hidden_size * bytes_per_elem * 7 / (1024 ** 2)
+            per_layer = (
+                batch_size * seq_length * hidden_size * bytes_per_elem * 7 / (1024**2)
+            )
             activations_no_gc = per_layer * cfg.num_layers
             activations_with_gc = per_layer * 2
-            savings["gradient_checkpointing_mb"] = activations_no_gc - activations_with_gc
+            savings["gradient_checkpointing_mb"] = (
+                activations_no_gc - activations_with_gc
+            )
         else:
             savings["gradient_checkpointing_mb"] = 0.0
 
@@ -544,7 +573,9 @@ class MemoryProfiler:
 
     def _get_base_memory(self) -> float:
         """Get the current model parameter memory in MiB."""
-        return sum(p.numel() * p.element_size() for p in self.model.parameters()) / (1024 ** 2)
+        return sum(p.numel() * p.element_size() for p in self.model.parameters()) / (
+            1024**2
+        )
 
     def _get_current_weight_bits(self) -> int:
         """Get the current weight precision in bits."""
@@ -560,12 +591,22 @@ class MemoryProfiler:
         bytes_per_elem_fp16 = 2
         bytes_per_elem_target = target_bits / 8
         per_layer_bytes_fp16 = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * bytes_per_elem_fp16
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * bytes_per_elem_fp16
         )
         per_layer_bytes_target = (
-            batch_size * cfg.num_key_value_heads * seq_length * cfg.head_dim * 2 * bytes_per_elem_target
+            batch_size
+            * cfg.num_key_value_heads
+            * seq_length
+            * cfg.head_dim
+            * 2
+            * bytes_per_elem_target
         )
-        savings_per_layer = (per_layer_bytes_fp16 - per_layer_bytes_target) / (1024 ** 2)
+        savings_per_layer = (per_layer_bytes_fp16 - per_layer_bytes_target) / (1024**2)
         return savings_per_layer * cfg.num_layers
 
     def _breakdown_module(self, module: nn.Module) -> MemoryBreakdown:
@@ -592,9 +633,9 @@ class MemoryProfiler:
             buffer_bytes += b.numel() * b.element_size()
 
         return MemoryBreakdown(
-            parameter_mb=param_bytes / (1024 ** 2),
-            buffer_mb=buffer_bytes / (1024 ** 2),
-            total_mb=(param_bytes + buffer_bytes) / (1024 ** 2),
+            parameter_mb=param_bytes / (1024**2),
+            buffer_mb=buffer_bytes / (1024**2),
+            total_mb=(param_bytes + buffer_bytes) / (1024**2),
             num_parameters=param_count,
             dtype=param_dtype,
         )
@@ -688,31 +729,43 @@ class MemoryProfiler:
 
         for layer_idx in sorted(report.per_layer_parameters.keys()):
             br = report.per_layer_parameters[layer_idx]
-            lines.append(f"  Layer {layer_idx:>2}: {br.total_mb:.3f} MiB ({br.num_parameters:,} params)")
+            lines.append(
+                f"  Layer {layer_idx:>2}: {br.total_mb:.3f} MiB ({br.num_parameters:,} params)"
+            )
 
-        lines.extend([
-            "",
-            "Memory Estimates:",
-            f"  Activation Memory (no GC):  {report.activation_estimation_mb:.2f} MiB",
-            f"  Gradient Memory:             {report.gradient_estimation_mb:.2f} MiB",
-            f"  Optimizer State (AdamW):     {report.optimizer_state_mb:.2f} MiB",
-            f"  KV Cache (FP16, 2048 ctx):   {report.kv_cache_mb:.2f} MiB",
-            "",
-            "CUDA Memory (measured):" if report.peak_allocated_mb > 0 else "CUDA Memory: N/A (no GPU)",
-        ])
+        lines.extend(
+            [
+                "",
+                "Memory Estimates:",
+                f"  Activation Memory (no GC):  {report.activation_estimation_mb:.2f} MiB",
+                f"  Gradient Memory:             {report.gradient_estimation_mb:.2f} MiB",
+                f"  Optimizer State (AdamW):     {report.optimizer_state_mb:.2f} MiB",
+                f"  KV Cache (FP16, 2048 ctx):   {report.kv_cache_mb:.2f} MiB",
+                "",
+                (
+                    "CUDA Memory (measured):"
+                    if report.peak_allocated_mb > 0
+                    else "CUDA Memory: N/A (no GPU)"
+                ),
+            ]
+        )
 
         if report.peak_allocated_mb > 0:
-            lines.extend([
-                f"  Peak Allocated:  {report.peak_allocated_mb:.2f} MiB",
-                f"  Current Allocated: {report.current_allocated_mb:.2f} MiB",
-                f"  Peak Reserved:   {report.peak_reserved_mb:.2f} MiB",
-            ])
+            lines.extend(
+                [
+                    f"  Peak Allocated:  {report.peak_allocated_mb:.2f} MiB",
+                    f"  Current Allocated: {report.current_allocated_mb:.2f} MiB",
+                    f"  Peak Reserved:   {report.peak_reserved_mb:.2f} MiB",
+                ]
+            )
 
-        lines.extend([
-            "",
-            "Estimated Savings from Optimizations:",
-            f"  Gradient Checkpointing: {report.saved_memory_gradient_checkpointing_mb:.2f} MiB",
-            "-" * 60,
-        ])
+        lines.extend(
+            [
+                "",
+                "Estimated Savings from Optimizations:",
+                f"  Gradient Checkpointing: {report.saved_memory_gradient_checkpointing_mb:.2f} MiB",
+                "-" * 60,
+            ]
+        )
 
         return "\n".join(lines)

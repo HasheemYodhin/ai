@@ -16,7 +16,9 @@ from dabba.model import (
 
 class TestMultiHeadAttention:
     def test_forward(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, cache = attn(x, position_ids=pos)
@@ -24,7 +26,9 @@ class TestMultiHeadAttention:
         assert weights.shape == (2, 4, 10, 10)
 
     def test_with_attention_mask(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         mask = torch.ones(2, 1, 10, 10)
@@ -33,7 +37,13 @@ class TestMultiHeadAttention:
         assert out.shape == (2, 10, 64)
 
     def test_dropout_training(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, attention_dropout=0.5, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            attention_dropout=0.5,
+            max_position_embeddings=64,
+        )
         attn.train()
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
@@ -42,7 +52,13 @@ class TestMultiHeadAttention:
         assert not torch.allclose(out1, out2)
 
     def test_dropout_eval(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, attention_dropout=0.5, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            attention_dropout=0.5,
+            max_position_embeddings=64,
+        )
         attn.eval()
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
@@ -51,15 +67,21 @@ class TestMultiHeadAttention:
         assert torch.allclose(out1, out2)
 
     def test_scale(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 1, 64)
         pos = torch.zeros(1, 1, dtype=torch.long)
         out, _, _ = attn(x, position_ids=pos)
         assert not torch.isnan(out).any()
 
     def test_multiple_layers_independent(self):
-        attn1 = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
-        attn2 = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn1 = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
+        attn2 = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 5, 64)
         pos = torch.zeros(1, 5, dtype=torch.long)
         o1, _, _ = attn1(x, position_ids=pos)
@@ -67,7 +89,9 @@ class TestMultiHeadAttention:
         assert not torch.allclose(o1, o2)
 
     def test_batch_independence(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x1 = torch.ones(1, 5, 64)
         x2 = torch.zeros(1, 5, 64)
         pos = torch.zeros(1, 5, dtype=torch.long)
@@ -77,7 +101,13 @@ class TestMultiHeadAttention:
         assert not torch.allclose(out[0], out[1])
 
     def test_causal_attention(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64, causal=True)
+        attn = MultiHeadAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            max_position_embeddings=64,
+            causal=True,
+        )
         x = torch.randn(1, 10, 64)
         pos = torch.arange(10).unsqueeze(0)
         _, weights, _ = attn(x, position_ids=pos)
@@ -86,7 +116,9 @@ class TestMultiHeadAttention:
                 assert weights[0, :, i, j].sum() < 1e-6
 
     def test_use_cache(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 5, 64)
         pos = torch.arange(5).unsqueeze(0)
         _, _, cache = attn(x, position_ids=pos, use_cache=True)
@@ -96,7 +128,9 @@ class TestMultiHeadAttention:
         assert cache2.size == 6
 
     def test_no_cache(self):
-        attn = MultiHeadAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiHeadAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 5, 64)
         pos = torch.arange(5).unsqueeze(0)
         _, _, cache = attn(x, position_ids=pos, use_cache=False)
@@ -105,21 +139,39 @@ class TestMultiHeadAttention:
 
 class TestGroupedQueryAttention:
     def test_kv_heads_less_than_q_heads(self):
-        attn = GroupedQueryAttention(hidden_size=64, num_heads=8, num_key_value_heads=2, head_dim=8, max_position_embeddings=64)
+        attn = GroupedQueryAttention(
+            hidden_size=64,
+            num_heads=8,
+            num_key_value_heads=2,
+            head_dim=8,
+            max_position_embeddings=64,
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_single_kv_head(self):
-        attn = GroupedQueryAttention(hidden_size=64, num_heads=8, num_key_value_heads=1, head_dim=8, max_position_embeddings=64)
+        attn = GroupedQueryAttention(
+            hidden_size=64,
+            num_heads=8,
+            num_key_value_heads=1,
+            head_dim=8,
+            max_position_embeddings=64,
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_equal_heads(self):
-        attn = GroupedQueryAttention(hidden_size=64, num_heads=8, num_key_value_heads=8, head_dim=8, max_position_embeddings=64)
+        attn = GroupedQueryAttention(
+            hidden_size=64,
+            num_heads=8,
+            num_key_value_heads=8,
+            head_dim=8,
+            max_position_embeddings=64,
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, _ = attn(x, position_ids=pos)
@@ -127,7 +179,13 @@ class TestGroupedQueryAttention:
 
     def test_error_kv_exceeds_q(self):
         try:
-            attn = GroupedQueryAttention(hidden_size=64, num_heads=4, num_key_value_heads=8, head_dim=16, max_position_embeddings=64)
+            attn = GroupedQueryAttention(
+                hidden_size=64,
+                num_heads=4,
+                num_key_value_heads=8,
+                head_dim=16,
+                max_position_embeddings=64,
+            )
             assert False
         except ValueError:
             pass
@@ -135,14 +193,18 @@ class TestGroupedQueryAttention:
 
 class TestMultiQueryAttention:
     def test_forward(self):
-        attn = MultiQueryAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiQueryAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_shared_kv(self):
-        attn = MultiQueryAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = MultiQueryAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 5, 64)
         pos = torch.arange(5).unsqueeze(0)
         out, weights, _ = attn(x, position_ids=pos)
@@ -239,21 +301,31 @@ class TestRotaryEmbedding:
 
 class TestFlashAttention:
     def test_forward(self):
-        attn = FlashAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = FlashAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_causal(self):
-        attn = FlashAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64, causal=True)
+        attn = FlashAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            max_position_embeddings=64,
+            causal=True,
+        )
         x = torch.randn(1, 10, 64)
         pos = torch.arange(10).unsqueeze(0)
         out, _, _ = attn(x, position_ids=pos)
         assert out.shape == (1, 10, 64)
 
     def test_with_mask(self):
-        attn = FlashAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = FlashAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         mask = torch.ones(2, 1, 10, 10)
@@ -263,14 +335,27 @@ class TestFlashAttention:
 
 class TestSparseAttention:
     def test_forward(self):
-        attn = SparseAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64, sparsity_factor=2)
+        attn = SparseAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            max_position_embeddings=64,
+            sparsity_factor=2,
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, _, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 10, 64)
 
     def test_strided_sparsity(self):
-        attn = SparseAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=128, sparsity_pattern="strided", sparsity_factor=2)
+        attn = SparseAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            max_position_embeddings=128,
+            sparsity_pattern="strided",
+            sparsity_factor=2,
+        )
         x = torch.randn(1, 20, 64)
         pos = torch.arange(20).unsqueeze(0)
         out, weights, _ = attn(x, position_ids=pos)
@@ -280,14 +365,26 @@ class TestSparseAttention:
 
 class TestSlidingWindowAttention:
     def test_forward(self):
-        attn = SlidingWindowAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64, window_size=8)
+        attn = SlidingWindowAttention(
+            hidden_size=64,
+            num_heads=4,
+            head_dim=16,
+            max_position_embeddings=64,
+            window_size=8,
+        )
         x = torch.randn(2, 20, 64)
         pos = torch.arange(20).unsqueeze(0).expand(2, -1)
         out, weights, _ = attn(x, position_ids=pos)
         assert out.shape == (2, 20, 64)
 
     def test_window_limits_attention(self):
-        attn = SlidingWindowAttention(hidden_size=64, num_heads=2, head_dim=16, max_position_embeddings=64, window_size=4)
+        attn = SlidingWindowAttention(
+            hidden_size=64,
+            num_heads=2,
+            head_dim=16,
+            max_position_embeddings=64,
+            window_size=4,
+        )
         x = torch.randn(1, 20, 64)
         pos = torch.arange(20).unsqueeze(0)
         _, weights, _ = attn(x, position_ids=pos)
@@ -297,7 +394,9 @@ class TestSlidingWindowAttention:
 
 class TestAlibiAttention:
     def test_forward(self):
-        attn = AlibiAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = AlibiAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(2, 10, 64)
         pos = torch.arange(10).unsqueeze(0).expand(2, -1)
         out, weights, _ = attn(x, position_ids=pos)
@@ -305,7 +404,9 @@ class TestAlibiAttention:
         assert weights.shape == (2, 4, 10, 10)
 
     def test_alibi_bias_applied(self):
-        attn = AlibiAttention(hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64)
+        attn = AlibiAttention(
+            hidden_size=64, num_heads=4, head_dim=16, max_position_embeddings=64
+        )
         x = torch.randn(1, 10, 64)
         pos = torch.arange(10).unsqueeze(0)
         _, weights, _ = attn(x, position_ids=pos)

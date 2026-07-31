@@ -16,6 +16,7 @@ The handler registered here only matters if this tool is ever invoked
 through some other path (direct testing, `registry.execute("ask_user", ...)`)
 that skips agent_loop's special-casing — real usage never reaches it.
 """
+
 from __future__ import annotations
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
@@ -45,11 +46,15 @@ def register_interaction_tools(registry: ToolRegistry) -> None:
                 "Their next message is the answer — continue the task from there."
             ),
             parameters=[
-                ToolParameter(name="question", type="string", description="The question to ask, in plain language."),
+                ToolParameter(
+                    name="question",
+                    type="string",
+                    description="The question to ask, in plain language.",
+                ),
                 ToolParameter(
                     name="options",
                     type="array",
-                    description="Optional short list of suggested answers, e.g. [\"Light\", \"Dark\"]. Omit for open-ended questions.",
+                    description='Optional short list of suggested answers, e.g. ["Light", "Dark"]. Omit for open-ended questions.',
                     required=False,
                     items=ToolParameter(name="option", type="string"),
                 ),

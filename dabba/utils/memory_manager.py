@@ -63,10 +63,11 @@ class MemoryManager:
                 data = json.loads(raw)
                 if isinstance(data, list):
                     self._memories = [
-                        m for m in data
-                        if isinstance(m, dict) and "fact" in m
+                        m for m in data if isinstance(m, dict) and "fact" in m
                     ]
-                    logger.info("Loaded %d memories from %s", len(self._memories), self._path)
+                    logger.info(
+                        "Loaded %d memories from %s", len(self._memories), self._path
+                    )
         except Exception as exc:
             logger.warning("Could not load memories from %s: %s", self._path, exc)
             self._memories = []
