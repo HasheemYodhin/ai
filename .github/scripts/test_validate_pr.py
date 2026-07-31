@@ -3,8 +3,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from validate_pr import validate, validate_title, validate_body  # noqa: E402
-
+from validate_pr import (  # noqa: E402
+    parse_sections,
+    validate,
+    validate_body,
+    validate_title,
+)
 
 VALID_TITLE = "feat(DEV-123): customer login"
 
@@ -131,3 +135,28 @@ def test_automation_summary_block_is_ignored_by_validation():
 def test_empty_body_fails_with_all_missing_sections():
     errors = validate_body("")
     assert any("Missing required section" in e for e in errors)
+
+
+def test_empty_string_body_reports_all_five_sections_missing():
+    # An empty PR description (the common case when a developer clears the
+    # template or opens the PR via the API without a body) should name every
+    # required section in one error, not just fail generically.
+    errors = validate_body("")
+    (missing_error,) = [e for e in errors if "Missing required section" in e]
+    for section in ("Details", "Test Plan", "Type", "User Impact", "Release Notes"):
+        assert section in missing_error
+
+
+def test_none_body_is_treated_as_empty():
+    assert validate_body(None) == validate_body("")
+
+
+def test_body_with_all_required_sections_present_reports_none_missing():
+    # A description containing every required heading — regardless of
+    # whether the content within each is otherwise valid — must not be
+    # flagged as missing any section.
+    sections = parse_sections(VALID_BODY)
+    for section in ("details", "test plan", "type", "user impact", "release notes"):
+        assert section in sections
+    errors = validate_body(VALID_BODY)
+    assert not any("Missing required section" in e for e in errors)

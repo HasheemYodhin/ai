@@ -11,7 +11,7 @@ be fully managed from committed workflow files.
 | --- | --- |
 | [`.github/PULL_REQUEST_TEMPLATE.md`](../.github/PULL_REQUEST_TEMPLATE.md) | Structured PR description template (Details, Test Plan, Type, User Impact, Release Notes). |
 | [`.github/workflows/pr-metadata.yml`](../.github/workflows/pr-metadata.yml) | Normalizes generic PR titles, injects an automated summary, applies file/title-based labels. Runs with write access (`pull_request_target`) but never checks out or executes PR code. |
-| [`.github/workflows/pr-validation.yml`](../.github/workflows/pr-validation.yml) | Blocking validation: PR title/description format, secret scanning, and conditional Helm/Kubernetes/Terraform checks. Runs as unprivileged `pull_request`. |
+| [`.github/workflows/pr-validation.yml`](../.github/workflows/pr-validation.yml) | Blocking validation: PR title/description format, secret scanning, and conditional Helm/Kubernetes/Terraform checks. Runs as unprivileged `pull_request`, and re-runs on `workflow_run` after `pr-metadata.yml` finishes — see "Race condition" below. |
 | [`.github/workflows/platform-ci.yml`](../.github/workflows/platform-ci.yml) | Existing build/test/Docker-build pipeline, extended to run on `edited`/`ready_for_review` and to skip its expensive jobs while a PR is a draft. |
 | [`.github/labeler.yml`](../.github/labeler.yml) | File-path → label rules used by `pr-metadata.yml`. |
 | [`.github/CODEOWNERS`](../.github/CODEOWNERS) | Documented example only — every rule is commented out pending real owner names (see below). |
@@ -33,6 +33,40 @@ on: `opened`, `edited`, `synchronize`, `reopened`, `ready_for_review`.
 - Backend + model pytest suites, frontend lint/test/build/E2E, `npm audit`,
   and a non-pushed Docker build (`platform-ci.yml`) — skipped while the PR
   is a draft
+
+## Race condition: validation vs. metadata updates
+
+`pr-metadata.yml` (`pull_request_target`) and `pr-validation.yml`
+(`pull_request`) both trigger off the same PR events and run in parallel.
+`pr-metadata.yml` can still be rewriting the PR title (via
+`normalize_title.py`) or description (automated-summary block) through the
+GitHub API while `pr-validation.yml`'s `validate-description` job is
+running — so trusting `github.event.pull_request.title`/`.body` (a snapshot
+from when the triggering event fired) risks validating stale content, or
+failing a PR that `pr-metadata.yml` was about to fix.
+
+Two changes close this gap:
+
+1. `validate-description` never reads `github.event.pull_request.*`. It
+   always fetches the PR's *current* title/body via `gh api
+   repos/:owner/:repo/pulls/:number` first, then validates that.
+2. `pr-validation.yml` also triggers on `workflow_run` for `pr-metadata.yml`
+   completions, so validation re-runs against whatever `pr-metadata.yml`
+   just wrote — not just once, at the (possibly stale) moment the original
+   PR event fired. The PR number is resolved from
+   `github.event.workflow_run.pull_requests[0].number`, falling back to a
+   `gh pr list --json headRefOid` lookup by commit SHA for fork PRs (where
+   GitHub doesn't populate `pull_requests` on the `workflow_run` payload).
+
+`detect-changes` and `secret-scan` stay `pull_request`-only (they need the
+actual PR diff/base-head SHAs, which `workflow_run` doesn't carry) — only
+`validate-description` re-runs on the `workflow_run` trigger.
+
+`normalize_title.py` also no longer discards a developer-written title that
+already matches the Conventional Commit shape except for the type's letter
+case (e.g. `Feat: thing`, `FIX(DEV-1): thing`) — it now fixes just the
+casing in place via `lowercase_type_if_close_match()`, rather than
+overwriting it with a branch-derived title.
 
 ## Checks that run only for specific file changes
 

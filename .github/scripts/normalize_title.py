@@ -17,7 +17,13 @@ import argparse
 import re
 import sys
 
-from validate_pr import TITLE_RE
+from validate_pr import ALLOWED_TYPES, TITLE_RE
+
+# Same shape as validate_pr.TITLE_RE but case-insensitive, used only to
+# detect titles that are conventional *except* for the type's letter case
+# (e.g. "Feat: thing", "FIX(DEV-1): thing") so those can have just the type
+# lowercased instead of being discarded and re-derived from the branch name.
+TITLE_RE_CI = re.compile(TITLE_RE.pattern, re.IGNORECASE)
 
 # Branch-prefix -> Conventional Commit type.
 PREFIX_TO_TYPE = {
@@ -71,6 +77,32 @@ def derive_title_from_branch(branch: str):
     return f"{commit_type}: {description}"
 
 
+def lowercase_type_if_close_match(title: str):
+    """If `title` already has the Conventional Commit shape except that its
+    type is the wrong letter-case (e.g. "Feat: thing", "FIX(DEV-1): thing"),
+    return it with just the type lowercased — preserving the scope and
+    description exactly as the developer wrote them.
+
+    Returns None when there's nothing to fix: the title is blank, already
+    matches case-sensitively, or doesn't match the Conventional Commit shape
+    at all (in which case the branch-derived fallback in `main` applies
+    instead). Types must always be lowercase in the final title.
+    """
+    stripped = (title or "").strip()
+    if not stripped:
+        return None
+    match = TITLE_RE_CI.match(stripped)
+    if not match:
+        return None
+    matched_type = match.group(1)
+    if matched_type in ALLOWED_TYPES:
+        return None  # already correct case
+    lowered = matched_type.lower()
+    if lowered not in ALLOWED_TYPES:
+        return None
+    return lowered + stripped[len(matched_type) :]
+
+
 def should_normalize(branch: str, current_title: str) -> bool:
     """Only normalize generic titles: the default GitHub title (== branch
     name), blank, or not already in the required Conventional Commit format.
@@ -92,6 +124,14 @@ def main(argv=None) -> int:
     parser.add_argument("--branch", required=True, help="Source (head) branch name")
     parser.add_argument("--title", required=True, help="Current PR title")
     args = parser.parse_args(argv)
+
+    # A title that's conventional except for the type's case just needs that
+    # one fix, in place — never discard a developer-written title and
+    # re-derive it from the branch name just because of letter-casing.
+    case_fixed = lowercase_type_if_close_match(args.title)
+    if case_fixed is not None:
+        print(case_fixed)
+        return 0
 
     if not should_normalize(args.branch, args.title):
         return 0
