@@ -1,0 +1,53 @@
+# Configuration for actions/labeler (used by .github/workflows/pr-metadata.yml).
+# Labels applied here based on changed files must exist in the repository
+# before they can be applied — see docs/pull-request-automation.md for the
+# list an administrator needs to create once.
+
+terraform:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.tf"
+          - "terraform/**"
+
+kubernetes:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "helm/**"
+          - "charts/**"
+          - "k8s/**"
+          - "kubernetes/**"
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Dockerfile"
+          - "**/Dockerfile"
+          - "docker/**"
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "**/*.md"
+
+testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "test/**"
+          - "**/tests/**"
+
+database:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "migrations/**"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "security/**"

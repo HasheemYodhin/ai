@@ -1,0 +1,24 @@
+# CODEOWNERS — example file, not yet active.
+#
+# No existing ownership information (GitHub usernames or teams) could be
+# identified in this repository, so every rule below is commented out. A
+# repository administrator must:
+#   1. Replace each @TODO-* placeholder with a real GitHub username or a
+#      team in the form @HasheemYodhin/<team-slug> (the team must exist in
+#      the org first).
+#   2. Uncomment the line(s) that apply.
+# Do not uncomment a line while it still contains a @TODO-* placeholder —
+# GitHub will fail to resolve the owner and the review requirement will not
+# apply as intended.
+#
+# Requiring Code Owner approval on protected files also requires enabling
+# "Require review from Code Owners" in branch protection — see
+# docs/pull-request-automation.md.
+
+# /.github/workflows/   @TODO-devops-team
+# /terraform/           @TODO-devops-or-cloud-team
+# /helm/                @TODO-platform-or-kubernetes-team
+# /k8s/                 @TODO-platform-or-kubernetes-team
+# /frontend/            @TODO-frontend-team
+# /dabba/               @TODO-backend-team
+# /migrations/          @TODO-database-team

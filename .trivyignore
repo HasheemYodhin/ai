@@ -1,0 +1,8 @@
+# Trivy ignore list for config and image scans run by
+# .github/workflows/platform-ci.yml (security / docker-scan jobs).
+#
+# Add one finding ID per line, with a comment explaining why it's
+# accepted and a review/expiry date. Do not add blanket ignores.
+#
+# Example:
+# CVE-2024-XXXXX  # false positive: not reachable, code path unused — review 2026-12-01
