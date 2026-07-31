@@ -29,8 +29,9 @@ COPY --from=frontend-builder /build/frontend/dist/ ./frontend/
 
 RUN groupadd --system dabba \
     && useradd --system --gid dabba --home-dir /app dabba \
-    && mkdir -p /data \
+    && mkdir -p /data/tmp \
     && chown -R dabba:dabba /app /data /usr/local/bin/dabba
+ENV TMPDIR=/data/tmp
 USER dabba
 
 EXPOSE 8080

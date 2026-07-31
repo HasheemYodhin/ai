@@ -6,10 +6,14 @@ import pytest
 
 from dabba.api.document_endpoints import (
     MAX_DOCUMENT_CHARS,
+    MAX_ZIP_FILE_BYTES,
     _bounded_document_text,
     _decode_data_url,
     extract_document_bytes,
+    extract_uploaded_file,
+    extract_zip_file,
 )
+from starlette.datastructures import UploadFile
 
 
 def _office_package(entries: dict[str, str]) -> bytes:
@@ -133,3 +137,59 @@ def test_extremely_large_document_reports_exact_truncation():
     assert truncated is True
     assert len(extracted) == MAX_DOCUMENT_CHARS
     assert f"of {len(content):,} extracted characters" in extracted
+
+
+def test_extract_zip_reads_supported_members_without_unpacking():
+    content = _office_package({
+        "notes/readme.md": "Project overview\n\nThe launch date is Friday.",
+        "data/ignored.bin": "not a supported document",
+        "reports/status.csv": "owner,status\nAsha,ready",
+    })
+
+    text, truncated = extract_zip_file("workspace.zip", io.BytesIO(content))
+
+    assert "--- notes/readme.md ---" in text
+    assert "The launch date is Friday." in text
+    assert "--- reports/status.csv ---" in text
+    assert "Asha,ready" in text
+    assert "ignored.bin" not in text
+    assert truncated is False
+
+
+def test_extract_zip_ignores_unsafe_member_paths():
+    content = _office_package({
+        "../../secret.txt": "must not be read",
+        "/absolute.md": "must not be read either",
+        "safe/notes.txt": "safe archive content",
+    })
+
+    text, _ = extract_zip_file("paths.zip", io.BytesIO(content))
+
+    assert "safe archive content" in text
+    assert "must not be read" not in text
+
+
+def test_zip_upload_policy_accepts_reported_size_over_one_gibibyte():
+    content = _office_package({"notes.txt": "large archive metadata test"})
+    upload = UploadFile(
+        io.BytesIO(content),
+        filename="large.zip",
+        size=2 * 1024 * 1024 * 1024,
+    )
+
+    text, truncated = extract_uploaded_file(upload)
+
+    assert "large archive metadata test" in text
+    assert truncated is False
+
+
+def test_zip_upload_policy_rejects_files_over_ten_gibibytes():
+    content = _office_package({"notes.txt": "too large"})
+    upload = UploadFile(
+        io.BytesIO(content),
+        filename="too-large.zip",
+        size=MAX_ZIP_FILE_BYTES + 1,
+    )
+
+    with pytest.raises(ValueError, match="10 GB"):
+        extract_uploaded_file(upload)

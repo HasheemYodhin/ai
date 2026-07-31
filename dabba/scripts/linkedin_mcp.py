@@ -24,12 +24,39 @@ from dabba.tools.web_tools import search_web, fetch_url
 # Initialize FastMCP Server
 mcp = FastMCP("LinkedIn")
 
+_MAX_SEARCH_QUERY_LENGTH = 256
+_VALID_SEARCH_CATEGORIES = {"people", "companies", "jobs", "posts", "all"}
+
+
+def _validate_search_input(query: str, category: str) -> str | None:
+    """Return a user-facing validation error, or None when input is usable."""
+    cleaned = (query or "").strip()
+    if not cleaned:
+        return "invalid_request: provide a real LinkedIn search query"
+    if len(cleaned) > _MAX_SEARCH_QUERY_LENGTH:
+        return (
+            f"invalid_request: LinkedIn search queries must be {_MAX_SEARCH_QUERY_LENGTH} "
+            f"characters or fewer (received {len(cleaned)})"
+        )
+    # Models occasionally pass the tool-selection instruction itself as the
+    # query. Never send that prompt dump to a search provider.
+    lowered = cleaned.lower()
+    if "use the linkedin mcp connector" in lowered or "its available tools are" in lowered:
+        return "invalid_request: provide the actual people, company, or job search terms"
+    normalized_category = (category or "people").strip().lower()
+    if normalized_category not in _VALID_SEARCH_CATEGORIES:
+        return "invalid_request: category must be people, companies, jobs, posts, or all"
+    return None
+
 @mcp.tool()
 async def check_linkedin_connection() -> str:
     """Check whether this connector has a valid LinkedIn account token without making changes."""
     token = os.environ.get("LINKEDIN_ACCESS_TOKEN", "").strip()
     if not token:
-        return "authentication_required: LINKEDIN_ACCESS_TOKEN is not configured"
+        return (
+            "public_mode: LINKEDIN_ACCESS_TOKEN is not configured; public LinkedIn "
+            "search is available, but account authentication is required to publish updates"
+        )
 
     headers = {"Authorization": f"Bearer {token}"}
     try:
@@ -56,8 +83,22 @@ async def search_linkedin(query: str, category: str = "people") -> str:
     
     Args:
         query: The name or search term to look for.
-        category: The category of search: 'people', 'companies', 'jobs', or 'all'.
+        category: The category of search: 'people', 'companies', 'jobs', 'posts', or 'all'.
     """
+    query = (query or "").strip()
+    category = (category or "people").strip().lower()
+    # If the model omits category for an obvious hiring request, avoid the
+    # misleading default of profile-only search.
+    if category == "people":
+        hiring_terms = ("hiring", "job", "jobs", "vacancy", "opening", "new joiner")
+        if "post" in query.lower() or "new joiner" in query.lower():
+            category = "posts"
+        elif any(term in query.lower() for term in hiring_terms):
+            category = "jobs"
+    validation_error = _validate_search_input(query, category)
+    if validation_error:
+        return validation_error
+
     # Restrict search query to LinkedIn domain based on category
     domain_query = query
     if category == "people":
@@ -66,6 +107,8 @@ async def search_linkedin(query: str, category: str = "people") -> str:
         domain_query = f"site:linkedin.com/company \"{query}\""
     elif category == "jobs":
         domain_query = f"site:linkedin.com/jobs/view \"{query}\""
+    elif category == "posts":
+        domain_query = f"site:linkedin.com/posts \"{query}\""
     else:
         domain_query = f"site:linkedin.com \"{query}\""
         

@@ -309,6 +309,8 @@ export interface UploadedFile {
   name: string
   size: number
   type: string
+  /** Browser File retained for disk-backed multipart document uploads. */
+  file?: File
   dataUrl?: string
   preview?: string
 }

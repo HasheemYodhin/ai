@@ -26,7 +26,7 @@ export type ActiveMode =
   | { kind: 'chat' }
   | { kind: 'image' }
   | { kind: 'skill'; skillId: string; name: string }
-  | { kind: 'agent'; label: string; effort?: string; hint?: string }
+  | { kind: 'agent'; label: string; effort?: string; hint?: string; allowedTools?: string[] }
 
 interface PlusMenuProps {
   disabled?: boolean
@@ -129,8 +129,8 @@ export function PlusMenu({
 
   const close = () => { setOpen(false); setSubmenu(null) }
 
-  const setAgentMode = (label: string, effort?: string, hint?: string) => {
-    onModeChange(mode.kind === 'agent' && mode.label === label ? { kind: 'chat' } : { kind: 'agent', label, effort, hint })
+  const setAgentMode = (label: string, effort?: string, hint?: string, allowedTools?: string[]) => {
+    onModeChange(mode.kind === 'agent' && mode.label === label ? { kind: 'chat' } : { kind: 'agent', label, effort, hint, allowedTools })
     close()
   }
 
@@ -197,9 +197,8 @@ export function PlusMenu({
                 const available = connectorAvailable(s)
                 return <SubItem key={s.name}
                   onClick={() => available && setAgentMode(
-                    `Connector: ${s.name}`, undefined,
-                    `Use the ${s.name} MCP connector for this request. Its available tools are: ${s.tools.join(', ')}. ` +
-                    `When an appropriate ${s.name} tool exists, call it instead of substituting generic web_fetch or web_search.`
+                    `Connector: ${s.name}`, undefined, undefined,
+                    s.tools.map(tool => `mcp__${s.name}__${tool}`),
                   )}
                   disabled={!available}
                   active={mode.kind === 'agent' && mode.label === `Connector: ${s.name}`}
@@ -222,8 +221,8 @@ export function PlusMenu({
               allTools.map(({ server, tool, connected }) => (
                 <SubItem key={`${server}.${tool}`}
                   onClick={() => connected && setAgentMode(
-                    `Plugin: ${tool}`, undefined,
-                    `Use the ${tool} tool (from ${server}) if it helps answer this request.`
+                    `Plugin: ${tool}`, undefined, undefined,
+                    [`mcp__${server}__${tool}`],
                   )}
                   disabled={!connected}
                   active={mode.kind === 'agent' && mode.label === `Plugin: ${tool}`}

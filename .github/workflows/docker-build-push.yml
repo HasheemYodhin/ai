@@ -9,7 +9,12 @@ name: Publish Dabba Image to Docker Hub
         default: latest
         type: string
   push:
+    branches: [main]
     tags: ["v*"]
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish:
@@ -29,7 +34,10 @@ jobs:
         with:
           images: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/dabba
           tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=raw,value=${{ inputs.image_tag }},enable=${{ github.event_name == 'workflow_dispatch' && inputs.image_tag != '' }}
             type=sha
       - uses: docker/build-push-action@v6

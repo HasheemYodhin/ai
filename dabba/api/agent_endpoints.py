@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 import time
 from typing import Any, Dict, List, Optional
@@ -63,6 +64,7 @@ class AgentRequest(BaseModel):
     require_plan_approval: bool = False    # pause on a proposed multi-step plan until the user approves it
     use_tool_search: Optional[bool] = None         # None = leave the agent loop's existing default alone
     max_steps: Optional[int] = None                # None = leave the agent loop's existing default alone
+    allowed_tools: Optional[List[str]] = None      # Optional per-turn tool scope for connector/plugin mode
     context_compaction_threshold: Optional[float] = None
     context_compaction_keep_recent: Optional[int] = None
 
@@ -112,7 +114,19 @@ def _requires_approval(tool_name: str) -> bool:
     user-configured external server (see dabba/agent/mcp_client.py), not a
     reviewed built-in tool.
     """
-    return tool_name in APPROVAL_REQUIRED_TOOLS or tool_name.startswith("mcp__")
+    if tool_name in APPROVAL_REQUIRED_TOOLS:
+        return True
+    if not tool_name.startswith("mcp__"):
+        return False
+
+    # Connector reads are safe to run automatically. Mutating/ambiguous MCP
+    # tools still pause for approval. MCP names are mcp__<server>__<tool>.
+    action = tool_name.rsplit("__", 1)[-1].lower()
+    read_only = re.match(
+        r"^(search|check|list|get|read|fetch|find|lookup|profile|status|describe|whoami)(?:_|$)",
+        action,
+    )
+    return read_only is None
 
 # call_id -> Future[bool], resolved by POST /v1/agent/approve.
 # A tool call genuinely pauses server-side execution until this resolves —
@@ -894,6 +908,9 @@ def create_agent_router() -> APIRouter:
                 loop_agent.config.use_tool_search = req.use_tool_search
             if req.max_steps is not None:
                 loop_agent.config.max_steps = req.max_steps
+            # Connector/plugin scopes are per request. Reset this when the
+            # user returns to normal chat so a previous selection cannot leak.
+            loop_agent.config.allowed_tools = req.allowed_tools or None
             if req.context_compaction_threshold is not None:
                 loop_agent.context_manager.compaction_threshold = req.context_compaction_threshold
             if req.context_compaction_keep_recent is not None:

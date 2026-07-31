@@ -12,11 +12,11 @@
   }
 
   .dark {
-    --color-bg: 30 30 28;
-    --color-surface: 38 38 36;
-    --color-border: 58 57 54;
-    --color-text: 242 241 237;
-    --color-text-secondary: 181 179 172;
+    --color-bg: 0 0 0;
+    --color-surface: 0 0 0;
+    --color-border: 38 38 38;
+    --color-text: 245 245 245;
+    --color-text-secondary: 163 163 163;
   }
 
   * {
@@ -52,7 +52,7 @@
   }
 
   .dark .aurora-bg {
-    background: #1e1e1c;
+    background: #000000;
   }
 
   .aurora-glow-1,
