@@ -39,11 +39,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install --quiet ruff
+      - run: pip install --quiet ruff==0.15.22
       - name: ruff format --check (backend formatting)
         run: ruff format --check --diff dabba
       - name: ruff check (backend lint)
-        run: ruff check dabba
+        # Keep the lint contract explicit: Ruff's zero-config defaults can
+        # expand between releases and unexpectedly turn on migration/style
+        # rules across the entire existing codebase.
+        run: ruff check --select E4,E7,E9,F dabba
 
   # ---------------------------------------------------------------------
   # build-and-test: compiles/builds and runs the unit-test suites for each
