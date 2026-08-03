@@ -46,10 +46,12 @@ rag = RAGPipeline(
 )
 
 # Add documents
-rag.add_documents([
-    {"text": "Dabba is a modular LLM framework.", "metadata": {"source": "docs"}},
-    {"text": "RAG improves factual accuracy.", "metadata": {"source": "paper"}},
-])
+rag.add_documents(
+    [
+        {"text": "Dabba is a modular LLM framework.", "metadata": {"source": "docs"}},
+        {"text": "RAG improves factual accuracy.", "metadata": {"source": "paper"}},
+    ]
+)
 
 # Query
 result = rag.query("What is Dabba?")
@@ -129,10 +131,7 @@ rag = RAGPipeline(
 
 ### Batch Document Addition
 ```python
-docs = [
-    {"text": f"Document {i}", "metadata": {"id": i}}
-    for i in range(1000)
-]
+docs = [{"text": f"Document {i}", "metadata": {"id": i}} for i in range(1000)]
 rag.add_documents(docs, batch_size=100)
 ```
 
