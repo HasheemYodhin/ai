@@ -13,10 +13,9 @@ Provides detailed analysis of memory usage including:
 
 import json
 import math
-from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -25,8 +24,6 @@ from dabba.model.transformer import Transformer
 from dabba.model.decoder_block import DecoderBlock
 from dabba.model.attention import MultiHeadAttention, GroupedQueryAttention
 from dabba.model.feed_forward import FeedForward
-from dabba.model.kv_cache import KVCache
-from dabba.config.model_config import ModelConfig
 
 
 @dataclass
@@ -448,7 +445,7 @@ class MemoryProfiler:
         )
 
         # Before forward pass
-        mem_before = torch.cuda.memory_allocated(self._cuda_device)
+        torch.cuda.memory_allocated(self._cuda_device)
 
         with torch.no_grad():
             _ = self.model(input_ids=dummy_input, use_cache=True)

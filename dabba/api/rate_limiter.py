@@ -7,8 +7,7 @@ to prevent abuse while allowing burst traffic.
 
 import asyncio
 import time
-from collections import defaultdict
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from fastapi import HTTPException, Request
 
@@ -79,7 +78,9 @@ class RateLimiter:
         if window_seconds is not None and window_seconds > 0:
             requests_per_minute = int(requests_per_minute * 60 / window_seconds)
         self._window_seconds = window_seconds if window_seconds else 60
-        self._max_requests = max_requests if max_requests is not None else requests_per_minute
+        self._max_requests = (
+            max_requests if max_requests is not None else requests_per_minute
+        )
         self.requests_per_minute = requests_per_minute
         self.burst = burst
         self.enabled = enabled

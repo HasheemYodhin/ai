@@ -1,5 +1,5 @@
 import torch
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock
 from dabba.inference import Generator, GenerationConfig
 from dabba.inference.samplers import (
     SamplerBase,

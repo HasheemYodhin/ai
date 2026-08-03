@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
 
-from textual.app import App, ComposeResult, ScreenStackError
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, ScrollableContainer, Vertical
 from textual.css.query import NoMatches
@@ -25,8 +25,6 @@ from textual.widgets import (
     Label,
     Static,
     Markdown as TUIMarkdown,
-    ListView,
-    ListItem,
     Button,
 )
 from textual import on, work
@@ -920,7 +918,6 @@ class UploadModal(ModalScreen):
 
     def _find_recent_files(self) -> list:
         """Find recently modified files in cwd for quick pick."""
-        import os
         from pathlib import Path
 
         try:
@@ -1061,10 +1058,10 @@ class SetKeyModal(ModalScreen):
             else (self._current[:4] + "…" if self._current else "")
         )
         with Container(id="setkey-dialog"):
-            yield Label(f"  Set API Key", id="setkey-title")
+            yield Label("  Set API Key", id="setkey-title")
             yield Label(f"  Provider: {self._plabel}", id="setkey-provider")
             yield Label(
-                f"  Paste your key below  (Ctrl+Shift+V to paste)", id="setkey-label"
+                "  Paste your key below  (Ctrl+Shift+V to paste)", id="setkey-label"
             )
             yield Input(
                 placeholder=self._placeholder,
@@ -1198,7 +1195,7 @@ class KeysModal(ModalScreen):
         def _on_result(result) -> None:
             if result is None:
                 return
-            action = result[0]
+            result[0]
             # Refresh the row status
             keys2 = getattr(self._config, "api_keys", {}) or {}
             k = keys2.get(pid, "")
@@ -1509,7 +1506,7 @@ class DabbaTUI(App[None]):
             yield Label("  ⌘  dabba", id="header-logo")
             yield Label(f"  {self.config.default_model}", id="header-model")
             yield Label(
-                f"[{TIER_COLOR.get(effort,'dim')}]{effort}[/{TIER_COLOR.get(effort,'dim')}]",
+                f"[{TIER_COLOR.get(effort, 'dim')}]{effort}[/{TIER_COLOR.get(effort, 'dim')}]",
                 id="header-effort",
             )
             yield Label(f"v{self.version}", id="header-meta")
@@ -1623,7 +1620,11 @@ class DabbaTUI(App[None]):
                 if not keys.get(info.provider, ""):
                     # Find provider label + placeholder for the modal
                     entry = next(
-                        ((p, l, ph) for p, l, ph in _PROVIDERS if p == info.provider),
+                        (
+                            (provider, label, placeholder)
+                            for provider, label, placeholder in _PROVIDERS
+                            if provider == info.provider
+                        ),
                         None,
                     )
                     if entry:
@@ -1790,7 +1791,14 @@ class DabbaTUI(App[None]):
             if len(args) >= 2:
                 # Jump directly to the provider's entry screen
                 pid = args[1].lower()
-                entry = next(((p, l, ph) for p, l, ph in _PROVIDERS if p == pid), None)
+                entry = next(
+                    (
+                        (provider, label, placeholder)
+                        for provider, label, placeholder in _PROVIDERS
+                        if provider == pid
+                    ),
+                    None,
+                )
                 if not entry:
                     self._post_system(
                         f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface"
@@ -1881,7 +1889,6 @@ class DabbaTUI(App[None]):
             self._post_system("Usage: /git status|diff|log|commit '<msg>'|push|branch")
             return
         subcmd = args[0].lower()
-        import subprocess
 
         cmds = {
             "status": ["git", "status", "--short"],
@@ -1963,8 +1970,9 @@ class DabbaTUI(App[None]):
         self._run_tool_cmd(
             lambda: execute_powershell(command),
             label=f"powershell {command}",
-            render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip()
-            or "(no output)",
+            render=lambda r: (
+                (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+            ),
         )
 
     def _cmd_ps(self, args):
@@ -1988,7 +1996,9 @@ class DabbaTUI(App[None]):
             self._run_tool_cmd(
                 lambda: process_tools.start_process(" ".join(args[1:])),
                 label=f"process start {' '.join(args[1:])}",
-                render=lambda r: f"Started `{r['process_id']}` (pid={r['pid']}, status={r['status']})",
+                render=lambda r: (
+                    f"Started `{r['process_id']}` (pid={r['pid']}, status={r['status']})"
+                ),
             )
         elif sub == "output" and len(args) > 1:
             try:
@@ -2018,8 +2028,9 @@ class DabbaTUI(App[None]):
         self._run_tool_cmd(
             lambda: ssh_tools.ssh_exec(host, command),
             label=f"ssh {host} {command}",
-            render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip()
-            or "(no output)",
+            render=lambda r: (
+                (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+            ),
         )
 
     def _cmd_docker(self, args):
@@ -2035,24 +2046,27 @@ class DabbaTUI(App[None]):
             self._run_tool_cmd(
                 lambda: docker_tools.docker_list_containers(),
                 label="docker ps",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip()
-                or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         elif sub == "exec" and len(args) > 2:
             container, command = args[1], " ".join(args[2:])
             self._run_tool_cmd(
                 lambda: docker_tools.docker_exec(container, command),
                 label=f"docker exec {container} {command}",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip()
-                or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         elif sub == "run" and len(args) > 2:
             image, command = args[1], " ".join(args[2:])
             self._run_tool_cmd(
                 lambda: docker_tools.docker_run(image, command),
                 label=f"docker run {image} {command}",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip()
-                or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         else:
             self._post_system(

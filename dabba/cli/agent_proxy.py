@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import time
 from typing import Any, AsyncGenerator, Dict, List, Optional, TYPE_CHECKING
 
 import httpx
@@ -21,7 +20,7 @@ from dabba.cli.permissions import PermissionManager
 from dabba.config.agent_config import AgentConfig
 
 if TYPE_CHECKING:
-    from dabba.agent import AgentLoop, ToolRegistry
+    pass
 
 
 def _get_logger():

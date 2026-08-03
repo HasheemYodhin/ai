@@ -4,7 +4,7 @@ tokens for control, padding, unknown words, and conversation roles.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict
 
 
 @dataclass
@@ -34,7 +34,6 @@ class SpecialTokens:
     additional_special_tokens: Dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self):
-        current_id = 7
         self._id_to_token = {}
         self._token_to_id = {}
         for name, tid in [

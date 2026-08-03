@@ -11,9 +11,8 @@ import ast
 import json
 import re
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry

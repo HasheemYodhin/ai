@@ -10,8 +10,6 @@ import math
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-import numpy.typing as npt
 
 from dabba.config.rag_config import RagConfig
 from dabba.rag.embedding_model import EmbeddingModel

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _HAS_WHISPER = False
 try:
     import whisper
+
     _HAS_WHISPER = True
 except ImportError:
     whisper = None
@@ -26,6 +27,7 @@ except ImportError:
 _HAS_TORCH = False
 try:
     import torch
+
     _HAS_TORCH = True
 except ImportError:
     torch = None
@@ -33,12 +35,14 @@ except ImportError:
 _HAS_AUDIOCLIP = False
 try:
     import audioop
+
     _HAS_AUDIOCLIP = True
 except ImportError:
     audioop = None
 
 try:
     from pydub import AudioSegment
+
     HAS_PYDUB = True
 except ImportError:
     AudioSegment = None
@@ -46,6 +50,7 @@ except ImportError:
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     np = None
@@ -125,15 +130,15 @@ class AudioProcessor:
             )
 
         logger.info(
-            "Loading Whisper model '%s' on %s...", self.model_size, self.device,
+            "Loading Whisper model '%s' on %s...",
+            self.model_size,
+            self.device,
         )
         self._model = whisper.load_model(self.model_size, device=self.device)
         self._model.eval()
         logger.info("Whisper model loaded successfully.")
 
-    def _load_audio_to_array(
-        self, source: Union[str, bytes, Path]
-    ) -> "np.ndarray":
+    def _load_audio_to_array(self, source: Union[str, bytes, Path]) -> "np.ndarray":
         """
         Load an audio file and convert to a float32 numpy array.
 
@@ -160,9 +165,7 @@ class AudioProcessor:
                 return self._decode_pydub(source)
             if _HAS_WHISPER:
                 return whisper.load_audio(source)
-            raise RuntimeError(
-                "Cannot decode audio. Install pydub+ffmpeg or librosa."
-            )
+            raise RuntimeError("Cannot decode audio. Install pydub+ffmpeg or librosa.")
 
         if isinstance(source, bytes):
             if HAS_PYDUB:
@@ -175,9 +178,7 @@ class AudioProcessor:
                     return whisper.load_audio(tmp_path)
                 finally:
                     os.unlink(tmp_path)
-            raise RuntimeError(
-                "Cannot decode audio bytes. Install pydub+ffmpeg."
-            )
+            raise RuntimeError("Cannot decode audio bytes. Install pydub+ffmpeg.")
 
         raise ValueError(f"Unsupported audio source type: {type(source)}")
 
@@ -188,6 +189,7 @@ class AudioProcessor:
 
         try:
             import scipy.io.wavfile as wavfile
+
             sample_rate, audio = wavfile.read(path)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)
@@ -198,6 +200,7 @@ class AudioProcessor:
 
         try:
             import torchaudio
+
             audio_tensor, sample_rate = torchaudio.load(path)
             if audio_tensor.shape[0] > 1:
                 audio_tensor = audio_tensor.mean(dim=0, keepdim=True)
@@ -222,6 +225,7 @@ class AudioProcessor:
 
         try:
             import scipy.signal as signal
+
             ratio = target_sr / orig_sr
             new_len = int(len(audio) * ratio)
             resampled = signal.resample(audio, new_len)
@@ -232,8 +236,10 @@ class AudioProcessor:
         if _HAS_WHISPER:
             try:
                 import whisper.audio as wa
-                import numpy as np
-                result = np.zeros(int(len(audio) * target_sr / orig_sr), dtype=np.float32)
+
+                result = np.zeros(
+                    int(len(audio) * target_sr / orig_sr), dtype=np.float32
+                )
                 wa.pad_or_trim(audio, len(result))
                 return result
             except Exception:
@@ -278,7 +284,8 @@ class AudioProcessor:
         if len(audio) > max_samples:
             logger.warning(
                 "Audio length (%.1f s) exceeds max duration (%.1f s). Truncating.",
-                len(audio) / sample_rate, self.max_duration_seconds,
+                len(audio) / sample_rate,
+                self.max_duration_seconds,
             )
             audio = audio[:max_samples]
         return audio
@@ -297,7 +304,7 @@ class AudioProcessor:
         """Load audio from *source* and return a 1-D float32 tensor."""
         if not _HAS_TORCH:
             raise ImportError("torch is required.")
-        import numpy as np
+
         audio_array = self._load_audio_to_array(source)
         return torch.tensor(audio_array, dtype=torch.float32)
 
@@ -324,7 +331,9 @@ class AudioProcessor:
         """Return duration in seconds given a waveform tensor."""
         return float(audio.shape[-1]) / self.sample_rate
 
-    def resample(self, audio: "torch.Tensor", orig_sr: int, target_sr: int) -> "torch.Tensor":
+    def resample(
+        self, audio: "torch.Tensor", orig_sr: int, target_sr: int
+    ) -> "torch.Tensor":
         """Resample *audio* tensor from *orig_sr* to *target_sr*."""
         if not _HAS_TORCH:
             raise ImportError("torch is required.")
@@ -333,7 +342,10 @@ class AudioProcessor:
         ratio = target_sr / orig_sr
         new_len = max(1, int(audio.shape[-1] * ratio))
         return torch.nn.functional.interpolate(
-            audio.float().view(1, 1, -1), size=new_len, mode="linear", align_corners=False
+            audio.float().view(1, 1, -1),
+            size=new_len,
+            mode="linear",
+            align_corners=False,
         ).view(-1)
 
     def transcribe(
@@ -390,7 +402,9 @@ class AudioProcessor:
         if detected_lang != "unknown":
             logger.debug(
                 "Transcribed %s audio: %d chars (%.1f s)",
-                detected_lang, len(text), len(audio) / 16000,
+                detected_lang,
+                len(text),
+                len(audio) / 16000,
             )
 
         return text
@@ -413,8 +427,7 @@ class AudioProcessor:
             List of transcribed text strings in the same order as inputs.
         """
         return [
-            self.transcribe(s, language=language, **whisper_kwargs)
-            for s in sources
+            self.transcribe(s, language=language, **whisper_kwargs) for s in sources
         ]
 
     def __repr__(self) -> str:

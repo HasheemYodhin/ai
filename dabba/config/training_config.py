@@ -4,7 +4,7 @@ loop: optimization, learning rate scheduling, mixed precision, gradient
 accumulation, checkpointing, validation, and logging.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 

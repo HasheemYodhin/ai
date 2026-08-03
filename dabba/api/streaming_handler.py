@@ -6,8 +6,7 @@ OpenAI-compatible format.
 """
 
 import asyncio
-import json
-from typing import Any, AsyncGenerator, Dict, List, Optional, Callable
+from typing import AsyncGenerator, Dict, List, Optional, Callable
 
 from dabba.api.openai_compat import ChatCompletionChunk
 
@@ -75,7 +74,7 @@ class StreamingHandler:
             yield final_chunk.to_sse()
             yield ChatCompletionChunk.done()
 
-        except Exception as e:
+        except Exception:
             error_chunk = ChatCompletionChunk(
                 model=self.model_name,
                 choices=[

@@ -1,5 +1,4 @@
 import os
-import json
 import tempfile
 import yaml
 from dabba.config import ModelConfig, TrainingConfig, DataConfig

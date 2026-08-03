@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
-from urllib.parse import parse_qs, urljoin, urlparse
+from typing import Dict, List
+from urllib.parse import urljoin, urlparse
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry
@@ -37,7 +36,7 @@ except ImportError:
 REQUEST_TIMEOUT = 30
 MAX_RESPONSE_SIZE = 5_000_000  # 5 MB
 USER_AGENT = (
-    "Mozilla/5.0 (compatible; DabbaAgent/1.0; " "+https://github.com/anomalyco/dabba)"
+    "Mozilla/5.0 (compatible; DabbaAgent/1.0; +https://github.com/anomalyco/dabba)"
 )
 
 
@@ -105,8 +104,7 @@ def fetch_url(url: str, timeout: int = REQUEST_TIMEOUT) -> Dict[str, object]:
 
         if content_length > MAX_RESPONSE_SIZE:
             raise WebToolError(
-                f"Response too large: {content_length} bytes "
-                f"(max {MAX_RESPONSE_SIZE})"
+                f"Response too large: {content_length} bytes (max {MAX_RESPONSE_SIZE})"
             )
 
         if "text" in content_type or "json" in content_type or "xml" in content_type:
@@ -262,7 +260,7 @@ def search_web(
             {
                 "title": f"Search results for: {query}",
                 "url": f"https://www.google.com/search?q={requests.utils.quote(query)}",
-                "snippet": f"Google search is currently offline or unreachable. Click the link to search directly.",
+                "snippet": "Google search is currently offline or unreachable. Click the link to search directly.",
             }
         ]
 

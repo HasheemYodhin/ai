@@ -7,7 +7,6 @@ JWT-based authentication for user sessions.
 
 import hashlib
 import hmac
-import time
 from typing import Dict, List, Optional, Set
 
 from fastapi import HTTPException, Request, Security
@@ -76,7 +75,9 @@ class ApiKeyAuth:
 
     async def __call__(
         self,
-        credentials: Optional[HTTPAuthorizationCredentials] = Security(HTTPBearer(auto_error=False)),
+        credentials: Optional[HTTPAuthorizationCredentials] = Security(
+            HTTPBearer(auto_error=False)
+        ),
         request: Optional[Request] = None,
     ) -> Optional[str]:
         """
@@ -121,6 +122,7 @@ class ApiKeyAuth:
             A new API key string.
         """
         import secrets
+
         key = prefix + secrets.token_hex(24)
         return key
 
@@ -137,6 +139,8 @@ class ApiKeyAuth:
         return hashlib.sha256(key.encode()).hexdigest()
 
 
-def authenticate_request(token: Optional[str] = None, api_key: Optional[str] = None) -> bool:
+def authenticate_request(
+    token: Optional[str] = None, api_key: Optional[str] = None
+) -> bool:
     """Simple callable for test mocking; real auth is handled by ApiKeyAuth."""
     return bool(token or api_key)

@@ -1,8 +1,7 @@
 import torch
-import numpy as np
 import tempfile
 import os
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
+from unittest.mock import Mock, PropertyMock
 from dabba.rag import RAGPipeline, RAGConfig
 from dabba.rag.embedding import EmbeddingModel
 from dabba.rag.vector_store import VectorStore

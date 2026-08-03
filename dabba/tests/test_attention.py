@@ -1,5 +1,4 @@
 import torch
-import pytest
 from dabba.model import (
     MultiHeadAttention,
     GroupedQueryAttention,
@@ -179,7 +178,7 @@ class TestGroupedQueryAttention:
 
     def test_error_kv_exceeds_q(self):
         try:
-            attn = GroupedQueryAttention(
+            GroupedQueryAttention(
                 hidden_size=64,
                 num_heads=4,
                 num_key_value_heads=8,

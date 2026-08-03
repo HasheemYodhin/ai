@@ -5,8 +5,6 @@ Provides temperature scaling, top-K filtering, and top-P (nucleus)
 sampling to control the quality and diversity of generated text.
 """
 
-from typing import Optional
-
 import torch
 import torch.nn.functional as F
 
@@ -100,7 +98,9 @@ class TopKSampler(TemperatureSampler):
         if not self.do_sample:
             return logits.argmax(dim=-1)
 
-        top_k_values, top_k_indices = torch.topk(logits, min(self.k, logits.shape[-1]), dim=-1)
+        top_k_values, top_k_indices = torch.topk(
+            logits, min(self.k, logits.shape[-1]), dim=-1
+        )
         filtered_logits = torch.full_like(logits, float("-inf"))
         filtered_logits.scatter_(-1, top_k_indices, top_k_values)
 
@@ -147,14 +147,20 @@ class TopPSampler(TemperatureSampler):
             return logits.argmax(dim=-1)
 
         scaled_logits = logits / max(self.temperature, 1e-8)
-        sorted_logits, sorted_indices = torch.sort(scaled_logits, descending=True, dim=-1)
+        sorted_logits, sorted_indices = torch.sort(
+            scaled_logits, descending=True, dim=-1
+        )
         cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
 
-        sorted_indices_to_remove = cumulative_probs - F.softmax(sorted_logits, dim=-1) > self.p
+        sorted_indices_to_remove = (
+            cumulative_probs - F.softmax(sorted_logits, dim=-1) > self.p
+        )
         if self.min_tokens_to_keep > 1:
-            sorted_indices_to_remove[..., :self.min_tokens_to_keep] = False
+            sorted_indices_to_remove[..., : self.min_tokens_to_keep] = False
 
-        indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+        indices_to_remove = sorted_indices_to_remove.scatter(
+            -1, sorted_indices, sorted_indices_to_remove
+        )
         filtered_logits = scaled_logits.masked_fill(indices_to_remove, float("-inf"))
 
         probs = F.softmax(filtered_logits, dim=-1)

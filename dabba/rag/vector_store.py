@@ -7,7 +7,7 @@ implementations using ChromaDB and FAISS for dense retrieval.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -65,6 +65,7 @@ class VectorStore:
 
     def __init__(self, dimension: int = 384, metric: str = "cosine"):
         import faiss
+
         self.dimension = dimension
         self.metric = metric
         if metric in ("cosine", "ip"):
@@ -85,7 +86,7 @@ class VectorStore:
             norms = np.linalg.norm(vecs, axis=1, keepdims=True)
             vecs = vecs / np.maximum(norms, 1e-8)
         self._index.add(vecs)
-        self._ids.extend(list(ids) if hasattr(ids, '__iter__') else [ids])
+        self._ids.extend(list(ids) if hasattr(ids, "__iter__") else [ids])
         self._vectors.extend(list(vecs))
 
     def search(self, query: npt.NDArray, k: int = 5):
@@ -100,16 +101,18 @@ class VectorStore:
         distances, indices = self._index.search(q, k)
         return [
             {"id": self._ids[i], "distance": float(distances[0][j])}
-            for j, i in enumerate(indices[0]) if i >= 0
+            for j, i in enumerate(indices[0])
+            if i >= 0
         ]
 
     def delete(self, ids) -> None:
-        id_set = set(ids) if hasattr(ids, '__iter__') else {ids}
+        id_set = set(ids) if hasattr(ids, "__iter__") else {ids}
         keep = [i for i, id_ in enumerate(self._ids) if id_ not in id_set]
         if not keep:
             self.clear()
             return
         import faiss
+
         vecs = np.array([self._vectors[i] for i in keep], dtype=np.float32)
         if self.metric in ("cosine", "ip"):
             self._index = faiss.IndexFlatIP(self.dimension)
@@ -121,6 +124,7 @@ class VectorStore:
 
     def clear(self) -> None:
         import faiss
+
         if self.metric in ("cosine", "ip"):
             self._index = faiss.IndexFlatIP(self.dimension)
         else:
@@ -129,26 +133,41 @@ class VectorStore:
         self._vectors = []
 
     def save(self, path: str) -> None:
-        import pickle, os
+        import pickle
+        import os
+
         # Support both file path (e.g. .npz) and directory path
         if str(path).endswith((".npz", ".pkl", ".pt")):
             with open(path, "wb") as f:
-                pickle.dump({
-                    "ids": self._ids,
-                    "dimension": self.dimension,
-                    "metric": self.metric,
-                    "vectors": self._vectors,
-                }, f)
+                pickle.dump(
+                    {
+                        "ids": self._ids,
+                        "dimension": self.dimension,
+                        "metric": self.metric,
+                        "vectors": self._vectors,
+                    },
+                    f,
+                )
         else:
             import faiss
+
             os.makedirs(path, exist_ok=True)
             faiss.write_index(self._index, os.path.join(path, "index.faiss"))
             with open(os.path.join(path, "meta.pkl"), "wb") as f:
-                pickle.dump({"ids": self._ids, "dimension": self.dimension, "metric": self.metric}, f)
+                pickle.dump(
+                    {
+                        "ids": self._ids,
+                        "dimension": self.dimension,
+                        "metric": self.metric,
+                    },
+                    f,
+                )
 
     @classmethod
     def load(cls, path: str) -> "VectorStore":
-        import pickle, os
+        import pickle
+        import os
+
         if str(path).endswith((".npz", ".pkl", ".pt")):
             with open(path, "rb") as f:
                 data = pickle.load(f)
@@ -160,6 +179,7 @@ class VectorStore:
             store._ids = data["ids"]
             return store
         import faiss
+
         with open(os.path.join(path, "meta.pkl"), "rb") as f:
             meta = pickle.load(f)
         store = cls(dimension=meta["dimension"], metric=meta["metric"])
@@ -313,9 +333,7 @@ class ChromaVectorStore(_VectorStoreABC):
                 "chromadb is required. Install with: pip install chromadb"
             )
 
-    def _to_chroma_metadata(
-        self, metadata: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    def _to_chroma_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Convert metadata values to types ChromaDB accepts."""
         cleaned: Dict[str, Any] = {}
         for k, v in metadata.items():
@@ -342,9 +360,7 @@ class ChromaVectorStore(_VectorStoreABC):
 
         ids = [doc.id for doc in documents]
         texts = [doc.text for doc in documents]
-        metadatas = [
-            self._to_chroma_metadata(doc.metadata) for doc in documents
-        ]
+        metadatas = [self._to_chroma_metadata(doc.metadata) for doc in documents]
 
         self._collection.add(
             embeddings=embeddings.tolist(),
@@ -352,7 +368,11 @@ class ChromaVectorStore(_VectorStoreABC):
             metadatas=metadatas,
             ids=ids,
         )
-        logger.info("Added %d documents to ChromaDB collection '%s'", len(documents), self.collection_name)
+        logger.info(
+            "Added %d documents to ChromaDB collection '%s'",
+            len(documents),
+            self.collection_name,
+        )
         return ids
 
     def add_embeddings(
@@ -410,9 +430,7 @@ class ChromaVectorStore(_VectorStoreABC):
             doc = Document(
                 id=doc_id,
                 text=results["documents"][0][i],
-                metadata=results["metadatas"][0][i]
-                if results["metadatas"]
-                else {},
+                metadata=results["metadatas"][0][i] if results["metadatas"] else {},
             )
             search_results.append(
                 SearchResult(document=doc, score=float(score), rank=i + 1)
@@ -480,6 +498,7 @@ class FAISSVectorStore(_VectorStoreABC):
         self.distance_metric = distance_metric
 
         self._index: Any = None
+        self._faiss: Any = None
         self._id_to_doc: Dict[str, Document] = {}
         self._next_id: int = 0
         self._load_faiss()
@@ -492,10 +511,9 @@ class FAISSVectorStore(_VectorStoreABC):
         try:
             import faiss
         except ImportError:
-            raise ImportError(
-                "faiss is required. Install with: pip install faiss-cpu"
-            )
+            raise ImportError("faiss is required. Install with: pip install faiss-cpu")
 
+        self._faiss = faiss
         if self.distance_metric == "cosine":
             self._index = faiss.IndexFlatIP(self.embedding_dim)
         elif self.distance_metric == "ip":
@@ -519,7 +537,7 @@ class FAISSVectorStore(_VectorStoreABC):
             self._load_faiss()
 
         if self.distance_metric == "cosine":
-            faiss.normalize_L2(embeddings)
+            self._faiss.normalize_L2(embeddings)
 
         ids: List[str] = []
         for i, doc in enumerate(documents):
@@ -544,7 +562,7 @@ class FAISSVectorStore(_VectorStoreABC):
 
         query_vec = query_embedding.reshape(1, -1).astype(np.float32)
         if self.distance_metric == "cosine":
-            faiss.normalize_L2(query_vec)
+            self._faiss.normalize_L2(query_vec)
 
         actual_k = min(top_k, self._index.ntotal)
         distances, indices = self._index.search(query_vec, actual_k)
@@ -583,8 +601,7 @@ class FAISSVectorStore(_VectorStoreABC):
         # Full rebuild required when using IndexFlat* without IDMap.
         # For simplicity we log a warning and rebuild on next persist.
         logger.warning(
-            "Documents removed from metadata map; "
-            "call persist() to rebuild the index."
+            "Documents removed from metadata map; call persist() to rebuild the index."
         )
 
     def persist(self) -> None:

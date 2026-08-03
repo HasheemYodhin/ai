@@ -12,7 +12,7 @@ import re
 import difflib
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry

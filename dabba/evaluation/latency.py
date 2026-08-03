@@ -16,14 +16,12 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 
 from dabba.model.transformer import Transformer
 from dabba.model.decoder_block import DecoderBlock
-from dabba.model.attention import MultiHeadAttention, GroupedQueryAttention
-from dabba.model.feed_forward import FeedForward
 
 
 @dataclass
@@ -149,25 +147,23 @@ class LatencyProfiler:
                 )
                 self._forward_hooks.append(handle)
 
-                # Hook attention inside the block
-                attn_handle = module.self_attn.register_forward_hook(
-                    self._make_attn_hook(module.layer_idx or 0)
-                )
-                self._forward_hooks.append(attn_handle)
+                layer_idx = module.layer_idx or 0
 
-                # Hook FFN inside the block
-                ffn_handle = module.feed_forward.register_forward_hook(
-                    self._make_ffn_hook(module.layer_idx or 0)
+                # Hook attention and FFN inside the block. Each operation needs
+                # both a pre-hook and a post-hook to measure elapsed time.
+                self._register_operation_hooks(
+                    module.self_attn, layer_idx, self._attn_times
                 )
-                self._forward_hooks.append(ffn_handle)
+                self._register_operation_hooks(
+                    module.feed_forward, layer_idx, self._ffn_times
+                )
 
                 # Hook norms inside the block
                 for subname, submod in module.named_modules():
                     if "layernorm" in subname.lower() or "rmsnorm" in subname.lower():
-                        norm_handle = submod.register_forward_hook(
-                            self._make_norm_hook(module.layer_idx or 0)
+                        self._register_operation_hooks(
+                            submod, layer_idx, self._norm_times
                         )
-                        self._forward_hooks.append(norm_handle)
 
     def _make_layer_hook(self, layer_idx: int):
         """Create a forward hook for a decoder block."""
@@ -180,40 +176,13 @@ class LatencyProfiler:
 
         return hook
 
-    def _make_attn_hook(self, layer_idx: int):
-        """Create a forward hook for an attention module."""
-        start_times = {}
-
-        def pre_hook(module, input_tensors):
-            if self._cuda_available:
-                if torch.cuda.is_available():
-                    start_event = torch.cuda.Event(enable_timing=True)
-                    start_event.record()
-                    start_times[id(module)] = start_event
-            else:
-                start_times[id(module)] = time.perf_counter()
-
-        def post_hook(module, input_tensors, output_tensor):
-            if id(module) in start_times:
-                if self._cuda_available:
-                    end_event = torch.cuda.Event(enable_timing=True)
-                    end_event.record()
-                    torch.cuda.synchronize()
-                    elapsed = start_times[id(module)].elapsed_time(end_event)
-                else:
-                    elapsed = (time.perf_counter() - start_times[id(module)]) * 1000
-                self._attn_times[layer_idx].append(elapsed)
-                del start_times[id(module)]
-
-        # We need to register both pre and post hooks
-        pre_handle = module.register_forward_pre_hook(pre_hook)
-        post_handle = module.register_forward_hook(post_hook)
-        self._forward_hooks.append(pre_handle)
-        self._forward_hooks.append(post_handle)
-        return post_handle
-
-    def _make_ffn_hook(self, layer_idx: int):
-        """Create a forward hook for an FFN module."""
+    def _register_operation_hooks(
+        self,
+        target_module: torch.nn.Module,
+        layer_idx: int,
+        samples: Dict[int, List[float]],
+    ) -> None:
+        """Register paired timing hooks for a model operation."""
         start_times = {}
 
         def pre_hook(module, input_tensors):
@@ -233,44 +202,13 @@ class LatencyProfiler:
                     elapsed = start_times[id(module)].elapsed_time(end_event)
                 else:
                     elapsed = (time.perf_counter() - start_times[id(module)]) * 1000
-                self._ffn_times[layer_idx].append(elapsed)
+                samples[layer_idx].append(elapsed)
                 del start_times[id(module)]
 
-        pre_handle = module.register_forward_pre_hook(pre_hook)
-        post_handle = module.register_forward_hook(post_hook)
+        pre_handle = target_module.register_forward_pre_hook(pre_hook)
+        post_handle = target_module.register_forward_hook(post_hook)
         self._forward_hooks.append(pre_handle)
         self._forward_hooks.append(post_handle)
-        return post_handle
-
-    def _make_norm_hook(self, layer_idx: int):
-        """Create a forward hook for a normalization module."""
-        start_times = {}
-
-        def pre_hook(module, input_tensors):
-            if self._cuda_available:
-                start_event = torch.cuda.Event(enable_timing=True)
-                start_event.record()
-                start_times[id(module)] = start_event
-            else:
-                start_times[id(module)] = time.perf_counter()
-
-        def post_hook(module, input_tensors, output_tensor):
-            if id(module) in start_times:
-                if self._cuda_available:
-                    end_event = torch.cuda.Event(enable_timing=True)
-                    end_event.record()
-                    torch.cuda.synchronize()
-                    elapsed = start_times[id(module)].elapsed_time(end_event)
-                else:
-                    elapsed = (time.perf_counter() - start_times[id(module)]) * 1000
-                self._norm_times[layer_idx].append(elapsed)
-                del start_times[id(module)]
-
-        pre_handle = module.register_forward_pre_hook(pre_hook)
-        post_handle = module.register_forward_hook(post_hook)
-        self._forward_hooks.append(pre_handle)
-        self._forward_hooks.append(post_handle)
-        return post_handle
 
     def _remove_hooks(self) -> None:
         """Remove all registered forward hooks."""
@@ -567,7 +505,7 @@ class LatencyProfiler:
             "=" * 60,
             "Latency Profiling Summary",
             "=" * 60,
-            f"  Total forward pass:",
+            "  Total forward pass:",
             f"    Mean:   {report.total_stats.mean_ms:.3f} ms",
             f"    Median: {report.total_stats.median_ms:.3f} ms",
             f"    P90:    {report.total_stats.p90_ms:.3f} ms",

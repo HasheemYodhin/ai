@@ -5,9 +5,9 @@ Provides GET /v1/models for listing available models, following the
 OpenAI API format for model discovery.
 """
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from dabba.api.openai_compat import ModelInfo, ModelList
 

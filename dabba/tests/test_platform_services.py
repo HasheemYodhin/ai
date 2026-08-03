@@ -238,7 +238,9 @@ def test_cowork_agent_run_completes_item_and_persists_output(
     completed = cowork.execute(
         run["id"],
         user["id"],
-        lambda assignment, context: f"Completed {assignment['title']} in {context['workspacePath']}",
+        lambda assignment, context: (
+            f"Completed {assignment['title']} in {context['workspacePath']}"
+        ),
     )
 
     assert completed["status"] == "completed"
@@ -520,7 +522,7 @@ def test_memory_delete_enforces_ownership(store):
     other = identity.signup("Other", "other7@example.com", "a-secure-password")
     memory = MemoryService(store)
 
-    saved = memory.put("preference", "favorite-language", "Python", user_id=owner["id"])
+    memory.put("preference", "favorite-language", "Python", user_id=owner["id"])
     listed = memory.list(scope="preference", user_id=owner["id"])
     assert len(listed) == 1 and listed[0]["content"] == "Python"
     memory_id = listed[0]["id"]

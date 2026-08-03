@@ -12,7 +12,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Generator, List, Optional, TextIO
+from typing import Any, List, Optional, TextIO
 
 from dabba.cli.config import CliConfig
 
@@ -25,7 +25,6 @@ try:
     from rich.panel import Panel
     from rich.rule import Rule
     from rich.table import Table
-    from rich.columns import Columns
     from rich.padding import Padding
     import rich.box as box
 
@@ -38,7 +37,6 @@ try:
     from prompt_toolkit.history import InMemoryHistory
     from prompt_toolkit.styles import Style as PTStyle
     from prompt_toolkit.formatted_text import HTML
-    from prompt_toolkit.key_binding import KeyBindings
 
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:

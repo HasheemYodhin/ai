@@ -7,9 +7,8 @@ from typing import Callable, Generator, List, Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-from dabba.inference.samplers import Sampler, TopKSampler, TopPSampler
+from dabba.inference.samplers import Sampler, TopPSampler
 
 
 class StreamingGenerator:
@@ -67,9 +66,10 @@ class StreamingGenerator:
             Generated token IDs one at a time.
         """
         generated = []
-        device = input_ids.device
         seq_len = input_ids.shape[-1]
-        max_new = (max_length - seq_len) if max_length is not None else self.max_new_tokens
+        max_new = (
+            (max_length - seq_len) if max_length is not None else self.max_new_tokens
+        )
         max_new = max(1, max_new)
         current_ids = input_ids.clone()
 

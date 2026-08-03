@@ -3,10 +3,11 @@ Training step implementation with mixed precision, gradient clipping,
 and gradient accumulation support.
 """
 
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import torch
 import torch.nn as nn
+
 try:
     from torch.amp import GradScaler, autocast
 except ImportError:
@@ -85,13 +86,15 @@ class TrainStep:
         self.logger = get_logger("dabba.trainer")
 
         self.amp_dtype = (
-            torch.bfloat16 if amp_dtype == "bfloat16"
-            else torch.float16 if amp_dtype == "float16"
+            torch.bfloat16
+            if amp_dtype == "bfloat16"
+            else torch.float16
+            if amp_dtype == "float16"
             else torch.float32
         )
 
         self.scaler = GradScaler(
-            device_type='cuda' if torch.cuda.is_available() else 'cpu',
+            device_type="cuda" if torch.cuda.is_available() else "cpu",
             enabled=(use_amp and amp_dtype == "float16"),
         )
         self._step_count = 0
@@ -115,7 +118,7 @@ class TrainStep:
         labels = batch["labels"]
         attention_mask = batch.get("attention_mask")
 
-        device_type = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
         with autocast(
             device_type=device_type,
             enabled=self.use_amp,
@@ -182,9 +185,7 @@ class TrainStep:
         """Perform the optimizer step with gradient clipping."""
         self.scaler.unscale_(self.optimizer)
 
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), self.max_grad_norm
-        )
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
         self.scaler.step(self.optimizer)
         self.scaler.update()

@@ -13,7 +13,6 @@ All measurements are performed with configurable warmup runs and
 multiple trials for statistical significance.
 """
 
-import csv
 import json
 import subprocess
 import threading
@@ -25,7 +24,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 
 from dabba.model.transformer import Transformer
-from dabba.config.model_config import ModelConfig
 
 
 @dataclass
@@ -556,7 +554,7 @@ class Benchmark:
         Returns:
             Tuple of (ttft_ms, tpot_ms, total_ms).
         """
-        batch_size = input_ids.size(0)
+        input_ids.size(0)
         past_kv = None
 
         # Prefill (timed separately)

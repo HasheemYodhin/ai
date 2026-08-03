@@ -8,12 +8,10 @@ with torch DataLoader.
 """
 
 import json
-import os
 import random
 import struct
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple, Union
-import numpy as np
+from typing import Dict, Iterator, List, Optional
 
 import torch
 from torch.utils.data import IterableDataset, get_worker_info

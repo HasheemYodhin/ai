@@ -13,7 +13,7 @@ Units" (Sennrich et al., 2016) and the GPT-2 byte-level BPE approach.
 import json
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Tuple
 from collections import defaultdict
 
 from dabba.tokenizer.special_tokens import SpecialTokens, get_special_tokens
@@ -171,7 +171,7 @@ class BPETokenizer:
                     self.vocab[symbol] = current_id
                     current_id += 1
 
-        total_merges = self.vocab_size - len(self.vocab)
+        self.vocab_size - len(self.vocab)
         merges_done = 0
 
         while len(self.vocab) < self.vocab_size:

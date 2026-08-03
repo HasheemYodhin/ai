@@ -17,17 +17,13 @@ import math
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, Optional, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from dabba.model.transformer import Transformer
-from dabba.model.decoder_block import DecoderBlock
-from dabba.model.attention import MultiHeadAttention, GroupedQueryAttention
-from dabba.model.feed_forward import FeedForward
 
 
 class QuantizationType(Enum):
@@ -804,7 +800,7 @@ class Quantizer:
         for name, lr in sorted_layers:
             short_name = name if len(name) < 40 else "..." + name[-37:]
             lines.append(
-                f"  {short_name:<40} {lr['saved_bytes']/(1024**2):>8.2f} MiB {lr['saved_pct']:>7.1f}%"
+                f"  {short_name:<40} {lr['saved_bytes'] / (1024**2):>8.2f} MiB {lr['saved_pct']:>7.1f}%"
             )
 
         lines.append("-" * 60)

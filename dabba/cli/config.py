@@ -11,7 +11,7 @@ import os
 import yaml
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from dabba.utils.paths import get_dabba_config_dir
 
@@ -198,13 +198,12 @@ class CliConfig:
             str: str,
             int: int,
             float: float,
-            bool: bool,
         }
 
-        if field_type in type_map:
-            coerced = type_map[field_type](value)
-        elif field_type == bool:
+        if field_type is bool:
             coerced = value.lower() in ("true", "yes", "1", "on")
+        elif field_type in type_map:
+            coerced = type_map[field_type](value)
         elif getattr(field_type, "__origin__", None) is list:
             coerced = [v.strip() for v in value.split(",") if v.strip()]
         else:

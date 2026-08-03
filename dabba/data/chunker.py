@@ -4,7 +4,7 @@ using paragraph, sentence, token-based, or fixed-size strategies.
 """
 
 import re
-from typing import Iterator, List, Optional
+from typing import Iterator, List
 
 
 class TextChunker:

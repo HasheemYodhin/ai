@@ -1,7 +1,7 @@
 from __future__ import annotations
 import json as _json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 TIERS = ["low", "medium", "high", "xhigh", "max"]

@@ -12,13 +12,11 @@ References:
       (Korthikanti et al., 2022) - https://arxiv.org/abs/2205.05198
 """
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set
 
 import torch
-import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from dabba.model.transformer import Transformer
@@ -163,7 +161,7 @@ class ActivationRecomputation:
         # Calculate how much each policy saves
         attn_pct = breakdown["attention_frac"]
         ffn_pct = breakdown["ffn_frac"]
-        norm_pct = breakdown["normalization_frac"]
+        breakdown["normalization_frac"]
 
         # Sort savings by impact
         savings = [
@@ -426,9 +424,9 @@ class ActivationRecomputation:
             f"  Recomputed:          {', '.join(self._recomputation_enabled) if self._recomputation_enabled else 'None'}",
             "",
             "Per-Layer Activation Breakdown:",
-            f"  Attention total:     {estimate['attention_mb']:.3f} MiB ({estimate['attention_frac']*100:.1f}%)",
-            f"  FFN total:           {estimate['ffn_mb']:.3f} MiB ({estimate['ffn_frac']*100:.1f}%)",
-            f"  Normalization total: {estimate['normalization_mb']:.3f} MiB ({estimate['normalization_frac']*100:.1f}%)",
+            f"  Attention total:     {estimate['attention_mb']:.3f} MiB ({estimate['attention_frac'] * 100:.1f}%)",
+            f"  FFN total:           {estimate['ffn_mb']:.3f} MiB ({estimate['ffn_frac'] * 100:.1f}%)",
+            f"  Normalization total: {estimate['normalization_mb']:.3f} MiB ({estimate['normalization_frac'] * 100:.1f}%)",
             f"  Per-layer total:     {estimate['per_layer_mb']:.3f} MiB",
             f"  All layers total:    {estimate['total_mb']:.2f} MiB",
             "",

@@ -5,12 +5,11 @@ formats: plain text, markdown, JSON, JSONL, CSV, and PDF.
 
 import json
 import csv
-import io
 import re
 import zipfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Dict, Iterator, List, Optional
 
 
 class DocumentParser:

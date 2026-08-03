@@ -15,12 +15,11 @@ correct next token given the preceding tokens.
 
 import math
 import time
-from collections import defaultdict
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
 
 from dabba.model.transformer import Transformer
 from dabba.data.streaming_dataset import StreamingDataset

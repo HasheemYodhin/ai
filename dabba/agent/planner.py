@@ -7,7 +7,6 @@ generates execution plans, and supports re-planning on failure.
 
 from __future__ import annotations
 
-import json
 import re
 import time
 import uuid

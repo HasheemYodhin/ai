@@ -167,9 +167,9 @@ class McpClientManager:
         self._supervisor_started = False
         self._sessions: Dict[str, Any] = {}  # server name -> ClientSession
         self._connected_tools: Dict[str, Dict[str, Any]] = {}  # namespaced name -> info
-        self._server_configs: Dict[str, McpServerConfig] = (
-            {}
-        )  # server name -> McpServerConfig
+        self._server_configs: Dict[
+            str, McpServerConfig
+        ] = {}  # server name -> McpServerConfig
         self._lock = threading.Lock()
 
     # -- background loop + supervisor task --------------------------------

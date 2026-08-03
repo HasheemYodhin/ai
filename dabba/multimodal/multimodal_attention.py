@@ -68,8 +68,7 @@ class MultimodalCrossAttention(nn.Module):
         self.post_norm = post_norm
 
         assert self.hidden_size % self.num_heads == 0, (
-            f"hidden_size ({hidden_size}) must be divisible by "
-            f"num_heads ({num_heads})"
+            f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
         )
 
         self.q_proj = nn.Linear(hidden_size, num_heads * self.head_dim, bias=bias)

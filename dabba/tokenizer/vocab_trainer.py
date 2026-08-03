@@ -5,7 +5,7 @@ from various sources, sampling, and training the tokenizer vocabulary.
 
 import random
 from pathlib import Path
-from typing import Iterator, List, Optional, Union
+from typing import Iterator, List, Optional
 from dabba.tokenizer.bpe_tokenizer import BPETokenizer
 from dabba.utils.logging import get_logger
 

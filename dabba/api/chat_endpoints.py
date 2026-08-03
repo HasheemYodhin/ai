@@ -6,9 +6,9 @@ responses, fully compatible with the OpenAI API format.
 """
 
 import asyncio
+import json
 import re
-import time
-from typing import AsyncGenerator, Dict, Iterator, List, Optional, Tuple
+from typing import AsyncGenerator, Dict, Iterator, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -18,7 +18,6 @@ from dabba.api.openai_compat import (
     ChatCompletionResponse,
     CompletionUsage,
     Message,
-    OpenAIError,
 )
 from dabba.api.auth import ApiKeyAuth
 from dabba.api.rate_limiter import RateLimiter

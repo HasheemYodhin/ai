@@ -46,7 +46,9 @@ class Validator:
         self.amp_dtype = (
             torch.bfloat16
             if amp_dtype == "bfloat16"
-            else torch.float16 if amp_dtype == "float16" else torch.float32
+            else torch.float16
+            if amp_dtype == "float16"
+            else torch.float32
         )
 
     def validate(

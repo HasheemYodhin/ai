@@ -5,7 +5,6 @@ Maps the final hidden states to vocabulary logits and optionally
 ties weights with the token embedding layer.
 """
 
-import math
 from typing import Optional
 
 import torch

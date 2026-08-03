@@ -7,8 +7,13 @@ greedy decoding, and streaming token generation.
 
 from dabba.inference.generator import Generator, GenerationConfig
 from dabba.inference.samplers import (
-    Sampler, SamplerBase, TopKSampler, TopPSampler, TemperatureSampler,
-    GreedySampler, BeamSampler,
+    Sampler,
+    SamplerBase,
+    TopKSampler,
+    TopPSampler,
+    TemperatureSampler,
+    GreedySampler,
+    BeamSampler,
 )
 from dabba.inference.beam_search import BeamSearch
 from dabba.inference.streaming import StreamingGenerator, StreamingHandler

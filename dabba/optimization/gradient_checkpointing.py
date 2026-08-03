@@ -12,12 +12,10 @@ Reference:
     https://arxiv.org/abs/1604.06174
 """
 
-import math
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from dabba.model.transformer import Transformer

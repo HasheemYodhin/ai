@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
 import shutil
 import signal
 import subprocess
-import sys
 import time
 import uuid
 from datetime import datetime
@@ -449,7 +447,6 @@ class InteractiveSession:
             "/mcp": self._cmd_mcp,
             "/view": self._cmd_view,
             "/run": self._cmd_run,
-            "/save": self._cmd_save,
         }
 
         handler = command_map.get(command)

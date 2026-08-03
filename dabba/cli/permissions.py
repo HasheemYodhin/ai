@@ -11,7 +11,6 @@ import json
 import os
 import re
 import subprocess
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from dabba.utils.paths import get_dabba_config_dir

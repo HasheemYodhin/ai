@@ -5,8 +5,7 @@ from training corpora.
 """
 
 import hashlib
-from typing import List, Optional, Set, Tuple
-from collections import defaultdict
+from typing import List, Set, Tuple
 import random
 
 

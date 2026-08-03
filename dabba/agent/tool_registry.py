@@ -13,7 +13,7 @@ import pkgutil
 import time
 import traceback
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Dict, List, Optional, Type
+from typing import Any, Awaitable, Dict, List, Optional
 
 from dabba.agent.tool_schema import (
     HandlerFn,

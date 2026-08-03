@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, List
+from typing import List
 from dabba.providers.base import BaseProvider, ModelInfo
 
 # Well-known Ollama models — shown even if Ollama isn't running
@@ -133,7 +133,7 @@ class OllamaProvider(BaseProvider):
     name = "ollama"
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
-        import httpx, json
+        import httpx
 
         payload = {
             "model": model,
@@ -156,7 +156,7 @@ class OllamaProvider(BaseProvider):
         try:
             resp = httpx.get(f"{OLLAMA_BASE}/api/tags", timeout=3.0)
             for m in resp.json().get("models", []):
-                name = m["name"].split(":")[0]
+                m["name"].split(":")[0]
                 running.append(
                     ModelInfo(
                         id=m["name"],

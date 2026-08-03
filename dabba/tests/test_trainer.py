@@ -2,10 +2,7 @@ import pytest
 import torch
 import tempfile
 import os
-import json
-from unittest.mock import Mock, patch, PropertyMock, MagicMock
 from dabba.trainer import Trainer, TrainerConfig
-from dabba.config import ModelConfig, TrainingConfig
 from dabba.trainer.optimizer import get_optimizer
 from dabba.trainer.scheduler import get_scheduler
 from dabba.trainer.train_step import train_step, eval_step
@@ -52,7 +49,9 @@ class TestOptimizer:
 
     def test_custom_kwargs(self):
         model = torch.nn.Linear(10, 10)
-        opt = get_optimizer(model, name="adamw", lr=1e-4, weight_decay=0.1, betas=(0.9, 0.99))
+        opt = get_optimizer(
+            model, name="adamw", lr=1e-4, weight_decay=0.1, betas=(0.9, 0.99)
+        )
         assert isinstance(opt, torch.optim.AdamW)
         assert opt.defaults["weight_decay"] == 0.1
 
@@ -90,7 +89,9 @@ class TestScheduler:
 
     def test_warmup_cosine(self):
         opt = torch.optim.AdamW([torch.nn.Parameter(torch.randn(10, 10))], lr=1e-4)
-        scheduler = get_scheduler(opt, name="cosine", num_training_steps=100, warmup_steps=10)
+        scheduler = get_scheduler(
+            opt, name="cosine", num_training_steps=100, warmup_steps=10
+        )
         lr = scheduler.get_last_lr()[0]
         assert lr < 1e-4
 
@@ -138,7 +139,7 @@ class TestTrainStep:
         for p in model.parameters():
             if p.grad is not None:
                 total_norm += p.grad.norm().item() ** 2
-        total_norm = total_norm ** 0.5
+        total_norm = total_norm**0.5
         assert total_norm <= 1.0 or total_norm == 0.0
 
 
@@ -189,7 +190,14 @@ class TestCheckpoint:
         model = torch.nn.Linear(10, 10)
         opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = save_checkpoint(model, opt, epoch=1, step=100, output_dir=tmpdir, metadata={"test": "value"})
+            path = save_checkpoint(
+                model,
+                opt,
+                epoch=1,
+                step=100,
+                output_dir=tmpdir,
+                metadata={"test": "value"},
+            )
             state = torch.load(path, map_location="cpu", weights_only=False)
             assert "metadata" in state
             assert state["metadata"]["test"] == "value"
@@ -280,7 +288,9 @@ class TestTrainer:
     def test_train(self):
         model = torch.nn.Linear(10, 10)
         cfg = TrainerConfig(num_epochs=1, batch_size=2, log_interval=1)
-        train_data = [{"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)]
+        train_data = [
+            {"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)
+        ]
         trainer = Trainer(model, cfg)
         history = trainer.train(train_data)
         assert "train_loss" in history
@@ -288,7 +298,9 @@ class TestTrainer:
     def test_evaluate(self):
         model = torch.nn.Linear(10, 10)
         cfg = TrainerConfig(batch_size=2)
-        eval_data = [{"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)]
+        eval_data = [
+            {"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)
+        ]
         trainer = Trainer(model, cfg)
         metrics = trainer.evaluate(eval_data)
         assert "eval_loss" in metrics
@@ -296,8 +308,12 @@ class TestTrainer:
     def test_train_eval_loop(self):
         model = torch.nn.Linear(10, 10)
         cfg = TrainerConfig(num_epochs=2, batch_size=2, eval_interval=1)
-        train_data = [{"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)]
-        eval_data = [{"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(2)]
+        train_data = [
+            {"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(4)
+        ]
+        eval_data = [
+            {"input_ids": torch.randn(10), "labels": torch.randn(10)} for _ in range(2)
+        ]
         trainer = Trainer(model, cfg)
         history = trainer.train(train_data, eval_data=eval_data)
         assert "train_loss" in history

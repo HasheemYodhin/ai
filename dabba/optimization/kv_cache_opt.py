@@ -16,14 +16,12 @@ Reference:
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 import torch
-import torch.nn as nn
 
-from dabba.model.kv_cache import KVCache
 from dabba.model.transformer import Transformer
 
 
@@ -406,7 +404,7 @@ class KVCacheOptimizer:
 
         elif self.eviction_policy == EvictionPolicy.SLIDING_WINDOW:
             # Evict oldest blocks (they're at the front)
-            evicted = blocks.pop(0)
+            blocks.pop(0)
             self._total_evictions += 1
 
     def _quantize(
@@ -721,7 +719,7 @@ class KVCacheOptimizer:
             f"  Saved:               {savings['memory_saved_mb']:.2f} MiB ({savings['memory_saved_pct']:.1f}%)",
             "",
             "Current Cache Stats:",
-            f"  Cache hit rate:      {stats['cache_hit_rate']*100:.1f}%",
+            f"  Cache hit rate:      {stats['cache_hit_rate'] * 100:.1f}%",
             f"  Total evictions:     {stats['total_evictions']:.0f}",
             f"  Current memory:      {stats['total_memory_mb']:.2f} MiB",
             f"  Tokens cached:       {stats['total_tokens_cached']:.0f}",

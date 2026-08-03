@@ -11,7 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -562,7 +562,7 @@ async def lifespan(app: FastAPI):
     if engine and config:
         try:
             engine.load()
-            app.state.logger.info(f"Model engine loaded")
+            app.state.logger.info("Model engine loaded")
         except Exception as e:
             app.state.logger.warning(f"Could not load model: {e}")
 

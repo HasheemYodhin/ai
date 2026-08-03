@@ -39,9 +39,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install --quiet black ruff
-      - name: black --check (backend formatting)
-        run: black --check --diff dabba
+      - run: pip install --quiet ruff
       - name: ruff format --check (backend formatting)
         run: ruff format --check --diff dabba
       - name: ruff check (backend lint)

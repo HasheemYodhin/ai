@@ -14,7 +14,6 @@ image) are allowlisted independently via CliConfig.allowed_docker_containers
 from __future__ import annotations
 
 import asyncio
-import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 

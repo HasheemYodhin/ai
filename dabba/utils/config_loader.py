@@ -6,7 +6,7 @@ and merging with command-line overrides.
 import json
 import yaml
 from pathlib import Path
-from typing import Any, Dict, Optional, Type, TypeVar
+from typing import Any, Dict, Optional, TypeVar
 
 from dabba.config.model_config import ModelConfig
 from dabba.config.training_config import TrainingConfig

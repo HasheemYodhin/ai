@@ -13,10 +13,12 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+
 try:
     import torchvision.transforms as T
     from torchvision.transforms import functional as F
     from torchvision.transforms import InterpolationMode
+
     _HAS_TORCHVISION = True
 except Exception:
     _HAS_TORCHVISION = False
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image, ExifTags
+
     HAS_PIL = True
 except ImportError:
     Image = None
@@ -37,6 +40,7 @@ except ImportError:
 
 try:
     import requests
+
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
@@ -106,7 +110,9 @@ class ImageProcessor(nn.Module):
         ]
         if center_crop and crop_padding > 0:
             transform_list.append(
-                T.CenterCrop((image_size - 2 * crop_padding, image_size - 2 * crop_padding))
+                T.CenterCrop(
+                    (image_size - 2 * crop_padding, image_size - 2 * crop_padding)
+                )
             )
         self._resize = T.Compose(transform_list)
 
@@ -232,8 +238,8 @@ class ImageProcessor(nn.Module):
         if not return_tensor:
             return image
 
-        tensor = F.pil_to_tensor(image).unsqueeze(0).to(
-            device=self.device, dtype=self.dtype
+        tensor = (
+            F.pil_to_tensor(image).unsqueeze(0).to(device=self.device, dtype=self.dtype)
         )
         tensor = (tensor / 255.0 - self.mean) / self.std
         return tensor
@@ -257,9 +263,7 @@ class ImageProcessor(nn.Module):
         processed = []
         for source in images:
             pil_image = self.load_image(source)
-            processed.append(
-                self.preprocess(pil_image, return_tensor=return_tensor)
-            )
+            processed.append(self.preprocess(pil_image, return_tensor=return_tensor))
 
         if return_tensor:
             return torch.cat(processed, dim=0)
@@ -310,8 +314,11 @@ class ImageProcessor(nn.Module):
     ) -> torch.Tensor:
         """Resize a CHW tensor to (C, H, W) with given size."""
         import torch.nn.functional as _F
+
         h, w = size
-        return _F.interpolate(image.unsqueeze(0), size=(h, w), mode="bilinear", align_corners=False).squeeze(0)
+        return _F.interpolate(
+            image.unsqueeze(0), size=(h, w), mode="bilinear", align_corners=False
+        ).squeeze(0)
 
     def normalize(
         self,

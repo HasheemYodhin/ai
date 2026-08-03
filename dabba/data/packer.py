@@ -7,7 +7,7 @@ prevent cross-sequence attention. This improves training efficiency
 by reducing padding overhead.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List
 import torch
 
 

@@ -4,9 +4,8 @@ decoder-only transformer architecture, supporting model sizes from
 10M to 7B+ parameters.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-import math
 
 
 @dataclass
@@ -164,7 +163,7 @@ class ModelConfig:
             if self.tie_word_embeddings
             else self.vocab_size * self.hidden_size
         )
-        kv_mult = self.num_key_value_heads / self.num_attention_heads
+        self.num_key_value_heads / self.num_attention_heads
         for _ in range(self.num_layers):
             n += 4 * self.hidden_size  # RMSNorm x2 (approx)
             n += (

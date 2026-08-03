@@ -82,9 +82,9 @@ class GoogleProvider(BaseProvider):
         history, system_text = self._convert_messages(messages)
 
         if system_text and history:
-            history[0]["parts"][
-                0
-            ] = f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
+            history[0]["parts"][0] = (
+                f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
+            )
 
         if not history:
             return ""

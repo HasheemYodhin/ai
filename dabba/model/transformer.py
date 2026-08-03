@@ -13,16 +13,16 @@ Supports:
     - Multiple attention modes (MHA, GQA, MQA)
 """
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from dabba.model.embedding import TokenEmbedding
 from dabba.model.decoder_block import DecoderBlock
 from dabba.model.output_head import OutputHead
 from dabba.model.kv_cache import KVCache
+from dabba.model.normalizations import LayerNorm, RMSNorm
 from dabba.config.model_config import ModelConfig
 
 
@@ -325,6 +325,3 @@ class Transformer(nn.Module):
         if hasattr(self, "buffers"):
             mem += sum(b.numel() * b.element_size() for b in self.buffers())
         return mem
-
-
-from dabba.model.normalizations import RMSNorm, LayerNorm

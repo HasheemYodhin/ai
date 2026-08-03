@@ -833,7 +833,7 @@ def create_agent_router() -> APIRouter:
                             "📊 **Current Session Usage:**\n"
                             f"- **Steps Taken:** {steps}\n"
                             f"- **Tool Calls:** {tool_calls}\n"
-                            f"- **Total Tokens:** ~{total_tokens} ({usage_ratio*100:.1f}% of context)\n"
+                            f"- **Total Tokens:** ~{total_tokens} ({usage_ratio * 100:.1f}% of context)\n"
                             f"- **Active Model:** `{proxy.cli_config.default_model}`\n"
                             f"- **Reasoning Effort:** `{getattr(proxy.cli_config, 'effort', 'medium')}`"
                         )
@@ -965,7 +965,6 @@ def create_agent_router() -> APIRouter:
                             try:
                                 from dabba.tools.web_tools import (
                                     search_web,
-                                    WebToolError,
                                 )
 
                                 results = search_web(query, num_results=6)
@@ -997,7 +996,6 @@ def create_agent_router() -> APIRouter:
                             try:
                                 from dabba.tools.web_tools import (
                                     fetch_url,
-                                    WebToolError,
                                 )
 
                                 result = fetch_url(url)

@@ -13,13 +13,10 @@ Usage:
 
 import argparse
 import os
-import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
 from dabba.config.model_config import ModelConfig
 from dabba.config.training_config import TrainingConfig
@@ -27,13 +24,9 @@ from dabba.config.data_config import DataConfig
 from dabba.utils.config_loader import load_config
 from dabba.utils.logging import setup_logger, get_logger
 from dabba.utils.distributed import (
-    setup_distributed,
-    cleanup_distributed,
     get_rank,
-    get_world_size,
 )
 from dabba.tokenizer.bpe_tokenizer import BPETokenizer
-from dabba.data.streaming_dataset import StreamingDataset
 from dabba.data.dataloader import create_dataloader
 from dabba.model.transformer import Transformer
 from dabba.trainer.optimizer import AdamW
@@ -174,7 +167,7 @@ def main():
         logger.info("Compiling model with torch.compile...")
         model = torch.compile(model)
 
-    tokenizer = create_tokenizer(data_config)
+    create_tokenizer(data_config)
 
     logger.info("Creating data loaders...")
     train_loader = create_dataloader(

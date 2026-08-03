@@ -7,7 +7,6 @@ import binascii
 import asyncio
 import contextlib
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException

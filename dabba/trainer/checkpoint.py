@@ -9,7 +9,6 @@ serialization for resume capability.
 import datetime
 import json
 import os
-import re
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -153,8 +152,7 @@ class CheckpointManager:
             config = self.model.config
             if hasattr(config, "__dataclass_fields__"):
                 config_dict = {
-                    k: getattr(config, k)
-                    for k in config.__dataclass_fields__
+                    k: getattr(config, k) for k in config.__dataclass_fields__
                 }
             else:
                 config_dict = config
@@ -166,14 +164,19 @@ class CheckpointManager:
         if self.save_total_limit <= 0:
             return
 
-        checkpoints = sorted([
-            d for d in self.output_dir.iterdir()
-            if d.is_dir() and d.name.startswith("checkpoint-")
-        ], key=lambda d: int(d.name.split("-")[1]))
+        checkpoints = sorted(
+            [
+                d
+                for d in self.output_dir.iterdir()
+                if d.is_dir() and d.name.startswith("checkpoint-")
+            ],
+            key=lambda d: int(d.name.split("-")[1]),
+        )
 
         while len(checkpoints) > self.save_total_limit:
             oldest = checkpoints.pop(0)
             import shutil
+
             shutil.rmtree(oldest)
             self.logger.info(f"Removed old checkpoint: {oldest}")
 
@@ -184,10 +187,14 @@ class CheckpointManager:
         Returns:
             Step number of the loaded checkpoint, or None if no checkpoint found.
         """
-        checkpoints = sorted([
-            d for d in self.output_dir.iterdir()
-            if d.is_dir() and d.name.startswith("checkpoint-")
-        ], key=lambda d: int(d.name.split("-")[1]))
+        checkpoints = sorted(
+            [
+                d
+                for d in self.output_dir.iterdir()
+                if d.is_dir() and d.name.startswith("checkpoint-")
+            ],
+            key=lambda d: int(d.name.split("-")[1]),
+        )
 
         if not checkpoints:
             return None
@@ -213,9 +220,7 @@ class CheckpointManager:
         if model_path.exists() and self.model is not None:
             state = torch.load(model_path, map_location="cpu")
             model_state = (
-                state["model_state_dict"]
-                if "model_state_dict" in state
-                else state
+                state["model_state_dict"] if "model_state_dict" in state else state
             )
             if hasattr(self.model, "module"):
                 self.model.module.load_state_dict(model_state)
@@ -225,15 +230,15 @@ class CheckpointManager:
 
         optimizer_path = checkpoint_dir / "optimizer.pt"
         if optimizer_path.exists() and self.optimizer is not None:
-            self.optimizer.load_state_dict(torch.load(
-                optimizer_path, map_location="cpu"
-            ))
+            self.optimizer.load_state_dict(
+                torch.load(optimizer_path, map_location="cpu")
+            )
 
         scheduler_path = checkpoint_dir / "scheduler.pt"
         if scheduler_path.exists() and self.scheduler is not None:
-            self.scheduler.load_state_dict(torch.load(
-                scheduler_path, map_location="cpu"
-            ))
+            self.scheduler.load_state_dict(
+                torch.load(scheduler_path, map_location="cpu")
+            )
 
         training_state_path = checkpoint_dir / "training_state.json"
         if training_state_path.exists():

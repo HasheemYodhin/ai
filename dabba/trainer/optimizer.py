@@ -128,8 +128,8 @@ class AdamW(torch.optim.Optimizer):
                     denom = exp_avg_sq.sqrt().add_(eps)
 
                 if correct_bias:
-                    bias_correction1 = 1 - beta1 ** step
-                    bias_correction2 = 1 - beta2 ** step
+                    bias_correction1 = 1 - beta1**step
+                    bias_correction2 = 1 - beta2**step
                     step_size = lr * math.sqrt(bias_correction2) / bias_correction1
                 else:
                     step_size = lr
@@ -140,7 +140,9 @@ class AdamW(torch.optim.Optimizer):
         return loss
 
 
-def get_optimizer(model: nn.Module, name: str = "adamw", lr: float = 1e-4, **kwargs) -> torch.optim.Optimizer:
+def get_optimizer(
+    model: nn.Module, name: str = "adamw", lr: float = 1e-4, **kwargs
+) -> torch.optim.Optimizer:
     params = model.parameters()
     name = name.lower()
     if name == "adamw":

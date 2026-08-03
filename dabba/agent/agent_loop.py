@@ -9,13 +9,11 @@ and LLM inference.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 from dabba.agent.context_manager import ContextManager
-from dabba.agent.executor import Executor, ExecutionStats
+from dabba.agent.executor import Executor
 from dabba.agent.mcp_handler import McpHandler
 from dabba.agent.planner import ExecutionPlan, Planner
 from dabba.agent.tool_schema import ToolCall, ToolResult

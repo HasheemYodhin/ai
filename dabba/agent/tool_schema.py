@@ -199,7 +199,7 @@ class ToolResult:
             try:
                 text = json.dumps(output, indent=2, default=str)
                 if len(text) > 100_000:
-                    text = text[:100_000] + f"\n... [truncated at 100000 chars]"
+                    text = text[:100_000] + "\n... [truncated at 100000 chars]"
                 return text
             except (TypeError, ValueError):
                 return str(output)

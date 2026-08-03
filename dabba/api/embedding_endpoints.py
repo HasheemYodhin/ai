@@ -4,16 +4,15 @@ Embedding API endpoints.
 Provides POST /v1/embeddings compatible with the OpenAI embedding API format.
 """
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from dabba.api.openai_compat import (
     EmbeddingData,
     EmbeddingRequest,
     EmbeddingResponse,
     CompletionUsage,
-    OpenAIError,
 )
 from dabba.api.auth import ApiKeyAuth
 from dabba.api.rate_limiter import RateLimiter
@@ -74,7 +73,7 @@ def create_embedding_router(
                 inputs = [str(req.input)]
 
         embeddings_list = _generate_embeddings(inputs, embedding_engine)
-        dim = len(embeddings_list[0]) if embeddings_list else 0
+        len(embeddings_list[0]) if embeddings_list else 0
 
         token_count = sum(len(text.split()) for text in inputs)
 

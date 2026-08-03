@@ -7,13 +7,10 @@ generating embeddings, and storing the results in a vector database.
 
 import hashlib
 import os
-import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import numpy as np
-import numpy.typing as npt
 
 from dabba.config.rag_config import RagConfig
 from dabba.data.chunker import TextChunker

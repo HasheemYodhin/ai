@@ -6,10 +6,14 @@ video formats (MP4, AVI, MOV, MKV, WebM). Uses OpenCV as the primary
 backend with a safe fallback when cv2 is unavailable.
 """
 
+from __future__ import annotations
+
 import logging
 import os
-import tempfile
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 

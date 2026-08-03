@@ -1,5 +1,4 @@
-import json
-from unittest.mock import Mock, patch, MagicMock, AsyncMock, PropertyMock
+from unittest.mock import Mock
 from fastapi.testclient import TestClient
 from dabba.api import create_app
 from dabba.api.auth import authenticate_request

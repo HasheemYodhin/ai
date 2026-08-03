@@ -7,9 +7,8 @@ and applies truncation strategies to stay within limits.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional
 
 from dabba.utils.logging import get_logger
 
@@ -313,8 +312,7 @@ class ContextManager:
         dropped = original_count - len(self._entries)
         if dropped > 0:
             logger.info(
-                "Truncation (drop_oldest): removed %d entries, "
-                "total tokens now %d/%d",
+                "Truncation (drop_oldest): removed %d entries, total tokens now %d/%d",
                 dropped,
                 self._total_tokens,
                 self.max_context_length,
@@ -328,7 +326,7 @@ class ContextManager:
         """
         if self._system_prompt:
             logger.info(
-                "Truncation (drop_system): removing system prompt " "(%d tokens)",
+                "Truncation (drop_system): removing system prompt (%d tokens)",
                 self._system_token_count,
             )
             self._total_tokens -= self._system_token_count

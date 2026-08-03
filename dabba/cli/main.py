@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from dabba import __version__
 from dabba.cli.config import CliConfig
