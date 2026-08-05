@@ -258,7 +258,7 @@ jobs:
         if: always()
         run: pip-audit -r requirements.txt || echo "::warning::Vulnerabilities found in requirements.txt (training deps, not shipped in the runtime image) — see job log."
       - name: Config scan (Trivy — Dockerfile, Helm chart)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .
@@ -340,7 +340,7 @@ jobs:
           name: docker-image
       - run: docker load -i image.tar
       - name: Scan image (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           input: image.tar
           format: table
