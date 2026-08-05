@@ -9,7 +9,6 @@ name: Dabba Platform CI
 "on":
   workflow_dispatch:
   push:
-    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 
@@ -361,15 +360,15 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------
-  # docker-push: only for the trusted default-branch push event, and only
-  # once every gate above has passed.
+  # docker-push: only for direct pushes in the trusted upstream repository,
+  # and only once every gate above has passed. Pull requests never publish.
   # ---------------------------------------------------------------------
   docker-push:
     runs-on: ubuntu-latest
     needs: [docker-scan]
     if: >
       success() &&
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
       github.repository == 'HasheemYodhin/ai'
     permissions:
       contents: read
@@ -406,7 +405,8 @@ jobs:
         with:
           images: ${{ steps.image.outputs.name }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
             type=sha,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

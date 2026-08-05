@@ -20,13 +20,14 @@ checks) is documented separately in
 
 ## Triggers
 
-Both workflows run on:
+The platform pipeline runs on:
 
 - `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) targeting the default branch (`main`)
-- `push` to `main`
+- `push` to any branch or tag
 - `workflow_dispatch` (manual run — Actions tab → select workflow → **Run workflow**)
 
-`codeql.yml` additionally runs on a weekly schedule (Monday 06:00 UTC).
+`codeql.yml` uses the same pull-request and manual triggers, runs on pushes to
+`main`, and additionally runs on a weekly schedule (Monday 06:00 UTC).
 
 Draft PRs skip every job except metadata handling — the expensive
 build/test/security/docker jobs only run once a PR is marked "ready for
@@ -50,7 +51,7 @@ docker-build
 docker-scan
    |
    v
-docker-push   (push events on main only)
+docker-push   (trusted upstream push events only)
    |
    v
 summary       (always runs, reports every stage's result)
@@ -66,7 +67,7 @@ summary       (always runs, reports every stage's result)
 | `security` | Gitleaks (push events only — PR events are already covered by `pr-validation.yml`), `pip-audit` against `requirements-server.txt` (blocking) and `requirements.txt` (report-only), Trivy config scan of the Dockerfile and Helm chart. |
 | `docker-build` | Builds the image with Buildx (GHA cache), tagged but **not pushed**. Saved as a workflow artifact for the next job. |
 | `docker-scan` | Trivy scan (vuln + secret + misconfig) of the built image. Report uploaded as an artifact. |
-| `docker-push` | Only for `push` to `main` in this repository (not forks). Logs in to Docker Hub and pushes `latest` + short-SHA + semver tags. |
+| `docker-push` | Direct pushes in this repository (not pull-request events or forks). Logs in to Docker Hub and pushes branch + short-SHA tags; `latest` is reserved for `main`. |
 | `summary` | Always runs; writes a GitHub Actions job summary table with every stage's result and the resolved image tags. |
 
 ## Pull Request behaviour
@@ -81,13 +82,20 @@ summary       (always runs, reports every stage's result)
   - builds and pushes `<image>:<short-sha>` and `<image>:latest`.
   - also pushes semver tags (`X.Y.Z`, `X.Y`) when the commit is tagged `vX.Y.Z`.
 
+## Other branch behaviour
+
+- A direct push runs every validation and scanning stage, then publishes
+  `<image>:<sanitized-branch-name>` and `<image>:<short-sha>`.
+- It never updates `<image>:latest`; that tag remains exclusive to `main`.
+- A pull-request event still builds and scans without publishing. If the same
+  branch belongs to this repository, its separate `push` event handles the
+  branch image.
+
 ## Manual runs
 
 Actions tab → **Dabba Platform CI** (or **CodeQL**) → **Run workflow** → pick
-a branch. `docker-push` will only actually push if that run is a `push` event
-on `main` — a manual (`workflow_dispatch`) run builds and scans but does not
-push, by design (the current gate is `github.event_name == 'push'`; broaden
-this in `docker-push`'s `if` if manual pushes are ever wanted).
+a branch. A manual (`workflow_dispatch`) run builds and scans but does not
+push, by design; publishing requires a direct `push` event.
 
 ## Docker image naming and tags
 
@@ -99,9 +107,10 @@ back to `dabba` if the variable is unset.
 | Event | Tags produced |
 | --- | --- |
 | Push to `main` | `<image>:<short-sha>`, `<image>:latest` |
-| Tag `vX.Y.Z` | `<image>:X.Y.Z`, `<image>:X.Y`, `<image>:latest` |
+| Tag `vX.Y.Z` | `<image>:X.Y.Z`, `<image>:X.Y`, `<image>:<short-sha>` |
 | Pull request (build+scan only, never pushed) | `<image>:pr-<number>` |
-| Other branch / manual dispatch (build+scan only) | `<image>:<sanitized-branch-name>` |
+| Push to another branch | `<image>:<sanitized-branch-name>`, `<image>:<short-sha>` |
+| Manual dispatch (build+scan only) | `<image>:<sanitized-branch-name>` |
 
 Branch-name sanitization for the `type=ref,event=branch` tag is handled by
 `docker/metadata-action`.
@@ -181,7 +190,7 @@ have `@vitest/coverage-v8` installed — see "Known gaps" below.
 | `frontend` fails `npm audit --audit-level=high` | Real vulnerable transitive deps (e.g. `dompurify`, `postcss`) as of this writing. Run `npm audit fix` (or `--force` for breaking upgrades) in a frontend-focused PR. |
 | `sonarqube` shows "SonarQube is not configured" notice | Expected until `SONAR_TOKEN`/`SONAR_HOST_URL` are set — see above. |
 | `docker-push` fails "DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN ... not set" | Add both secrets under Settings → Secrets and variables → Actions. |
-| `docker-push` never ran on a PR | By design — pushes only happen on `push` to `main` in this repository. |
+| `docker-push` never ran on a PR | By design — pull-request events never publish. Push the branch in this repository to trigger its separate branch-image publication run. |
 | `security` fails on `requirements.txt` pip-audit | Non-blocking by design (see policy above) — check the `::warning::` in the job log for the specific package/CVE. |
 | `pr-validation.yml`'s `secret-scan` fails with `403 Resource not accessible by integration` | `gitleaks-action` calls `GET /pulls/:number/commits`, which needs `pull-requests: read` on the job's token. Already fixed — the job now grants it explicitly. |
 | `codeql.yml` fails with `Code scanning is not enabled for this repository` | Repo-settings/GHAS gap, not a workflow bug — see the Security scan policy section above. The job stays green (`continue-on-error`) and still uploads the SARIF as an artifact. |
