@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, type ChangeEvent, type DragEvent } from 'react'
 import type { UploadedFile } from '@/types'
 import { cn } from '@/lib/utils'
-import { Upload, File as FileIcon, Image, X, FileText, AlertCircle } from 'lucide-react'
+import { Upload, Image, X, FileText, AlertCircle } from 'lucide-react'
 
 const ACCEPTED_TYPES = {
   'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'],

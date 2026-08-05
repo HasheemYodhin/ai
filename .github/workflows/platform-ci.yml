@@ -65,7 +65,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -r requirements-server.txt pytest pytest-cov
+      - run: pip install -r requirements-server.txt pytest pytest-asyncio pytest-cov
       - name: Compile backend
         run: python -m compileall -q dabba
       - name: Full server/agent/platform test suite
@@ -145,10 +145,6 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - name: Lint (eslint)
-        # NOTE: eslint itself is not currently a devDependency in
-        # frontend/package.json, so this step fails until it is added — see
-        # docs/ci-cd-pipeline.md "Known gaps". Intentionally not silenced:
-        # a missing tool should be visible, not swallowed.
         run: npm run lint
       - run: npm audit --audit-level=high
       - name: Unit tests
@@ -198,7 +194,7 @@ jobs:
       - name: Regenerate backend coverage for Sonar
         if: steps.sonar-check.outputs.configured == 'true'
         run: |
-          pip install -r requirements-server.txt pytest pytest-cov
+          pip install -r requirements-server.txt pytest pytest-asyncio pytest-cov
           python -m pytest dabba/tests/ -q \
             --ignore=dabba/tests/test_inference.py --ignore=dabba/tests/test_rag.py \
             --ignore=dabba/tests/test_attention.py --ignore=dabba/tests/test_model.py \

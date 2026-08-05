@@ -615,7 +615,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
 
     setMessages([...truncated, editedMessage, assistantMessage])
     await runCompletion([...truncated, editedMessage], assistantMessage.id)
-  }, [messages, isLoading, runCompletion])
+  }, [messages, isLoading, runCompletion, setMessages])
 
   // Regenerates an assistant reply (also serves as retry-on-error), optionally
   // with a different model/effort than the current settings.
@@ -630,7 +630,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
 
     setMessages([...history, assistantMessage])
     await runCompletion(history, assistantMessage.id, overrides)
-  }, [messages, isLoading, runCompletion])
+  }, [messages, isLoading, runCompletion, setMessages])
 
   return {
     messages,

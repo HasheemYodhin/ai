@@ -2,7 +2,7 @@ import { useMemo, useState, type ComponentType } from 'react'
 import {
   Boxes, Bug, ChevronRight, Cloud, Database, FileText, Github, HardDrive, Loader2,
   MessageCircle, PenTool, Plug, Plus, RefreshCw, Search, Slack, Trash2,
-  Triangle, Workflow, Wrench,
+  Triangle, Workflow,
 } from 'lucide-react'
 import type { SimpleIcon } from 'simple-icons'
 import {

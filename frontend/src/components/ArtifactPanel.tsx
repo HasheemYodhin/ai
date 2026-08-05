@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { X, Copy, Check, Code2, Eye, Maximize2, Minimize2, GripVertical, Globe, Loader2 } from 'lucide-react'
@@ -53,16 +53,10 @@ export function ArtifactPanel() {
     }
   }
 
-  // Reset to the code tab whenever a different artifact opens.
-  const key = artifact ? `${artifact.title}:${artifact.code.length}` : ''
-  useMemo(() => setTab('code'), [key])
-
-  // Auto-switch to preview tab for HTML artifacts
-  useMemo(() => {
-    if (artifact && isPreviewable(artifact.language, artifact.code)) {
-      setTab('preview')
-    }
-  }, [key]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Select the appropriate initial tab whenever a different artifact opens.
+  useEffect(() => {
+    setTab(previewable ? 'preview' : 'code')
+  }, [artifact, previewable])
 
   const handleCopy = async () => {
     if (!artifact) return
