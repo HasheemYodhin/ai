@@ -21,7 +21,7 @@ pillow>=10,<13
 opentelemetry-api>=1.25,<2
 opentelemetry-sdk>=1.25,<2
 opentelemetry-exporter-otlp>=1.25,<2
-cryptography>=42,<50
+cryptography>=50,<51
 
 # CLI (dabba/cli/tui.py, output_handler.py) — imported unconditionally at
 # module load, not behind a try/except, so a missing install here doesn't
