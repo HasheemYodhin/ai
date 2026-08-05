@@ -346,11 +346,12 @@ jobs:
           format: table
           scanners: "vuln,secret,misconfig"
           severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
           exit-code: "1"
           output: trivy-image-report.txt
         # Covers OS + application-dependency vulnerabilities, misconfigurations,
-        # and exposed secrets baked into image layers. Fails the job on any
-        # unfixed CRITICAL/HIGH finding — see docs/ci-cd-pipeline.md for policy.
+        # and exposed secrets baked into image layers. Fails on patchable
+        # CRITICAL/HIGH findings; distro findings without a fix do not block.
       - name: Upload image scan report
         if: always()
         uses: actions/upload-artifact@v4

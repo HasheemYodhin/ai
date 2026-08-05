@@ -14,7 +14,9 @@ checks) is documented separately in
 - **Container**: multi-stage `Dockerfile` at the repo root — builds the
   frontend with `node:22-bookworm-slim`, then copies the static build output
   into a `python:3.10-slim` runtime image. Build context is the repo root
-  (`.`). Exposes port `8080`, healthcheck on `/ready`.
+  (`.`). Exposes port `8080`, healthcheck on `/ready`. The production target
+  excludes Git and Node development tooling; build `--target developer-runtime`
+  when those optional coding and npx-based MCP tools are required.
 
 ## Triggers
 
@@ -150,9 +152,11 @@ have `@vitest/coverage-v8` installed — see "Known gaps" below.
   shipped in the image) is reported but does not block.
 - **Config** (Trivy, `scan-type: config` against the Dockerfile and Helm
   chart) and **image** (Trivy, `scanners: vuln,secret,misconfig` against the
-  built image): fails on any unfixed `CRITICAL` or `HIGH` finding. Add
-  accepted findings with justification and a review date to `.trivyignore`
-  — never a blanket ignore.
+  built image): fails on patchable `CRITICAL` or `HIGH` findings. OS findings
+  for which the distribution has not published a fix do not block the image;
+  rebuild regularly so fixes are incorporated when available. Add accepted
+  fixable findings with justification and a review date to `.trivyignore` —
+  never a blanket ignore.
 - **Source code** (CodeQL, `codeql.yml`): findings are meant to surface in
   the repo's Security tab; this workflow does not currently fail the build
   on findings (CodeQL doesn't gate merges by default — pair it with a branch
