@@ -17,7 +17,7 @@ interface ChatWindowProps {
   messages: Message[]
   isLoading: boolean
   onSend: (content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => void
-  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => void
+  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean; planMode?: boolean }) => void
   onGenerateImage: (prompt: string) => void
   onStop: () => void
   onClear: () => void

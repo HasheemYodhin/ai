@@ -84,7 +84,7 @@ interface UseChatReturn {
   updateMessage: (id: string, updates: Partial<Message>) => void
   clearMessages: () => void
   sendMessage: (content: string, images?: string[], opts?: { conversationId?: string; systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => Promise<void>
-  runAgentMode: (content: string, opts: { conversationId?: string; label: string; effort?: string; hint?: string; viaVoice?: boolean }) => Promise<void>
+  runAgentMode: (content: string, opts: { conversationId?: string; label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean }) => Promise<void>
   generateImage: (prompt: string, conversationId?: string) => Promise<void>
   editMessage: (id: string, content: string) => Promise<void>
   regenerate: (id: string, overrides?: { model?: string; effort?: string }) => Promise<void>
@@ -435,7 +435,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
   // (see client.streamAgent's docstring) — it only sees the latest message,
   // not this hook's full `messages` history, so it's best used for one-off
   // lookups rather than as a drop-in replacement for the normal chat turn.
-  const runAgentMode = useCallback(async (content: string, opts: { conversationId?: string; label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => {
+  const runAgentMode = useCallback(async (content: string, opts: { conversationId?: string; label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean; planMode?: boolean }) => {
     if (!content.trim() || isLoading) return
     const conversationId = opts.conversationId ?? activeConversationRef.current ?? '__draft__'
 
@@ -459,7 +459,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
       : ''
     // Research has a dedicated backend pipeline that gathers sources before
     // synthesis, so send the user's clean query instead of a UI-only hint.
-    const instructionParts = [!isResearch ? opts.hint : '', exportHint].filter(Boolean)
+    const instructionParts = [exportHint].filter(Boolean)
     const sendText = instructionParts.length
       ? `${instructionParts.join('\n\n')}\n\n${content}`
       : content
@@ -475,6 +475,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
         permissionMode: settings.defaultPermissionMode,
         useToolSearch: settings.useToolSearch,
         maxSteps: settings.maxSteps,
+        allowedTools: opts.allowedTools,
         contextCompactionThreshold: settings.contextCompactionThreshold,
         contextCompactionKeepRecent: settings.contextCompactionKeepRecent,
         onApproval: request => new Promise<boolean>(resolve => {
@@ -614,7 +615,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
 
     setMessages([...truncated, editedMessage, assistantMessage])
     await runCompletion([...truncated, editedMessage], assistantMessage.id)
-  }, [messages, isLoading, runCompletion])
+  }, [messages, isLoading, runCompletion, setMessages])
 
   // Regenerates an assistant reply (also serves as retry-on-error), optionally
   // with a different model/effort than the current settings.
@@ -629,7 +630,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate }: U
 
     setMessages([...history, assistantMessage])
     await runCompletion(history, assistantMessage.id, overrides)
-  }, [messages, isLoading, runCompletion])
+  }, [messages, isLoading, runCompletion, setMessages])
 
   return {
     messages,

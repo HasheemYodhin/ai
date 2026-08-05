@@ -1,0 +1,82 @@
+name: CodeQL
+
+# Source-code security scanning. Separate from platform-ci.yml because
+# CodeQL needs its own init/autobuild/analyze steps and language matrix,
+# and benefits from its own weekly schedule independent of code pushes.
+"on":
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  schedule:
+    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC
+
+concurrency:
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["python", "javascript-typescript"]
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL analysis
+        id: analyze
+        # This repository is private without GitHub Advanced Security /
+        # "Code scanning" enabled under Settings -> Security, so the SARIF
+        # upload this action does at the end (POST to the code scanning API)
+        # 403s with "Code scanning is not enabled for this repository" —
+        # that's a repo-settings toggle, not something fixable from a
+        # workflow file. continue-on-error keeps that from hard-failing the
+        # whole job; the SARIF is still produced and uploaded as a build
+        # artifact below so findings aren't lost. Once code scanning is
+        # enabled (see docs/ci-cd-pipeline.md), this step will both analyze
+        # and upload to the Security tab in one pass, same as today.
+        continue-on-error: true
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          output: codeql-sarif
+
+      - name: Upload SARIF as a build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codeql-sarif-${{ matrix.language }}
+          path: codeql-sarif
+          retention-days: 14
+
+      - name: Note analysis outcome
+        if: steps.analyze.outcome == 'failure'
+        # Deliberately not `exit 1` here: the only way this step's outcome is
+        # "failure" right now is the code-scanning-not-enabled 403 (verified
+        # in this repo's actual run logs), and continue-on-error already
+        # keeps the job green for that case. There's no reliable way to tell
+        # "upload rejected by repo settings" apart from "analysis itself
+        # crashed" from the step outcome alone — if CodeQL starts crashing
+        # for a different reason, check this annotation and the SARIF
+        # artifact above, since the job will stay green either way.
+        run: |
+          echo "::warning::CodeQL 'Perform CodeQL analysis' step did not fully succeed — see its log and the codeql-sarif-${{ matrix.language }} artifact. Expected cause: code scanning not enabled for this (private) repository, documented in docs/ci-cd-pipeline.md."

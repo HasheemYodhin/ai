@@ -61,8 +61,8 @@ class KVCache:
             self._value = torch.cat([self._value, value], dim=2)
 
             if self.max_cache_size > 0 and self._key.size(2) > self.max_cache_size:
-                self._key = self._key[:, :, -self.max_cache_size:]
-                self._value = self._value[:, :, -self.max_cache_size:]
+                self._key = self._key[:, :, -self.max_cache_size :]
+                self._value = self._value[:, :, -self.max_cache_size :]
 
         return self._key, self._value
 

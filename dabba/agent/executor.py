@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from dabba.agent.planner import ExecutionPlan, PlanStep, StepStatus
@@ -152,6 +152,7 @@ class Executor:
             Dict with "status" and "result" keys.
         """
         import asyncio as _asyncio
+
         loop = _asyncio.new_event_loop()
         try:
             ok = loop.run_until_complete(self._execute_step(step))
@@ -159,7 +160,10 @@ class Executor:
             return {"status": "failed", "result": None, "error": str(exc)}
         finally:
             loop.close()
-        return {"status": "success" if ok else "failed", "result": getattr(step, "result", None)}
+        return {
+            "status": "success" if ok else "failed",
+            "result": getattr(step, "result", None),
+        }
 
     async def _execute_step(self, step: PlanStep) -> bool:
         """

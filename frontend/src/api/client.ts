@@ -466,6 +466,31 @@ export class ApiClient {
   }
 
   async extractDocuments(files: UploadedFile[], signal?: AbortSignal): Promise<ExtractedDocument[]> {
+    if (files.every(file => file.file)) {
+      const form = new FormData()
+      for (const file of files) form.append('files', file.file as File, file.name)
+      const headers = this.getHeaders()
+      // The browser must add the multipart boundary itself.
+      delete headers['Content-Type']
+      const response = await fetch(`${this.baseUrl}/v1/documents/extract-upload`, {
+        method: 'POST',
+        headers,
+        body: form,
+        signal,
+      })
+      if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error(
+            'Large-file uploads require the updated Dabba backend. Rebuild and restart the server, then try again.',
+          )
+        }
+        throw await responseError(response, `Document extraction failed (status ${response.status})`)
+      }
+      const data = await response.json() as { documents?: ExtractedDocument[] }
+      return data.documents ?? []
+    }
+
+    // Compatibility path for attachments restored from older in-memory state.
     const payload = files.map(file => {
       if (!file.dataUrl) throw new Error(`Attachment "${file.name}" has no readable data.`)
       return { name: file.name, data_url: file.dataUrl }
@@ -710,6 +735,7 @@ export class ApiClient {
       permissionMode?: 'ask' | 'allow' | 'deny'
       useToolSearch?: boolean
       maxSteps?: number | null
+      allowedTools?: string[]
       contextCompactionThreshold?: number
       contextCompactionKeepRecent?: number
       onApproval?: (request: { callId: string; name: string; arguments: unknown }) => Promise<boolean>
@@ -730,6 +756,7 @@ export class ApiClient {
         require_plan_approval: !!options.requirePlanApproval,
         use_tool_search: options.useToolSearch,
         max_steps: options.maxSteps ?? undefined,
+        allowed_tools: options.allowedTools,
         context_compaction_threshold: options.contextCompactionThreshold,
         context_compaction_keep_recent: options.contextCompactionKeepRecent,
       }),

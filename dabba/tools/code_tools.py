@@ -11,9 +11,8 @@ import ast
 import json
 import re
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from dabba.agent.tool_schema import ToolDefinition, ToolParameter
 from dabba.agent.tool_registry import ToolRegistry
@@ -108,8 +107,8 @@ def analyze_code(code: str = "", language: str = "", path: str = "") -> Dict[str
     else:
         _generic_analyze(code, analysis)
 
-    analysis["complexity"]["avg_line_length"] = (
-        analysis["char_count"] / max(analysis["line_count"], 1)
+    analysis["complexity"]["avg_line_length"] = analysis["char_count"] / max(
+        analysis["line_count"], 1
     )
     analysis["complexity"]["empty_lines_pct"] = (
         _count_empty_lines(code) / max(analysis["line_count"], 1) * 100
@@ -122,7 +121,10 @@ def _detect_language(code: str) -> str:
     """Detect the programming language from code content."""
     heuristics = [
         (r"^\s*(import |from \S+ import |def |class |async def |@\w+)", "python"),
-        (r"^\s*(function |const |let |var |import |export |interface |type |=>)", "javascript"),
+        (
+            r"^\s*(function |const |let |var |import |export |interface |type |=>)",
+            "javascript",
+        ),
         (r"^\s*(#include|int main|void main|printf|scanf)", "c"),
         (r"^\s*(#include\s*<iostream>|std::|cout|cin|template)", "cpp"),
         (r"^\s*(import java\.|public class|private |protected |void main)", "java"),
@@ -139,7 +141,11 @@ def _detect_language(code: str) -> str:
 
     if re.search(r"^\s*<\?php", code, re.MULTILINE):
         return "php"
-    if re.search(r"^\s*(SELECT|FROM|WHERE|INSERT|CREATE|ALTER)", code, re.IGNORECASE | re.MULTILINE):
+    if re.search(
+        r"^\s*(SELECT|FROM|WHERE|INSERT|CREATE|ALTER)",
+        code,
+        re.IGNORECASE | re.MULTILINE,
+    ):
         return "sql"
     if re.search(r"^\s*#!/", code, re.MULTILINE):
         return "bash"
@@ -186,7 +192,8 @@ def _analyze_python(code: str, analysis: Dict[str, Any]) -> None:
                         for b in node.bases
                     ],
                     "methods": [
-                        n.name for n in node.body
+                        n.name
+                        for n in node.body
                         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
                     ],
                     "docstring": ast.get_docstring(node) or "",
@@ -327,6 +334,7 @@ def _format_python(code: str) -> str:
             return result.stdout
 
         import ast
+
         try:
             tree = ast.parse(code)
             if tree:
@@ -335,9 +343,7 @@ def _format_python(code: str) -> str:
         except SyntaxError:
             pass
 
-        raise ValueError(
-            "Could not format Python code. Install black or autopep8."
-        )
+        raise ValueError("Could not format Python code. Install black or autopep8.")
 
     except FileNotFoundError:
         return _basic_format(code)
@@ -426,11 +432,15 @@ def explain_code(code: str, language: str = "") -> str:
 
     if analysis["classes"]:
         class_names = [c["name"] for c in analysis["classes"]]
-        parts.append(f"It defines {len(analysis['classes'])} class(es): {', '.join(class_names)}.")
+        parts.append(
+            f"It defines {len(analysis['classes'])} class(es): {', '.join(class_names)}."
+        )
 
     if analysis["functions"]:
         func_names = [f["name"] for f in analysis["functions"]]
-        parts.append(f"It contains {len(analysis['functions'])} function(s): {', '.join(func_names)}.")
+        parts.append(
+            f"It contains {len(analysis['functions'])} function(s): {', '.join(func_names)}."
+        )
 
     if analysis["imports"]:
         imp = analysis["imports"][:10]
@@ -472,9 +482,27 @@ def register_code_tools(registry: ToolRegistry) -> None:
                 "Pass EITHER 'path' (to analyze a file directly, preferred) OR 'code' (inline source text) — not both."
             ),
             parameters=[
-                ToolParameter(name="code", type="string", description="Inline source code to analyze. Omit if using 'path'.", required=False, default=""),
-                ToolParameter(name="path", type="string", description="Path to a file to read and analyze. Omit if using 'code'.", required=False, default=""),
-                ToolParameter(name="language", type="string", description="Programming language (auto-detected if empty).", required=False, default=""),
+                ToolParameter(
+                    name="code",
+                    type="string",
+                    description="Inline source code to analyze. Omit if using 'path'.",
+                    required=False,
+                    default="",
+                ),
+                ToolParameter(
+                    name="path",
+                    type="string",
+                    description="Path to a file to read and analyze. Omit if using 'code'.",
+                    required=False,
+                    default="",
+                ),
+                ToolParameter(
+                    name="language",
+                    type="string",
+                    description="Programming language (auto-detected if empty).",
+                    required=False,
+                    default="",
+                ),
             ],
             handler=analyze_code,
             handler_sync=True,
@@ -486,8 +514,16 @@ def register_code_tools(registry: ToolRegistry) -> None:
             name="code_format",
             description="Format source code using black/autopep8 (Python) or prettier (JS/TS/others).",
             parameters=[
-                ToolParameter(name="code", type="string", description="Source code to format."),
-                ToolParameter(name="language", type="string", description="Programming language.", required=False, default=""),
+                ToolParameter(
+                    name="code", type="string", description="Source code to format."
+                ),
+                ToolParameter(
+                    name="language",
+                    type="string",
+                    description="Programming language.",
+                    required=False,
+                    default="",
+                ),
             ],
             handler=format_code,
             handler_sync=True,
@@ -499,8 +535,16 @@ def register_code_tools(registry: ToolRegistry) -> None:
             name="code_explain",
             description="Generate a plain-language explanation of what source code does.",
             parameters=[
-                ToolParameter(name="code", type="string", description="Source code to explain."),
-                ToolParameter(name="language", type="string", description="Programming language.", required=False, default=""),
+                ToolParameter(
+                    name="code", type="string", description="Source code to explain."
+                ),
+                ToolParameter(
+                    name="language",
+                    type="string",
+                    description="Programming language.",
+                    required=False,
+                    default="",
+                ),
             ],
             handler=explain_code,
             handler_sync=True,

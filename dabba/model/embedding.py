@@ -44,10 +44,8 @@ class TokenEmbedding(nn.Module):
         self.hidden_size = hidden_size
         self.padding_idx = padding_idx
 
-        self.weight = nn.Parameter(
-            torch.empty(vocab_size, hidden_size)
-        )
-        nn.init.normal_(self.weight, mean=0.0, std=hidden_size ** -0.5)
+        self.weight = nn.Parameter(torch.empty(vocab_size, hidden_size))
+        nn.init.normal_(self.weight, mean=0.0, std=hidden_size**-0.5)
 
         if padding_idx is not None:
             self.weight.data[padding_idx].zero_()
@@ -128,10 +126,12 @@ class RotaryEmbedding(nn.Module):
         freqs = torch.outer(t, self.inv_freq)
         emb = torch.cat((freqs, freqs), dim=-1)
 
-        self.register_buffer("cos_cached", emb.cos().unsqueeze(0).unsqueeze(0),
-                             persistent=False)
-        self.register_buffer("sin_cached", emb.sin().unsqueeze(0).unsqueeze(0),
-                             persistent=False)
+        self.register_buffer(
+            "cos_cached", emb.cos().unsqueeze(0).unsqueeze(0), persistent=False
+        )
+        self.register_buffer(
+            "sin_cached", emb.sin().unsqueeze(0).unsqueeze(0), persistent=False
+        )
 
     def forward(
         self,
@@ -209,6 +209,6 @@ def rotate_half(x: torch.Tensor) -> torch.Tensor:
     Returns:
         Rotated tensor.
     """
-    x1 = x[..., :x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2:]
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)

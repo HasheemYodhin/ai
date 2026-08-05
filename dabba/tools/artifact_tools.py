@@ -72,7 +72,11 @@ def _parse_markdown(markdown_text: str) -> List[_Block]:
         if heading:
             flush_paragraph()
             blocks.append(
-                _Block(kind="heading", text=heading.group(2).strip(), level=len(heading.group(1)))
+                _Block(
+                    kind="heading",
+                    text=heading.group(2).strip(),
+                    level=len(heading.group(1)),
+                )
             )
             i += 1
             continue
@@ -98,7 +102,9 @@ def _parse_markdown(markdown_text: str) -> List[_Block]:
     return blocks
 
 
-def markdown_to_pdf(path: str, markdown_text: str, title: str = "") -> Dict[str, object]:
+def markdown_to_pdf(
+    path: str, markdown_text: str, title: str = ""
+) -> Dict[str, object]:
     """
     Render markdown text to a real PDF file using reportlab.
 
@@ -132,7 +138,9 @@ def markdown_to_pdf(path: str, markdown_text: str, title: str = "") -> Dict[str,
     file_path.parent.mkdir(parents=True, exist_ok=True)
 
     styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(str(file_path), pagesize=LETTER, title=title or file_path.stem)
+    doc = SimpleDocTemplate(
+        str(file_path), pagesize=LETTER, title=title or file_path.stem
+    )
     story = []
 
     if title:
@@ -146,7 +154,9 @@ def markdown_to_pdf(path: str, markdown_text: str, title: str = "") -> Dict[str,
     def flush_list() -> None:
         nonlocal list_buf, list_ordered
         if list_buf:
-            story.append(ListFlowable(list_buf, bulletType="1" if list_ordered else "bullet"))
+            story.append(
+                ListFlowable(list_buf, bulletType="1" if list_ordered else "bullet")
+            )
             story.append(Spacer(1, 0.1 * inch))
             list_buf = []
 
@@ -157,7 +167,11 @@ def markdown_to_pdf(path: str, markdown_text: str, title: str = "") -> Dict[str,
             continue
         flush_list()
         if block.kind == "heading":
-            story.append(Paragraph(block.text, styles[heading_styles.get(block.level, "Heading4")]))
+            story.append(
+                Paragraph(
+                    block.text, styles[heading_styles.get(block.level, "Heading4")]
+                )
+            )
         elif block.kind == "code":
             story.append(Preformatted(block.text, styles["Code"]))
         else:
@@ -178,7 +192,9 @@ def markdown_to_pdf(path: str, markdown_text: str, title: str = "") -> Dict[str,
     return {"status": "success", "path": str(file_path), "size": size, "exists": True}
 
 
-def markdown_to_docx(path: str, markdown_text: str, title: str = "") -> Dict[str, object]:
+def markdown_to_docx(
+    path: str, markdown_text: str, title: str = ""
+) -> Dict[str, object]:
     """
     Render markdown text to a real Word (.docx) file using python-docx.
 
@@ -214,14 +230,18 @@ def markdown_to_docx(path: str, markdown_text: str, title: str = "") -> Dict[str
             for run in paragraph.runs:
                 run.font.name = "Courier New"
         elif block.kind == "list":
-            document.add_paragraph(block.text, style="List Number" if block.ordered else "List Bullet")
+            document.add_paragraph(
+                block.text, style="List Number" if block.ordered else "List Bullet"
+            )
         else:
             document.add_paragraph(block.text)
 
     document.save(str(file_path))
 
     if not file_path.exists() or file_path.stat().st_size == 0:
-        raise OSError(f"DOCX render reported no error but produced no file: {file_path}")
+        raise OSError(
+            f"DOCX render reported no error but produced no file: {file_path}"
+        )
 
     size = file_path.stat().st_size
     logger.info("Wrote DOCX '%s' (%d bytes)", file_path, size)
@@ -244,13 +264,22 @@ def register_artifact_tools(registry: ToolRegistry) -> None:
                 "cannot produce an actual PDF."
             ),
             parameters=[
-                ToolParameter(name="path", type="string", description="Output path for the .pdf file."),
                 ToolParameter(
-                    name="markdown_text", type="string", description="Markdown-formatted document content."
+                    name="path",
+                    type="string",
+                    description="Output path for the .pdf file.",
                 ),
                 ToolParameter(
-                    name="title", type="string", description="Optional document title.",
-                    required=False, default="",
+                    name="markdown_text",
+                    type="string",
+                    description="Markdown-formatted document content.",
+                ),
+                ToolParameter(
+                    name="title",
+                    type="string",
+                    description="Optional document title.",
+                    required=False,
+                    default="",
                 ),
             ],
             handler=markdown_to_pdf,
@@ -267,13 +296,22 @@ def register_artifact_tools(registry: ToolRegistry) -> None:
                 "cannot produce an actual Word document."
             ),
             parameters=[
-                ToolParameter(name="path", type="string", description="Output path for the .docx file."),
                 ToolParameter(
-                    name="markdown_text", type="string", description="Markdown-formatted document content."
+                    name="path",
+                    type="string",
+                    description="Output path for the .docx file.",
                 ),
                 ToolParameter(
-                    name="title", type="string", description="Optional document title.",
-                    required=False, default="",
+                    name="markdown_text",
+                    type="string",
+                    description="Markdown-formatted document content.",
+                ),
+                ToolParameter(
+                    name="title",
+                    type="string",
+                    description="Optional document title.",
+                    required=False,
+                    default="",
                 ),
             ],
             handler=markdown_to_docx,

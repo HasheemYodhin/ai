@@ -15,12 +15,11 @@ correct next token given the preceding tokens.
 
 import math
 import time
-from collections import defaultdict
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
 
 from dabba.model.transformer import Transformer
 from dabba.data.streaming_dataset import StreamingDataset
@@ -123,7 +122,11 @@ class PerplexityEvaluator:
             total_sequences += input_ids.size(0)
 
             if verbose and (batch_idx + 1) % 10 == 0:
-                current_ppl = math.exp(total_loss / total_tokens) if total_tokens > 0 else float("inf")
+                current_ppl = (
+                    math.exp(total_loss / total_tokens)
+                    if total_tokens > 0
+                    else float("inf")
+                )
                 print(
                     f"  Batch {batch_idx + 1}: avg loss = {total_loss / total_tokens:.4f}, "
                     f"perplexity = {current_ppl:.2f}"
@@ -167,7 +170,9 @@ class PerplexityEvaluator:
 
         for doc_idx, doc in enumerate(documents):
             if verbose and (doc_idx + 1) % 10 == 0:
-                print(f"  Document {doc_idx + 1}/{len(documents)} (tokens: {doc.size(0)})")
+                print(
+                    f"  Document {doc_idx + 1}/{len(documents)} (tokens: {doc.size(0)})"
+                )
 
             doc = doc.to(self.device)
             doc_len = doc.size(0)
@@ -186,12 +191,14 @@ class PerplexityEvaluator:
             avg_loss = loss / tokens if tokens > 0 else float("inf")
             ppl = math.exp(avg_loss) if avg_loss < 100 else float("inf")
 
-            results.append({
-                "perplexity": ppl,
-                "loss": avg_loss,
-                "num_tokens": tokens,
-                "num_windows": num_windows,
-            })
+            results.append(
+                {
+                    "perplexity": ppl,
+                    "loss": avg_loss,
+                    "num_tokens": tokens,
+                    "num_windows": num_windows,
+                }
+            )
 
         return results
 

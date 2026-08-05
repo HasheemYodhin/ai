@@ -1,20 +1,30 @@
 import { useState, useRef, useCallback, type ChangeEvent, type DragEvent } from 'react'
 import type { UploadedFile } from '@/types'
 import { cn } from '@/lib/utils'
-import { Upload, File as FileIcon, Image, X, FileText, AlertCircle } from 'lucide-react'
+import { Upload, Image, X, FileText, AlertCircle } from 'lucide-react'
 
 const ACCEPTED_TYPES = {
   'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'],
   'text/*': ['.txt', '.md', '.json', '.csv', '.yaml', '.yml', '.xml'],
   'application/pdf': ['.pdf'],
   'application/json': ['.json'],
+  'application/zip': ['.zip'],
+  'application/x-zip-compressed': ['.zip'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
   'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
+const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024
+const MAX_DOCUMENT_FILE_SIZE = 100 * 1024 * 1024
+const MAX_ZIP_FILE_SIZE = 10 * 1024 * 1024 * 1024
 const MAX_FILES = 5
+
+function isZipFile(file: File): boolean {
+  return file.type === 'application/zip'
+    || file.type === 'application/x-zip-compressed'
+    || file.name.toLowerCase().endsWith('.zip')
+}
 
 interface FileUploadProps {
   files: UploadedFile[]
@@ -35,8 +45,18 @@ export function FileUpload({ files, onFilesChange, disabled = false }: FileUploa
     const toProcess = Array.from(fileList).slice(0, remaining)
 
     for (const file of toProcess) {
-      if (file.size > MAX_FILE_SIZE) {
-        setError(`"${file.name}" exceeds the 10 MB limit`)
+      const limit = isZipFile(file)
+        ? MAX_ZIP_FILE_SIZE
+        : file.type.startsWith('image/')
+          ? MAX_IMAGE_FILE_SIZE
+          : MAX_DOCUMENT_FILE_SIZE
+      if (file.size > limit) {
+        const label = isZipFile(file)
+          ? '10 GB ZIP'
+          : file.type.startsWith('image/')
+            ? '10 MB image'
+            : '100 MB document'
+        setError(`"${file.name}" exceeds the ${label} limit`)
         continue
       }
 
@@ -46,6 +66,7 @@ export function FileUpload({ files, onFilesChange, disabled = false }: FileUploa
         name: file.name,
         size: file.size,
         type: file.type,
+        file,
       }
 
       if (file.type.startsWith('image/')) {
@@ -119,7 +140,7 @@ export function FileUpload({ files, onFilesChange, disabled = false }: FileUploa
           Drag & drop files here, or click to browse
         </p>
         <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary mt-1">
-          Images, Word, Excel, PowerPoint, PDF, and text (max 10 MB each, up to 5 files)
+          ZIP up to 10 GB; documents up to 100 MB (up to 5 files)
         </p>
         <input
           ref={inputRef}

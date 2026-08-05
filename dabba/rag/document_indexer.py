@@ -7,13 +7,10 @@ generating embeddings, and storing the results in a vector database.
 
 import hashlib
 import os
-import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import numpy as np
-import numpy.typing as npt
 
 from dabba.config.rag_config import RagConfig
 from dabba.data.chunker import TextChunker
@@ -72,9 +69,7 @@ class DocumentIndexer:
             max_file_size_mb=self.config.max_file_size_mb,
         )
 
-    def _generate_doc_id(
-        self, source: str, chunk_index: int, text: str
-    ) -> str:
+    def _generate_doc_id(self, source: str, chunk_index: int, text: str) -> str:
         """Generate a deterministic document ID from source, index, and text."""
         raw = f"{source}:{chunk_index}:{text[:100]}"
         return hashlib.sha256(raw.encode()).hexdigest()[:32]
@@ -127,9 +122,7 @@ class DocumentIndexer:
         for i, chunk_text in enumerate(chunks):
             doc_id = self._generate_doc_id(source, i, chunk_text)
             doc_meta = self._build_metadata(source, i, total, extra=metadata)
-            documents.append(
-                Document(id=doc_id, text=chunk_text, metadata=doc_meta)
-            )
+            documents.append(Document(id=doc_id, text=chunk_text, metadata=doc_meta))
 
         return self._embed_and_store(documents, batch_size=batch_size)
 
@@ -215,9 +208,7 @@ class DocumentIndexer:
                     batch_size=batch_size,
                 )
                 results[str(file_path)] = doc_ids
-                logger.info(
-                    "Indexed %s → %d chunks", file_path.name, len(doc_ids)
-                )
+                logger.info("Indexed %s → %d chunks", file_path.name, len(doc_ids))
             except Exception as exc:
                 logger.error("Failed to index %s: %s", file_path, exc)
                 results[str(file_path)] = []
@@ -251,12 +242,8 @@ class DocumentIndexer:
         for i, chunk_text in enumerate(texts):
             doc_id = self._generate_doc_id(source_prefix, i, chunk_text)
             extra = metadatas[i] if metadatas and i < len(metadatas) else None
-            doc_meta = self._build_metadata(
-                source_prefix, i, total, extra=extra
-            )
-            documents.append(
-                Document(id=doc_id, text=chunk_text, metadata=doc_meta)
-            )
+            doc_meta = self._build_metadata(source_prefix, i, total, extra=extra)
+            documents.append(Document(id=doc_id, text=chunk_text, metadata=doc_meta))
 
         return self._embed_and_store(documents, batch_size=batch_size)
 

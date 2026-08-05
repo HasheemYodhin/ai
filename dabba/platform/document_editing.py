@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Dict
 
@@ -136,9 +135,7 @@ def edit_pdf(source: Path, destination: Path, replacements: Dict[str, str]) -> i
     return count
 
 
-def edit_document(
-    source: Path, destination: Path, replacements: Dict[str, str]
-) -> int:
+def edit_document(source: Path, destination: Path, replacements: Dict[str, str]) -> int:
     suffix = source.suffix.lower()
     destination.parent.mkdir(parents=True, exist_ok=True)
     if suffix == ".docx":
@@ -153,7 +150,9 @@ def edit_document(
         raise ValueError(f"Format-preserving edits are not supported for {suffix}")
     if count == 0:
         destination.unlink(missing_ok=True)
-        raise ValueError("None of the requested text was found; the original was not changed")
+        raise ValueError(
+            "None of the requested text was found; the original was not changed"
+        )
     if not destination.exists() or destination.stat().st_size == 0:
         destination.unlink(missing_ok=True)
         raise OSError("Document editor did not produce a valid output file")

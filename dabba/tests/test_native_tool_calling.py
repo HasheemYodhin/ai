@@ -12,6 +12,7 @@ Regression tests for two bugs found in a user-reported Dabba transcript:
 See dabba/providers/base.py's native-function-calling-adapter docstring and
 dabba/agent/agent_loop.py's _workspace_info()/_tool_dicts() for the fix.
 """
+
 import json
 from unittest.mock import MagicMock, patch
 
@@ -58,10 +59,14 @@ class TestWorkspaceGrounding:
             return "ok, no tool needed"
 
         config = AgentConfig(workspace_root="/repo/train", use_planning=False)
-        loop = AgentLoop(registry=ToolRegistry(), config=config, llm_generate=fake_llm_generate)
+        loop = AgentLoop(
+            registry=ToolRegistry(), config=config, llm_generate=fake_llm_generate
+        )
         loop.run("create a file in the train directory")
 
-        system_msg = next(m["content"] for m in captured["messages"] if m["role"] == "system")
+        system_msg = next(
+            m["content"] for m in captured["messages"] if m["role"] == "system"
+        )
         assert "/repo/train" in system_msg
         assert captured["tools"] is not None  # tools= was passed to llm_generate
 
@@ -73,10 +78,14 @@ class TestWorkspaceGrounding:
             return "ok"
 
         config = AgentConfig(workspace_root=None, use_planning=False)
-        loop = AgentLoop(registry=ToolRegistry(), config=config, llm_generate=fake_llm_generate)
+        loop = AgentLoop(
+            registry=ToolRegistry(), config=config, llm_generate=fake_llm_generate
+        )
         loop.run("hello")
 
-        system_msg = next(m["content"] for m in captured["messages"] if m["role"] == "system")
+        system_msg = next(
+            m["content"] for m in captured["messages"] if m["role"] == "system"
+        )
         assert "working directory" not in system_msg
 
 
@@ -101,9 +110,9 @@ class TestRoleRemap:
 class TestMalformedTextToolCalls:
     def test_repairs_duplicate_arguments_brace(self):
         response = (
-            '<tool_call>\n'
+            "<tool_call>\n"
             '{"name":"file_read", {"arguments":{"path":"backend/app/main.py"}}\n'
-            '</tool_call>'
+            "</tool_call>"
         )
 
         calls = McpHandler().parse_tool_calls(response)
@@ -114,9 +123,9 @@ class TestMalformedTextToolCalls:
 
     def test_recovers_multiple_calls_without_closing_tags(self):
         response = (
-            'Working now.\n<tool_call>\n'
+            "Working now.\n<tool_call>\n"
             '{"name":"file_write","arguments":{"path":"a.py","content":"a"}}\n'
-            '<tool_call>\n'
+            "<tool_call>\n"
             '{"name":"file_write","arguments":{"path":"b.py","content":"b"}}'
         )
 
@@ -138,9 +147,13 @@ class TestOpenAINativeToolCalling:
         fake_tool_call = MagicMock()
         fake_tool_call.id = "call_1"
         fake_tool_call.function.name = "file_write"
-        fake_tool_call.function.arguments = json.dumps({"path": "/repo/train/x.yml", "content": "a: b"})
+        fake_tool_call.function.arguments = json.dumps(
+            {"path": "/repo/train/x.yml", "content": "a: b"}
+        )
 
-        fake_message = MagicMock(content="Creating it now.", tool_calls=[fake_tool_call])
+        fake_message = MagicMock(
+            content="Creating it now.", tool_calls=[fake_tool_call]
+        )
         fake_resp = MagicMock(choices=[MagicMock(message=fake_message)])
         client = MagicMock()
         client.chat.completions.create.return_value = fake_resp
@@ -153,7 +166,13 @@ class TestOpenAINativeToolCalling:
                 messages=[{"role": "user", "content": "make a file"}],
                 model="gpt-4o",
                 api_key="fake",
-                tools=[{"name": "file_write", "description": "writes a file", "parameters": {"type": "object", "properties": {}}}],
+                tools=[
+                    {
+                        "name": "file_write",
+                        "description": "writes a file",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+                ],
             )
 
         assert "<tool_call>" in result
@@ -183,7 +202,9 @@ class TestOpenAINativeToolCalling:
         client.chat.completions.create.return_value = fake_resp
         with patch("openai.OpenAI", return_value=client):
             result = OpenAIProvider().chat(
-                messages=[{"role": "user", "content": "hi"}], model="gpt-4o", api_key="fake",
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4o",
+                api_key="fake",
             )
         assert result == "plain text reply"
         _, kwargs = client.chat.completions.create.call_args
@@ -222,7 +243,13 @@ class TestAnthropicNativeToolCalling:
                 messages=[{"role": "user", "content": "make a file"}],
                 model="claude-sonnet-5",
                 api_key="fake",
-                tools=[{"name": "file_write", "description": "d", "parameters": {"type": "object", "properties": {}}}],
+                tools=[
+                    {
+                        "name": "file_write",
+                        "description": "d",
+                        "parameters": {"type": "object", "properties": {}},
+                    }
+                ],
             )
 
         assert "<tool_call>" in result
@@ -253,4 +280,7 @@ class TestAnthropicNativeToolCalling:
         # An empty {} parameters dict is falsy, so tools_to_anthropic_schema's
         # `or {...default...}` fallback kicks in — this is intentional (an
         # empty JSON Schema object would confuse the API), not a bug.
-        assert kwargs["tools"][0]["input_schema"] == {"type": "object", "properties": {}}
+        assert kwargs["tools"][0]["input_schema"] == {
+            "type": "object",
+            "properties": {},
+        }

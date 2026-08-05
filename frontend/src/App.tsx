@@ -142,7 +142,7 @@ function ChatApp() {
     sendMessage(content, images, { conversationId, systemPromptOverride, viaVoice: opts?.viaVoice, documents: opts?.documents, attachments: opts?.attachments })
   }, [ensureConversation, sendMessage, currentProject])
 
-  const handleRunAgentMode = useCallback((content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => {
+  const handleRunAgentMode = useCallback((content: string, opts: { label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean; planMode?: boolean }) => {
     const conversationId = ensureConversation()
     if (!conversationId) return
     runAgentMode(content, { ...opts, conversationId })

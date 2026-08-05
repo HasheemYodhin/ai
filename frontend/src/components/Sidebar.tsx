@@ -4,7 +4,7 @@ import { ConversationList } from './ConversationList'
 import { ProjectModal } from './ProjectModal'
 import { cn } from '@/lib/utils'
 import {
-  Plus, PanelLeftClose, Settings, Sparkles, Search, Ghost, LogOut, MoreHorizontal,
+  Plus, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
   MessageSquare, Folder, Bot, Wrench, Plug, BookOpen, Telescope, FolderPlus,
   ChevronDown, X, Pin, BriefcaseBusiness, CalendarClock, ListChecks, Webhook,
 } from 'lucide-react'

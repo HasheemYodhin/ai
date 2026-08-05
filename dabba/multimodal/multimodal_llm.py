@@ -16,7 +16,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from dabba.config.multimodal_config import MultimodalConfig
 from dabba.config.model_config import ModelConfig
@@ -35,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image
+
     HAS_PIL = True
 except ImportError:
     Image = None
@@ -99,7 +99,9 @@ class MultimodalLLM(nn.Module):
         )
 
         proj_input_dim = mm_config.projection_input_dim or mm_config.vision_hidden_size
-        proj_output_dim = mm_config.projection_output_dim or mm_config.vision_projection_dim
+        proj_output_dim = (
+            mm_config.projection_output_dim or mm_config.vision_projection_dim
+        )
 
         self.projector = MultimodalProjection(
             input_dim=proj_input_dim,
@@ -194,7 +196,9 @@ class MultimodalLLM(nn.Module):
         input_ids: torch.LongTensor,
         vision_embeddings: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.LongTensor, torch.Tensor, Optional[torch.Tensor], torch.LongTensor]:
+    ) -> Tuple[
+        torch.LongTensor, torch.Tensor, Optional[torch.Tensor], torch.LongTensor
+    ]:
         """
         Prepare inputs for the LLM by prepending vision tokens to text tokens.
 
@@ -217,7 +221,6 @@ class MultimodalLLM(nn.Module):
         num_vision_tokens = vision_embeddings.shape[1]
         combined_length = text_length + num_vision_tokens
         device = input_ids.device
-        hidden_size = self.model_config.hidden_size
 
         text_embeds = self.llm.embed_tokens(input_ids)
 
@@ -231,14 +234,22 @@ class MultimodalLLM(nn.Module):
         )
         extended_ids[:, num_vision_tokens:] = input_ids
 
-        position_ids = torch.arange(
-            combined_length, dtype=torch.long, device=device,
-        ).unsqueeze(0).expand(batch_size, -1)
+        position_ids = (
+            torch.arange(
+                combined_length,
+                dtype=torch.long,
+                device=device,
+            )
+            .unsqueeze(0)
+            .expand(batch_size, -1)
+        )
 
         if attention_mask is not None:
             vision_mask = torch.ones(
-                batch_size, num_vision_tokens,
-                dtype=attention_mask.dtype, device=device,
+                batch_size,
+                num_vision_tokens,
+                dtype=attention_mask.dtype,
+                device=device,
             )
             extended_mask = torch.cat([vision_mask, attention_mask], dim=1)
         else:
@@ -287,10 +298,12 @@ class MultimodalLLM(nn.Module):
             if past_key_values is not None:
                 inputs_embeds = None
             else:
-                ext_ids, combined_embeds, ext_mask, pos_ids = self._prepare_multimodal_inputs(
-                    input_ids=input_ids,
-                    vision_embeddings=vision_embeds,
-                    attention_mask=attention_mask,
+                ext_ids, combined_embeds, ext_mask, pos_ids = (
+                    self._prepare_multimodal_inputs(
+                        input_ids=input_ids,
+                        vision_embeddings=vision_embeds,
+                        attention_mask=attention_mask,
+                    )
                 )
                 input_ids = ext_ids
                 inputs_embeds = combined_embeds
@@ -372,15 +385,16 @@ class MultimodalLLM(nn.Module):
             )
 
         batch_size, seq_length = input_ids.shape
-        device = input_ids.device
 
         vision_embeds = self.process_images(images)
-        num_vision_tokens = vision_embeds.shape[1]
+        vision_embeds.shape[1]
 
-        ext_ids, combined_embeds, ext_mask, position_ids = self._prepare_multimodal_inputs(
-            input_ids=input_ids,
-            vision_embeddings=vision_embeds,
-            attention_mask=attention_mask,
+        ext_ids, combined_embeds, ext_mask, position_ids = (
+            self._prepare_multimodal_inputs(
+                input_ids=input_ids,
+                vision_embeddings=vision_embeds,
+                attention_mask=attention_mask,
+            )
         )
 
         sampler = self._build_sampler(temperature, top_k, top_p, do_sample)
@@ -479,15 +493,14 @@ class MultimodalLLM(nn.Module):
             Memory footprint in bytes.
         """
         mem = 0
-        for module in (self.llm, self.vision_encoder, self.projector, self.image_processor):
-            mem += sum(
-                p.numel() * p.element_size()
-                for p in module.parameters()
-            )
-            mem += sum(
-                b.numel() * b.element_size()
-                for b in module.buffers()
-            )
+        for module in (
+            self.llm,
+            self.vision_encoder,
+            self.projector,
+            self.image_processor,
+        ):
+            mem += sum(p.numel() * p.element_size() for p in module.parameters())
+            mem += sum(b.numel() * b.element_size() for b in module.buffers())
         return mem
 
     def __repr__(self) -> str:

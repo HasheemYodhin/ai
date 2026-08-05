@@ -1,25 +1,70 @@
 name: Dabba Platform CI
 
+# Full build -> test -> quality -> security -> image pipeline for the Dabba
+# application (Python backend in dabba/, React frontend in frontend/,
+# packaged by the root Dockerfile). Runs unprivileged (`pull_request`, not
+# `_target`) so it is safe to run against fork PRs — those simply lack the
+# DOCKERHUB_*/SONAR_* secrets and the docker-push/sonarqube steps degrade to
+# documented no-ops instead of failing opaquely.
 "on":
   workflow_dispatch:
   push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  group: platform-${{ github.ref }}
+  group: platform-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.10"
+  NODE_VERSION: "22"
+
 jobs:
-  backend:
+  # ---------------------------------------------------------------------
+  # validate: formatting/lint gates. Fast-fail before spending time on the
+  # heavier build/test/docker jobs below.
+  # ---------------------------------------------------------------------
+  format-check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - run: pip install -r requirements-server.txt pytest
+      - run: pip install --quiet ruff==0.15.22
+      - name: ruff format --check (backend formatting)
+        run: ruff format --check --diff dabba
+      - name: ruff check (backend lint)
+        # Keep the lint contract explicit: Ruff's zero-config defaults can
+        # expand between releases and unexpectedly turn on migration/style
+        # rules across the entire existing codebase.
+        run: ruff check --select E4,E7,E9,F dabba
+
+  # ---------------------------------------------------------------------
+  # build-and-test: compiles/builds and runs the unit-test suites for each
+  # component. Kept as separate jobs (as before) so a slow/heavy suite
+  # (model) never blocks the fast everyday backend/frontend suites, and so
+  # failures are attributable to a single component.
+  # ---------------------------------------------------------------------
+  backend:
+    if: success() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    needs: [format-check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -r requirements-server.txt pytest pytest-asyncio pytest-cov
       - name: Compile backend
         run: python -m compileall -q dabba
       - name: Full server/agent/platform test suite
@@ -39,14 +84,27 @@ jobs:
           --ignore=dabba/tests/test_trainer.py
           --ignore=dabba/tests/test_multimodal.py
           --ignore=dabba/tests/test_data.py
+          --junitxml=backend-test-results.xml
+          --cov=dabba --cov-report=xml:backend-coverage.xml --cov-report=term
+      - name: Upload backend test/coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: |
+            backend-test-results.xml
+            backend-coverage.xml
+          retention-days: 14
 
   model:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
       - run: pip install -r requirements.txt pytest
       - name: Model/training/RAG test suite (torch-based)
@@ -60,37 +118,344 @@ jobs:
           dabba/tests/test_trainer.py
           dabba/tests/test_multimodal.py
           dabba/tests/test_data.py
-          -q
+          -q --junitxml=model-test-results.xml
+      - name: Upload model test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-test-reports
+          path: model-test-results.xml
+          retention-days: 14
 
   frontend:
+    if: success() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    needs: [format-check]
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
       - run: npm audit --audit-level=high
-      - run: npm test
+      - name: Unit tests
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=frontend-test-results.xml
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e -- --project=chromium
+      - name: Upload frontend test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-test-reports
+          path: frontend/frontend-test-results.xml
+          retention-days: 14
 
-  docker:
-    runs-on: ubuntu-latest
+  # ---------------------------------------------------------------------
+  # sonarqube: static analysis + quality gate. Degrades to a documented
+  # skip (not a failure) when SONAR_TOKEN isn't configured, so this stays
+  # safe for fork PRs where the secret is withheld by GitHub.
+  # ---------------------------------------------------------------------
+  sonarqube:
+    # Custom `if` conditions replace the implicit "all `needs` succeeded"
+    # gate, so success() must be spelled out explicitly here and on every
+    # other job below that combines `needs` with a custom `if`.
+    if: success() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     needs: [backend, frontend]
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history required for accurate SonarQube blame/analysis
+      - name: Check SonarQube configuration
+        id: sonar-check
+        run: |
+          if [ -n "${{ secrets.SONAR_TOKEN }}" ] && [ -n "${{ vars.SONAR_HOST_URL }}${{ secrets.SONAR_HOST_URL }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SonarQube is not configured (SONAR_TOKEN/SONAR_HOST_URL missing) — skipping analysis. See docs/ci-cd-pipeline.md."
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.sonar-check.outputs.configured == 'true'
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Regenerate backend coverage for Sonar
+        if: steps.sonar-check.outputs.configured == 'true'
+        run: |
+          pip install -r requirements-server.txt pytest pytest-asyncio pytest-cov
+          python -m pytest dabba/tests/ -q \
+            --ignore=dabba/tests/test_inference.py --ignore=dabba/tests/test_rag.py \
+            --ignore=dabba/tests/test_attention.py --ignore=dabba/tests/test_model.py \
+            --ignore=dabba/tests/test_tokenizer.py --ignore=dabba/tests/test_trainer.py \
+            --ignore=dabba/tests/test_multimodal.py --ignore=dabba/tests/test_data.py \
+            --cov=dabba --cov-report=xml:coverage.xml
+      - name: SonarQube Scan
+        if: steps.sonar-check.outputs.configured == 'true'
+        uses: sonarsource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL || secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY || 'dabba' }}
+            -Dsonar.python.coverage.reportPaths=coverage.xml
+      - name: SonarQube Quality Gate
+        if: steps.sonar-check.outputs.configured == 'true'
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ---------------------------------------------------------------------
+  # security: secret scanning, dependency scanning, IaC/config scanning.
+  # Source-code scanning (CodeQL) lives in its own workflow (codeql.yml)
+  # since it needs its own build-mode/init/analyze steps.
+  # ---------------------------------------------------------------------
+  security:
+    if: success() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks)
+        # pr-validation.yml already runs gitleaks for pull_request events;
+        # this covers the push-to-main path that workflow doesn't trigger on.
+        if: github.event_name != 'pull_request'
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_COMMENTS: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install --quiet pip-audit
+      - name: Dependency scan — runtime deps (blocking)
+        run: pip-audit -r requirements-server.txt
+      - name: Dependency scan — training/model deps (report only)
+        # requirements.txt's heavy training deps (torch, chromadb, ...) are
+        # never shipped in the runtime image (see Dockerfile), matching the
+        # existing convention where the `model` job isn't a docker-build
+        # dependency. Reported, not blocking, until that changes.
+        if: always()
+        run: pip-audit -r requirements.txt || echo "::warning::Vulnerabilities found in requirements.txt (training deps, not shipped in the runtime image) — see job log."
+      - name: Config scan (Trivy — Dockerfile, Helm chart)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          trivyignores: .trivyignore
+          skip-dirs: "node_modules,frontend/node_modules,vscode-extension/node_modules"
+
+  # ---------------------------------------------------------------------
+  # docker-build / docker-scan: build the runtime image once tests+security
+  # pass, then scan it before it's allowed to be pushed.
+  # ---------------------------------------------------------------------
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: [sonarqube, security]
+    outputs:
+      image_ref: ${{ steps.tags.outputs.image_ref }}
+      tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/build-push-action@v6
+      - name: Resolve Docker Hub image name
+        id: image
+        run: |
+          set -euo pipefail
+          REPO="${{ vars.DOCKERHUB_REPOSITORY }}"
+          USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -z "$REPO" ]; then
+            REPO="dabba"
+          fi
+          # If DOCKERHUB_REPOSITORY already contains a "/", treat it as the
+          # full "<user>/<repo>" path and don't prefix the username again.
+          if [[ "$REPO" == */* ]] || [ -z "$USER" ]; then
+            echo "name=$REPO" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=$USER/$REPO" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Docker metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          flavor: |
+            latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=sha,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+            type=ref,event=pr
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build image (not pushed yet — scanned first)
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
-          tags: dabba:ci
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - id: tags
+        run: echo "image_ref=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)" >> "$GITHUB_OUTPUT"
+      - name: Save image for the scan job
+        run: docker save '${{ steps.tags.outputs.image_ref }}' -o image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+          retention-days: 1
+
+  docker-scan:
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+      - run: docker load -i image.tar
+      - name: Scan image (Trivy)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          input: image.tar
+          format: table
+          scanners: "vuln,secret,misconfig"
+          severity: "CRITICAL,HIGH"
+          ignore-unfixed: true
+          exit-code: "1"
+          output: trivy-image-report.txt
+        # Covers OS + application-dependency vulnerabilities, misconfigurations,
+        # and exposed secrets baked into image layers. Fails on patchable
+        # CRITICAL/HIGH findings; distro findings without a fix do not block.
+      - name: Upload image scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-scan-report
+          path: trivy-image-report.txt
+          retention-days: 14
+
+  # ---------------------------------------------------------------------
+  # docker-push: only for direct pushes in the trusted upstream repository,
+  # and only once every gate above has passed. Pull requests never publish.
+  # ---------------------------------------------------------------------
+  docker-push:
+    runs-on: ubuntu-latest
+    needs: [docker-scan]
+    if: >
+      success() &&
+      github.event_name == 'push' &&
+      github.repository == 'HasheemYodhin/ai'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+      - name: Verify Docker Hub credentials are configured
+        run: |
+          if [ -z "${{ secrets.DOCKERHUB_USERNAME }}" ] || [ -z "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            echo "::error::DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN repository secrets are not set. Skipping push — see docs/ci-cd-pipeline.md for setup."
+            exit 1
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Resolve Docker Hub image name
+        id: image
+        run: |
+          set -euo pipefail
+          REPO="${{ vars.DOCKERHUB_REPOSITORY }}"
+          USER="${{ secrets.DOCKERHUB_USERNAME }}"
+          if [ -z "$REPO" ]; then REPO="dabba"; fi
+          if [[ "$REPO" == */* ]]; then
+            echo "name=$REPO" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=$USER/$REPO" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Docker metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------
+  # summary: single job-summary of the whole run, regardless of outcome.
+  # ---------------------------------------------------------------------
+  summary:
+    if: always()
+    runs-on: ubuntu-latest
+    needs:
+      [
+        format-check,
+        backend,
+        model,
+        frontend,
+        sonarqube,
+        security,
+        docker-build,
+        docker-scan,
+        docker-push,
+      ]
+    steps:
+      - name: Write job summary
+        run: |
+          {
+            echo "## Dabba Platform CI — Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| Commit SHA | \`${{ github.sha }}\` |"
+            echo "| Formatting/lint | ${{ needs['format-check'].result }} |"
+            echo "| Backend build+tests | ${{ needs.backend.result }} |"
+            echo "| Model/training tests | ${{ needs.model.result }} |"
+            echo "| Frontend build+tests | ${{ needs.frontend.result }} |"
+            echo "| SonarQube | ${{ needs.sonarqube.result }} |"
+            echo "| Security scans | ${{ needs.security.result }} |"
+            echo "| Docker build | ${{ needs['docker-build'].result }} |"
+            echo "| Docker image scan | ${{ needs['docker-scan'].result }} |"
+            echo "| Docker image tags | \`${{ needs['docker-build'].outputs.tags }}\` |"
+            echo "| Docker push | ${{ needs['docker-push'].result }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

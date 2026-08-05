@@ -6,8 +6,7 @@ OpenAI-compatible format.
 """
 
 import asyncio
-import json
-from typing import Any, AsyncGenerator, Dict, List, Optional, Callable
+from typing import AsyncGenerator, Dict, List, Optional, Callable
 
 from dabba.api.openai_compat import ChatCompletionChunk
 
@@ -51,34 +50,40 @@ class StreamingHandler:
             async for token in token_generator:
                 chunk = ChatCompletionChunk(
                     model=self.model_name,
-                    choices=[{
-                        "index": 0,
-                        "delta": {"role": "assistant", "content": token},
-                        "finish_reason": None,
-                    }],
+                    choices=[
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": token},
+                            "finish_reason": None,
+                        }
+                    ],
                 )
                 yield chunk.to_sse()
                 index += 1
 
             final_chunk = ChatCompletionChunk(
                 model=self.model_name,
-                choices=[{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop",
-                }],
+                choices=[
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
             )
             yield final_chunk.to_sse()
             yield ChatCompletionChunk.done()
 
-        except Exception as e:
+        except Exception:
             error_chunk = ChatCompletionChunk(
                 model=self.model_name,
-                choices=[{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "error",
-                }],
+                choices=[
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "error",
+                    }
+                ],
             )
             yield error_chunk.to_sse()
             yield ChatCompletionChunk.done()
@@ -101,13 +106,15 @@ class StreamingHandler:
         """
         result = generator(*args, **kwargs)
 
-        if hasattr(result, '__aiter__'):
+        if hasattr(result, "__aiter__"):
             async_gen = result
         else:
+
             async def to_async():
                 for token in result:
                     yield token
                     await asyncio.sleep(0)
+
             async_gen = to_async()
 
         async for token in async_gen:
@@ -138,11 +145,13 @@ class StreamingHandler:
         """
         chunk = ChatCompletionChunk(
             model=self.model_name,
-            choices=[{
-                "index": index,
-                "delta": {"content": token},
-                "finish_reason": finish_reason,
-            }],
+            choices=[
+                {
+                    "index": index,
+                    "delta": {"content": token},
+                    "finish_reason": finish_reason,
+                }
+            ],
             usage=usage,
         )
         return chunk.to_sse()

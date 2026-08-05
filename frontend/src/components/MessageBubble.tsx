@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { User, AlertCircle, Copy, Check, Pencil, RotateCcw, Globe, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
+import { User, AlertCircle, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
 import { RegenerateMenu } from './RegenerateMenu'
 import { DownloadMenu } from './DownloadMenu'

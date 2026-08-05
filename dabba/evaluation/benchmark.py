@@ -13,7 +13,6 @@ All measurements are performed with configurable warmup runs and
 multiple trials for statistical significance.
 """
 
-import csv
 import json
 import subprocess
 import threading
@@ -25,7 +24,6 @@ from typing import Dict, List, Optional, Tuple, Union
 import torch
 
 from dabba.model.transformer import Transformer
-from dabba.config.model_config import ModelConfig
 
 
 @dataclass
@@ -49,6 +47,7 @@ class BenchmarkResults:
         timing_breakdown: Dict of CPU vs GPU timing.
         config_snapshot: Model configuration snapshot.
     """
+
     throughput_tps: float = 0.0
     ttft_ms: float = 0.0
     tpot_ms: float = 0.0
@@ -62,7 +61,9 @@ class BenchmarkResults:
     num_trials: int = 5
     trial_times_ms: List[float] = field(default_factory=list)
     timing_breakdown: Dict[str, float] = field(default_factory=dict)
-    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(default_factory=dict)
+    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(
+        default_factory=dict
+    )
 
 
 class _GPUUtilMonitor:
@@ -105,7 +106,8 @@ class _GPUUtilMonitor:
             try:
                 result = subprocess.run(
                     [
-                        "nvidia-smi", "--query-gpu=utilization.gpu",
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu",
                         "--format=csv,noheader,nounits",
                     ],
                     capture_output=True,
@@ -186,7 +188,8 @@ class Benchmark:
         """
         self._reset_memory_stats()
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, input_length),
             device=self.device,
         )
@@ -207,8 +210,12 @@ class Benchmark:
         gpu_mon.start()
 
         for _ in range(num_trials):
-            start_event = torch.cuda.Event(enable_timing=True) if self._cuda_available else None
-            end_event = torch.cuda.Event(enable_timing=True) if self._cuda_available else None
+            start_event = (
+                torch.cuda.Event(enable_timing=True) if self._cuda_available else None
+            )
+            end_event = (
+                torch.cuda.Event(enable_timing=True) if self._cuda_available else None
+            )
 
             if self._cuda_available:
                 start_event.record()
@@ -285,7 +292,8 @@ class Benchmark:
         """
         self._reset_memory_stats()
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, input_length),
             device=self.device,
         )
@@ -367,7 +375,8 @@ class Benchmark:
         """
         self._reset_memory_stats()
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, input_length),
             device=self.device,
         )
@@ -448,7 +457,8 @@ class Benchmark:
         """
         self._reset_memory_stats()
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, input_length),
             device=self.device,
         )
@@ -544,7 +554,7 @@ class Benchmark:
         Returns:
             Tuple of (ttft_ms, tpot_ms, total_ms).
         """
-        batch_size = input_ids.size(0)
+        input_ids.size(0)
         past_kv = None
 
         # Prefill (timed separately)
@@ -610,7 +620,7 @@ class Benchmark:
         """
         if not self._cuda_available:
             return 0.0
-        return torch.cuda.max_memory_allocated(self._cuda_device) / (1024 ** 2)
+        return torch.cuda.max_memory_allocated(self._cuda_device) / (1024**2)
 
     def _get_current_memory(self) -> float:
         """
@@ -621,7 +631,7 @@ class Benchmark:
         """
         if not self._cuda_available:
             return 0.0
-        return torch.cuda.memory_allocated(self._cuda_device) / (1024 ** 2)
+        return torch.cuda.memory_allocated(self._cuda_device) / (1024**2)
 
     def _config_snapshot(self) -> Dict[str, Union[int, float, str, bool, None]]:
         """
@@ -684,9 +694,7 @@ class Benchmark:
             f"  Warmup runs:         {results.num_warmup}",
             f"  Trials:              {results.num_trials}",
             "",
-            "  Throughput:          {:.2f} tokens/sec".format(
-                results.throughput_tps
-            ),
+            "  Throughput:          {:.2f} tokens/sec".format(results.throughput_tps),
             "  TTFT:                {:.2f} ms".format(results.ttft_ms),
             "  TPOT:                {:.2f} ms".format(results.tpot_ms),
             "",
@@ -694,9 +702,8 @@ class Benchmark:
             "  Avg GPU memory:      {:.2f} MiB".format(results.avg_memory_mb),
             "  GPU utilization:     {:.1f}%".format(results.gpu_utilization_pct),
             "",
-            "  Trial times (ms):    " + ", ".join(
-                f"{t:.1f}" for t in results.trial_times_ms
-            ),
+            "  Trial times (ms):    "
+            + ", ".join(f"{t:.1f}" for t in results.trial_times_ms),
             "-" * 60,
         ]
         return "\n".join(lines)
@@ -716,6 +723,7 @@ class Benchmark:
         Returns:
             Formatted comparison string.
         """
+
         def pct(a, b):
             if a == 0:
                 return float("inf")

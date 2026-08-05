@@ -101,7 +101,9 @@ multiple <tool_call> blocks, or by passing a JSON array:
 After receiving results, continue your response naturally."""
     )
 
-    def build_system_prompt(self, tool_descriptions: str, workspace_info: str = "") -> str:
+    def build_system_prompt(
+        self, tool_descriptions: str, workspace_info: str = ""
+    ) -> str:
         """
         Build the system prompt with available tool descriptions.
 
@@ -167,11 +169,13 @@ After receiving results, continue your response naturally."""
         """
         tools_list = []
         for tool_def in registry.list_tools():
-            tools_list.append({
-                "name": tool_def.name,
-                "description": tool_def.description,
-                "parameters": tool_def.parameters_to_json_schema(),
-            })
+            tools_list.append(
+                {
+                    "name": tool_def.name,
+                    "description": tool_def.description,
+                    "parameters": tool_def.parameters_to_json_schema(),
+                }
+            )
 
         descriptions = cls.format_tool_descriptions(tools_list)
         handler = cls()
@@ -225,8 +229,12 @@ After receiving results, continue your response naturally."""
             json_start = marker.end()
             while json_start < len(text) and text[json_start].isspace():
                 json_start += 1
-            next_marker = re.search(r"<tool_call>|</tool_call>", text[json_start:], re.IGNORECASE)
-            payload_limit = json_start + next_marker.start() if next_marker else len(text)
+            next_marker = re.search(
+                r"<tool_call>|</tool_call>", text[json_start:], re.IGNORECASE
+            )
+            payload_limit = (
+                json_start + next_marker.start() if next_marker else len(text)
+            )
             payload = text[json_start:payload_limit]
             # Some open-weight models occasionally duplicate the opening brace
             # before the arguments object:
@@ -234,7 +242,7 @@ After receiving results, continue your response naturally."""
             # Repair that deterministic typo so the tool can execute and the
             # agent can continue instead of treating it as a final answer.
             repaired_payload = re.sub(
-                r',\s*\{\s*("arguments"\s*:)', r', \1', payload, count=1
+                r',\s*\{\s*("arguments"\s*:)', r", \1", payload, count=1
             )
             candidate = repaired_payload if repaired_payload != payload else text
             candidate_start = 0 if candidate is not text else json_start
@@ -243,7 +251,7 @@ After receiving results, continue your response naturally."""
             except json.JSONDecodeError:
                 logger.warning(
                     "Failed to parse tool call JSON after marker: %s",
-                    text[json_start:json_start + 200],
+                    text[json_start : json_start + 200],
                 )
                 continue
             span_end = payload_limit if candidate is not text else json_end
@@ -275,7 +283,9 @@ After receiving results, continue your response naturally."""
         name = data.get("name") or data.get("tool_name") or data.get("function")
         if not name or not isinstance(name, str):
             return None
-        arguments = data.get("arguments") or data.get("parameters") or data.get("args", {})
+        arguments = (
+            data.get("arguments") or data.get("parameters") or data.get("args", {})
+        )
         if not isinstance(arguments, dict):
             try:
                 if isinstance(arguments, str):
@@ -330,9 +340,7 @@ After receiving results, continue your response naturally."""
                 f"Tool '{result.tool_name}' result:\n"
                 f"```\n{result._serialize_output(result.output)}\n```"
             )
-        return (
-            f"Tool '{result.tool_name}' failed: {result.error}"
-        )
+        return f"Tool '{result.tool_name}' failed: {result.error}"
 
     @staticmethod
     def has_tool_calls(text: str) -> bool:
@@ -369,10 +377,13 @@ After receiving results, continue your response naturally."""
         parts.append(text[cursor:])
         return "".join(parts).strip()
 
-
     def handle_tool_call(self, tool_call, context=None):
         """Execute a tool call and return its result."""
-        calls = self.parse_tool_calls(str(tool_call)) if isinstance(tool_call, str) else [tool_call]
+        calls = (
+            self.parse_tool_calls(str(tool_call))
+            if isinstance(tool_call, str)
+            else [tool_call]
+        )
         if calls:
             return {"status": "ok", "result": str(calls[0])}
         return {"status": "error", "result": "no tool call found"}

@@ -94,7 +94,9 @@ def load_mcp_config(path: Optional[Path] = None) -> Dict[str, McpServerConfig]:
     return servers
 
 
-def save_mcp_config(servers: Dict[str, McpServerConfig], path: Optional[Path] = None) -> None:
+def save_mcp_config(
+    servers: Dict[str, McpServerConfig], path: Optional[Path] = None
+) -> None:
     """
     Write server definitions back to mcp_servers.json in the same shape
     load_mcp_config() reads. Shared by every place that lets a user edit
@@ -111,7 +113,11 @@ def save_mcp_config(servers: Dict[str, McpServerConfig], path: Optional[Path] = 
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "mcpServers": {
-            name: {"command": cfg.command, "args": cfg.args, **({"env": cfg.env} if cfg.env else {})}
+            name: {
+                "command": cfg.command,
+                "args": cfg.args,
+                **({"env": cfg.env} if cfg.env else {}),
+            }
             for name, cfg in servers.items()
         }
     }
@@ -155,11 +161,15 @@ class McpClientManager:
         # A regular Queue is intentional here.  Some restricted runtimes do not
         # reliably wake an asyncio selector through call_soon_threadsafe(), which
         # previously left every MCP connection stuck during supervisor startup.
-        self._queue: "queue.Queue[tuple[str, Any, concurrent.futures.Future[Any]]]" = queue.Queue()
+        self._queue: "queue.Queue[tuple[str, Any, concurrent.futures.Future[Any]]]" = (
+            queue.Queue()
+        )
         self._supervisor_started = False
         self._sessions: Dict[str, Any] = {}  # server name -> ClientSession
         self._connected_tools: Dict[str, Dict[str, Any]] = {}  # namespaced name -> info
-        self._server_configs: Dict[str, McpServerConfig] = {}  # server name -> McpServerConfig
+        self._server_configs: Dict[
+            str, McpServerConfig
+        ] = {}  # server name -> McpServerConfig
         self._lock = threading.Lock()
 
     # -- background loop + supervisor task --------------------------------
@@ -192,7 +202,9 @@ class McpClientManager:
                 loop.run_until_complete(self._supervisor_loop())
                 loop.close()
 
-            self._thread = threading.Thread(target=_run, name="dabba-mcp-loop", daemon=True)
+            self._thread = threading.Thread(
+                target=_run, name="dabba-mcp-loop", daemon=True
+            )
             self._thread.start()
             ready.wait(timeout=5)
             self._loop = loop_box["loop"]
@@ -233,15 +245,19 @@ class McpClientManager:
                                 break
                             cfg = payload[name]
                             old_cfg = self._server_configs.get(name)
-                            if (not old_cfg or
-                                    old_cfg.command != cfg.command or
-                                    old_cfg.args != cfg.args or
-                                    old_cfg.env != cfg.env):
+                            if (
+                                not old_cfg
+                                or old_cfg.command != cfg.command
+                                or old_cfg.args != cfg.args
+                                or old_cfg.env != cfg.env
+                            ):
                                 changed = True
                                 break
 
                         if changed:
-                            logger.info("MCP configuration changed. Reconnecting all servers...")
+                            logger.info(
+                                "MCP configuration changed. Reconnecting all servers..."
+                            )
                             await exit_stack.aclose()
                             exit_stack = AsyncExitStack()
                             self._sessions.clear()
@@ -267,7 +283,9 @@ class McpClientManager:
 
     # -- connecting --------------------------------------------------------
 
-    def connect(self, configs: Optional[Dict[str, McpServerConfig]] = None) -> Dict[str, Any]:
+    def connect(
+        self, configs: Optional[Dict[str, McpServerConfig]] = None
+    ) -> Dict[str, Any]:
         """
         Connect to every configured MCP server not already connected.
 
@@ -286,9 +304,14 @@ class McpClientManager:
             return fut.result(timeout=MCP_CONNECT_TIMEOUT_SECONDS)
         except Exception as exc:
             logger.error("MCP connect failed: %s", exc)
-            return {"connected": [], "failed": {n: str(exc) for n in configs if n not in self._sessions}}
+            return {
+                "connected": [],
+                "failed": {n: str(exc) for n in configs if n not in self._sessions},
+            }
 
-    async def _do_connect(self, exit_stack, configs: Dict[str, McpServerConfig]) -> Dict[str, Any]:
+    async def _do_connect(
+        self, exit_stack, configs: Dict[str, McpServerConfig]
+    ) -> Dict[str, Any]:
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
 
@@ -304,7 +327,9 @@ class McpClientManager:
                     command=cfg.command, args=cfg.args, env=cfg.env or None
                 )
                 read, write = await exit_stack.enter_async_context(stdio_client(params))
-                session = await exit_stack.enter_async_context(ClientSession(read, write))
+                session = await exit_stack.enter_async_context(
+                    ClientSession(read, write)
+                )
                 await session.initialize()
                 tools_result = await session.list_tools()
 
@@ -319,7 +344,11 @@ class McpClientManager:
                         "input_schema": tool.inputSchema or {},
                     }
                 connected.append(name)
-                logger.info("Connected MCP server '%s' (%d tools)", name, len(tools_result.tools))
+                logger.info(
+                    "Connected MCP server '%s' (%d tools)",
+                    name,
+                    len(tools_result.tools),
+                )
             except Exception as exc:
                 failed[name] = str(exc)
                 logger.error("Failed to connect MCP server '%s': %s", name, exc)
@@ -367,7 +396,9 @@ class McpClientManager:
         """Flatten an MCP CallToolResult's content blocks into text dabba's tool pipeline expects."""
         if getattr(result, "isError", False):
             texts = [getattr(c, "text", str(c)) for c in getattr(result, "content", [])]
-            raise RuntimeError("; ".join(t for t in texts if t) or "MCP tool call failed")
+            raise RuntimeError(
+                "; ".join(t for t in texts if t) or "MCP tool call failed"
+            )
         content = getattr(result, "content", None)
         if not content:
             return ""
@@ -416,7 +447,9 @@ def register_mcp_tools(registry, manager: McpClientManager) -> int:
         Number of tools registered.
     """
     # Identify existing MCP tools in the registry
-    mcp_tools_in_registry = [name for name, t in registry.tools.items() if t.category == "mcp"]
+    mcp_tools_in_registry = [
+        name for name, t in registry.tools.items() if t.category == "mcp"
+    ]
 
     # Get active MCP tools from manager
     active_mcp_tools = manager.list_tools()
@@ -434,6 +467,7 @@ def register_mcp_tools(registry, manager: McpClientManager) -> int:
         def _make_handler(bound_name: str):
             def _handler(**kwargs: Any) -> Any:
                 return manager.call_tool(bound_name, kwargs)
+
             return _handler
 
         registry.register(

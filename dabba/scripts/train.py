@@ -13,13 +13,10 @@ Usage:
 
 import argparse
 import os
-import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
 from dabba.config.model_config import ModelConfig
 from dabba.config.training_config import TrainingConfig
@@ -27,13 +24,9 @@ from dabba.config.data_config import DataConfig
 from dabba.utils.config_loader import load_config
 from dabba.utils.logging import setup_logger, get_logger
 from dabba.utils.distributed import (
-    setup_distributed,
-    cleanup_distributed,
     get_rank,
-    get_world_size,
 )
 from dabba.tokenizer.bpe_tokenizer import BPETokenizer
-from dabba.data.streaming_dataset import StreamingDataset
 from dabba.data.dataloader import create_dataloader
 from dabba.model.transformer import Transformer
 from dabba.trainer.optimizer import AdamW
@@ -49,19 +42,28 @@ def parse_args():
         description="Train a dabba language model from scratch"
     )
     parser.add_argument("--config", type=str, help="Path to YAML config file")
-    parser.add_argument("--model", type=str, default="tiny",
-                        choices=["tiny", "small", "base", "medium", "large", "xl", "xxl"],
-                        help="Model size preset")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="tiny",
+        choices=["tiny", "small", "base", "medium", "large", "xl", "xxl"],
+        help="Model size preset",
+    )
     parser.add_argument("--data", type=str, help="Path to training data directory")
-    parser.add_argument("--output", type=str, default="./checkpoints",
-                        help="Output directory for checkpoints")
+    parser.add_argument(
+        "--output",
+        type=str,
+        default="./checkpoints",
+        help="Output directory for checkpoints",
+    )
     parser.add_argument("--resume", type=str, help="Resume from checkpoint path")
     parser.add_argument("--batch-size", type=int, help="Batch size per GPU")
     parser.add_argument("--lr", type=float, help="Learning rate")
     parser.add_argument("--max-steps", type=int, help="Maximum training steps")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--local-rank", type=int, default=-1,
-                        help="Local rank for distributed training")
+    parser.add_argument(
+        "--local-rank", type=int, default=-1, help="Local rank for distributed training"
+    )
     return parser.parse_args()
 
 
@@ -69,6 +71,7 @@ def set_seed(seed: int) -> None:
     """Set random seeds for reproducibility."""
     import random
     import numpy as np
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -164,7 +167,7 @@ def main():
         logger.info("Compiling model with torch.compile...")
         model = torch.compile(model)
 
-    tokenizer = create_tokenizer(data_config)
+    create_tokenizer(data_config)
 
     logger.info("Creating data loaders...")
     train_loader = create_dataloader(
@@ -273,8 +276,10 @@ def main():
             if step >= max_steps:
                 break
 
-            batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v
-                     for k, v in batch.items()}
+            batch = {
+                k: v.to(device) if isinstance(v, torch.Tensor) else v
+                for k, v in batch.items()
+            }
 
             step_metrics = train_step(batch)
             metrics.update(step_metrics, step=step)
@@ -296,7 +301,10 @@ def main():
                 )
 
                 current_eval_loss = eval_metrics["loss"]
-                if current_eval_loss < best_eval_loss - training_config.early_stopping_threshold:
+                if (
+                    current_eval_loss
+                    < best_eval_loss - training_config.early_stopping_threshold
+                ):
                     best_eval_loss = current_eval_loss
                     no_improvement_steps = 0
                     save_metrics = {
@@ -308,8 +316,10 @@ def main():
                 else:
                     no_improvement_steps += training_config.eval_steps
 
-                if (training_config.early_stopping_patience
-                        and no_improvement_steps >= training_config.early_stopping_patience):
+                if (
+                    training_config.early_stopping_patience
+                    and no_improvement_steps >= training_config.early_stopping_patience
+                ):
                     logger.info(f"Early stopping triggered at step {step}")
                     max_steps = step
                     break

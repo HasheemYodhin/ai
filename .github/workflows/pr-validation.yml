@@ -1,0 +1,216 @@
+name: PR Validation
+
+# Standard `pull_request` (not `_target`): GitHub gives this a read-only
+# GITHUB_TOKEN and, for fork PRs, withholds repository secrets. It's the
+# safe event type for checking out and running a PR's own code. Any step
+# here that needs write access (updating title/labels/description) belongs
+# in pr-metadata.yml instead.
+#
+# `validate-description` additionally re-runs on `workflow_run` once
+# "PR Metadata Automation" (pr-metadata.yml) finishes. That workflow runs in
+# parallel with this one (both trigger off the same `pull_request` events)
+# and can still be rewriting the PR title/summary via the API when this
+# workflow's `pull_request` run reads `github.event.pull_request.*` — that
+# payload is a snapshot from when *this* event fired, not the current state.
+# So `validate-description` never trusts the event payload: it always fetches
+# the PR's current title/body through the API first. See
+# docs/pull-request-automation.md#race-condition for the full picture.
+"on":
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["PR Metadata Automation"]
+    types: [completed]
+
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  detect-changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      helm: ${{ steps.filter.outputs.helm }}
+      terraform: ${{ steps.filter.outputs.terraform }}
+      k8s: ${{ steps.filter.outputs.k8s }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          set -euo pipefail
+          git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" > changed_files.txt
+          cat changed_files.txt
+
+          check() {
+            grep -qE "$1" changed_files.txt && echo true || echo false
+          }
+
+          echo "helm=$(check '^(helm/|charts/)')" >> "$GITHUB_OUTPUT"
+          echo "terraform=$(check '(\.tf$|^terraform/)')" >> "$GITHUB_OUTPUT"
+          echo "k8s=$(check '^(k8s/|kubernetes/)')" >> "$GITHUB_OUTPUT"
+
+  validate-description:
+    # For workflow_run, only react to a completed (not cancelled/skipped) run
+    # of pr-metadata.yml — a failed metadata run still means the title/body
+    # are worth (re)checking as they stand.
+    if: github.event_name == 'pull_request' || github.event.workflow_run.conclusion != 'cancelled'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Run PR title/description validation script unit tests
+        run: |
+          pip install --quiet pytest pyyaml
+          python -m pytest .github/scripts/ -q
+
+      - name: Resolve PR number
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          DIRECT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          WORKFLOW_RUN_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            NUMBER="$DIRECT_PR_NUMBER"
+          else
+            NUMBER="$WORKFLOW_RUN_PR_NUMBER"
+            # workflow_run only populates `pull_requests` for PRs from
+            # branches in this same repository — for fork PRs it's empty, so
+            # fall back to looking the PR up by head commit SHA.
+            if [ -z "$NUMBER" ] || [ "$NUMBER" = "null" ]; then
+              NUMBER="$(gh pr list --repo "$REPO" --state open \
+                --json number,headRefOid \
+                --jq ".[] | select(.headRefOid == \"$HEAD_SHA\") | .number" | head -n1)"
+            fi
+          fi
+          if [ -z "$NUMBER" ] || [ "$NUMBER" = "null" ]; then
+            echo "::error::Could not resolve a pull request number for this event — nothing to validate."
+            exit 1
+          fi
+          echo "number=$NUMBER" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch current PR title/body from the API
+        id: fetch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          # Deliberately not github.event.pull_request.title/.body — see the
+          # workflow-level comment above on why that payload can be stale.
+          gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.title' > pr_title.txt
+          gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.body // ""' > pr_body.txt
+
+      - name: Validate this PR's title and description
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/validate_pr.py --title "$(cat pr_title.txt)" --body-file pr_body.txt
+
+  secret-scan:
+    # PR-diff scanning needs the actual pull_request event context (base/head
+    # SHAs) — not meaningful (and would check out the wrong ref) on a
+    # workflow_run re-trigger, so this stays pull_request-only.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # gitleaks-action calls GET /pulls/:number/commits to scan just the PR
+      # diff; without this the API call 403s with "Resource not accessible
+      # by integration" and the job fails before any scanning happens.
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan PR diff for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+          GITLEAKS_ENABLE_COMMENTS: false
+
+  helm-validate:
+    needs: detect-changes
+    if: needs['detect-changes'].outputs.helm == 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - uses: azure/setup-helm@v4
+      - run: pip install --quiet pyyaml
+      - name: helm lint
+        run: helm lint helm/dabba
+      - name: helm template
+        run: helm template dabba helm/dabba > rendered.yaml
+      - name: Validate rendered manifests (resources, security context, image tags)
+        run: python3 .github/scripts/check_k8s_manifests.py < rendered.yaml
+
+  # No raw Kubernetes manifests exist in this repository today (only the
+  # Helm chart under helm/, validated by the helm-validate job above using
+  # the same check_k8s_manifests.py script). This job is kept so the same
+  # validation runs automatically if k8s/** or kubernetes/** manifests are
+  # ever added directly.
+  k8s-validate:
+    needs: detect-changes
+    if: needs['detect-changes'].outputs.k8s == 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install --quiet pyyaml
+      - name: Validate YAML syntax
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for f in k8s/**/*.yml k8s/**/*.yaml kubernetes/**/*.yml kubernetes/**/*.yaml; do
+            [ -f "$f" ] || continue
+            echo "Checking $f"
+            python3 -c "import sys, yaml; list(yaml.safe_load_all(open(sys.argv[1])))" "$f"
+          done
+      - name: Validate resources, security context, image tags
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for f in k8s/**/*.yml k8s/**/*.yaml kubernetes/**/*.yml kubernetes/**/*.yaml; do
+            [ -f "$f" ] || continue
+            python3 .github/scripts/check_k8s_manifests.py < "$f"
+          done
+
+  # No Terraform is present in this repository today. This job is kept
+  # ready (guarded by detect-changes) for when Terraform is introduced —
+  # see docs/pull-request-automation.md for why `terraform plan` is
+  # intentionally not wired up yet.
+  terraform-validate:
+    needs: detect-changes
+    if: needs['detect-changes'].outputs.terraform == 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+      - name: terraform init (no backend)
+        run: |
+          for dir in $(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" | grep '\.tf$' | xargs -r -n1 dirname | sort -u); do
+            (cd "$dir" && terraform init -backend=false && terraform validate)
+          done

@@ -68,8 +68,7 @@ class MultimodalCrossAttention(nn.Module):
         self.post_norm = post_norm
 
         assert self.hidden_size % self.num_heads == 0, (
-            f"hidden_size ({hidden_size}) must be divisible by "
-            f"num_heads ({num_heads})"
+            f"hidden_size ({hidden_size}) must be divisible by num_heads ({num_heads})"
         )
 
         self.q_proj = nn.Linear(hidden_size, num_heads * self.head_dim, bias=bias)
@@ -137,8 +136,12 @@ class MultimodalCrossAttention(nn.Module):
         v = self.v_proj(kv)
 
         q = q.view(batch_size, text_len, self.num_heads, self.head_dim).transpose(1, 2)
-        k = k.view(batch_size, num_vision_tokens, self.num_heads, self.head_dim).transpose(1, 2)
-        v = v.view(batch_size, num_vision_tokens, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(
+            batch_size, num_vision_tokens, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        v = v.view(
+            batch_size, num_vision_tokens, self.num_heads, self.head_dim
+        ).transpose(1, 2)
 
         attn_weights = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
@@ -150,7 +153,9 @@ class MultimodalCrossAttention(nn.Module):
 
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.reshape(batch_size, text_len, self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(
+            batch_size, text_len, self.num_heads * self.head_dim
+        )
         attn_output = self.o_proj(attn_output)
 
         output = self.out_norm(hidden_states + attn_output)

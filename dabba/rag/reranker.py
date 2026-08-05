@@ -109,9 +109,7 @@ class Reranker:
             return []
 
         self._load_model()
-        effective_top_k = (
-            top_k if top_k is not None else self.top_k
-        )
+        effective_top_k = top_k if top_k is not None else self.top_k
 
         # Prepare (query, document) pairs for the cross-encoder.
         pairs = [(query, r.document.text) for r in results]
@@ -175,6 +173,5 @@ class Reranker:
             List of re-ranked result lists.
         """
         return [
-            self.rerank(q, res, top_k=top_k)
-            for q, res in zip(queries, query_doc_pairs)
+            self.rerank(q, res, top_k=top_k) for q, res in zip(queries, query_doc_pairs)
         ]

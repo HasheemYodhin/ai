@@ -7,8 +7,6 @@ with configurable top-k and score threshold filtering.
 
 from typing import Any, Dict, List, Optional
 
-import numpy as np
-import numpy.typing as npt
 
 from dabba.config.rag_config import RagConfig
 from dabba.rag.embedding_model import EmbeddingModel
@@ -91,9 +89,7 @@ class Retriever:
 
         effective_top_k = top_k if top_k is not None else self.top_k
         effective_threshold = (
-            score_threshold
-            if score_threshold is not None
-            else self.score_threshold
+            score_threshold if score_threshold is not None else self.score_threshold
         )
 
         query_embedding = self.embedding_model.encode_queries([query])[0]
@@ -142,9 +138,7 @@ class Retriever:
         query_embeddings = self.embedding_model.encode_queries(queries)
         effective_top_k = top_k if top_k is not None else self.top_k
         effective_threshold = (
-            score_threshold
-            if score_threshold is not None
-            else self.score_threshold
+            score_threshold if score_threshold is not None else self.score_threshold
         )
 
         all_results: List[List[SearchResult]] = []

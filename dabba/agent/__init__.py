@@ -45,6 +45,7 @@ __all__ = [
     "McpHandler",
     "ContextManager",
     "ConversationEntry",
+    "AgentConfig",
     "ExecutionPlan",
     "PlanStep",
     "Planner",
@@ -52,4 +53,6 @@ __all__ = [
     "Executor",
     "ExecutionStats",
     "AgentLoop",
+    "Agent",
+    "MCPHandler",
 ]

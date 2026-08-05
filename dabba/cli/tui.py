@@ -2,6 +2,7 @@
 Premium full-screen TUI for Dabba.
 Supports multi-provider models, effort levels, slash autocomplete, and code ops.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +12,7 @@ import time
 from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
 
-from textual.app import App, ComposeResult, ScreenStackError
+from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, ScrollableContainer, Vertical
 from textual.css.query import NoMatches
@@ -19,7 +20,13 @@ from textual.message import Message
 from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import Input, Label, Static, Markdown as TUIMarkdown, ListView, ListItem, Button
+from textual.widgets import (
+    Input,
+    Label,
+    Static,
+    Markdown as TUIMarkdown,
+    Button,
+)
 from textual import on, work
 
 if TYPE_CHECKING:
@@ -29,41 +36,220 @@ if TYPE_CHECKING:
 
 # ── Shell command detection ───────────────────────────────────────────────────
 
+
 def _is_likely_command(text: str) -> bool:
     """Heuristic: is this text likely a shell command, not a question/conversation?"""
     if not text or len(text) < 2:
         return False
     stripped = text.strip()
-    q_starters = {"what", "why", "how", "when", "where", "who", "whom", "whose",
-                  "which", "is", "are", "was", "were", "do", "does", "did",
-                  "can", "could", "will", "would", "shall", "should", "may",
-                  "might", "must", "has", "have", "had", "explain", "describe",
-                  "tell", "show", "define", "list", "find", "search", "summarize"}
+    q_starters = {
+        "what",
+        "why",
+        "how",
+        "when",
+        "where",
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "is",
+        "are",
+        "was",
+        "were",
+        "do",
+        "does",
+        "did",
+        "can",
+        "could",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "may",
+        "might",
+        "must",
+        "has",
+        "have",
+        "had",
+        "explain",
+        "describe",
+        "tell",
+        "show",
+        "define",
+        "list",
+        "find",
+        "search",
+        "summarize",
+    }
     first_word = stripped.split()[0].lower().rstrip("?,.;:!")
     if first_word in q_starters:
         return False
     common_commands = {
-        "ls", "df", "du", "ps", "top", "htop", "who", "whoami", "pwd", "id",
-        "uname", "date", "cal", "clear", "env", "printenv", "which", "whereis",
-        "type", "time", "sleep", "yes", "seq", "shuf", "sort", "uniq", "wc",
-        "head", "tail", "cat", "tac", "rev", "cut", "tr", "fmt", "pr", "fold",
-        "nl", "od", "base64", "cksum", "sum", "md5sum", "sha1sum", "sha256sum",
-        "git", "curl", "wget", "ssh", "scp", "rsync", "tar", "gzip", "gunzip",
-        "zip", "unzip", "make", "cmake", "ninja", "meson", "npm", "yarn",
-        "pnpm", "pip", "pip3", "cargo", "go", "rustc", "gcc", "g++", "clang",
-        "clang++", "python", "python3", "node", "deno", "bun", "ruby", "perl",
-        "php", "swift", "kotlin", "docker", "podman", "kubectl", "helm",
-        "terraform", "ansible", "vagrant", "chmod", "chown", "cp", "mv", "rm",
-        "mkdir", "rmdir", "touch", "ln", "mount", "umount", "dd", "find",
-        "locate", "grep", "egrep", "fgrep", "awk", "sed", "xargs", "tee",
-        "echo", "printf", "read", "test", "expr", "let", "set", "export",
-        "source", ".", "exec", "eval", "trap", "kill", "pkill", "killall",
-        "nohup", "disown", "fg", "bg", "jobs", "screen", "tmux", "sudo",
-        "doas", "su", "passwd", "useradd", "usermod", "groupadd", "systemctl",
-        "journalctl", "service", "iptables", "ufw", "ping", "traceroute",
-        "nslookup", "dig", "host", "netstat", "ss", "ip", "ifconfig",
-        "nmcli", "nmtui", "iwctl", "bluetoothctl", "alsamixer", "pactl",
-        "xrandr", "xset", "xinput", "xdg-open", "open",
+        "ls",
+        "df",
+        "du",
+        "ps",
+        "top",
+        "htop",
+        "who",
+        "whoami",
+        "pwd",
+        "id",
+        "uname",
+        "date",
+        "cal",
+        "clear",
+        "env",
+        "printenv",
+        "which",
+        "whereis",
+        "type",
+        "time",
+        "sleep",
+        "yes",
+        "seq",
+        "shuf",
+        "sort",
+        "uniq",
+        "wc",
+        "head",
+        "tail",
+        "cat",
+        "tac",
+        "rev",
+        "cut",
+        "tr",
+        "fmt",
+        "pr",
+        "fold",
+        "nl",
+        "od",
+        "base64",
+        "cksum",
+        "sum",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "git",
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "rsync",
+        "tar",
+        "gzip",
+        "gunzip",
+        "zip",
+        "unzip",
+        "make",
+        "cmake",
+        "ninja",
+        "meson",
+        "npm",
+        "yarn",
+        "pnpm",
+        "pip",
+        "pip3",
+        "cargo",
+        "go",
+        "rustc",
+        "gcc",
+        "g++",
+        "clang",
+        "clang++",
+        "python",
+        "python3",
+        "node",
+        "deno",
+        "bun",
+        "ruby",
+        "perl",
+        "php",
+        "swift",
+        "kotlin",
+        "docker",
+        "podman",
+        "kubectl",
+        "helm",
+        "terraform",
+        "ansible",
+        "vagrant",
+        "chmod",
+        "chown",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "rmdir",
+        "touch",
+        "ln",
+        "mount",
+        "umount",
+        "dd",
+        "find",
+        "locate",
+        "grep",
+        "egrep",
+        "fgrep",
+        "awk",
+        "sed",
+        "xargs",
+        "tee",
+        "echo",
+        "printf",
+        "read",
+        "test",
+        "expr",
+        "let",
+        "set",
+        "export",
+        "source",
+        ".",
+        "exec",
+        "eval",
+        "trap",
+        "kill",
+        "pkill",
+        "killall",
+        "nohup",
+        "disown",
+        "fg",
+        "bg",
+        "jobs",
+        "screen",
+        "tmux",
+        "sudo",
+        "doas",
+        "su",
+        "passwd",
+        "useradd",
+        "usermod",
+        "groupadd",
+        "systemctl",
+        "journalctl",
+        "service",
+        "iptables",
+        "ufw",
+        "ping",
+        "traceroute",
+        "nslookup",
+        "dig",
+        "host",
+        "netstat",
+        "ss",
+        "ip",
+        "ifconfig",
+        "nmcli",
+        "nmtui",
+        "iwctl",
+        "bluetoothctl",
+        "alsamixer",
+        "pactl",
+        "xrandr",
+        "xset",
+        "xinput",
+        "xdg-open",
+        "open",
     }
     tokens = stripped.split()
     first = tokens[0]
@@ -86,51 +272,63 @@ def _is_likely_command(text: str) -> bool:
 # ── Slash commands ─────────────────────────────────────────────────────────────
 
 SLASH_COMMANDS: List[tuple[str, str]] = [
-    ("/help",       "Show all commands"),
-    ("/clear",      "Clear conversation history"),
-    ("/exit",       "Exit Dabba"),
-    ("/save",       "Save session to file"),
-    ("/history",    "Show conversation history"),
-    ("/reset",      "Reset agent state"),
-    ("/model",      "Switch model (Claude, GPT, Gemini, Nvidia, Ollama…)"),
-    ("/effort",     "Set effort level: low medium high xhigh max"),
-    ("/keys",       "Manage API keys: /keys set <provider> <key>"),
-    ("/upload",     "Attach a file to the conversation: /upload <path>"),
-    ("/tools",      "List available tools"),
-    ("/mcp",        "Manage MCP servers — view status, add, remove"),
-    ("/mode",       "Set permission mode: allow deny ask"),
-    ("/permissions","Show permission settings"),
-    ("/metrics",    "Session time and message count"),
-    ("/git",        "Git ops: status diff log commit push"),
-    ("/view",       "View a file: /view <path>"),
-    ("/create",     "Create a file: /create <path>"),
-    ("/run",        "Run a shell command: /run <cmd>"),
+    ("/help", "Show all commands"),
+    ("/clear", "Clear conversation history"),
+    ("/exit", "Exit Dabba"),
+    ("/save", "Save session to file"),
+    ("/history", "Show conversation history"),
+    ("/reset", "Reset agent state"),
+    ("/model", "Switch model (Claude, GPT, Gemini, Nvidia, Ollama…)"),
+    ("/effort", "Set effort level: low medium high xhigh max"),
+    ("/keys", "Manage API keys: /keys set <provider> <key>"),
+    ("/upload", "Attach a file to the conversation: /upload <path>"),
+    ("/tools", "List available tools"),
+    ("/mcp", "Manage MCP servers — view status, add, remove"),
+    ("/mode", "Set permission mode: allow deny ask"),
+    ("/permissions", "Show permission settings"),
+    ("/metrics", "Session time and message count"),
+    ("/git", "Git ops: status diff log commit push"),
+    ("/view", "View a file: /view <path>"),
+    ("/create", "Create a file: /create <path>"),
+    ("/run", "Run a shell command: /run <cmd>"),
     ("/powershell", "Run a command via PowerShell: /powershell <cmd>"),
-    ("/ps",         "Background processes: /ps [list|start <cmd>|output <id>|stop <id>]"),
-    ("/ssh",        "Run a remote command: /ssh <host> <cmd>"),
-    ("/docker",     "Docker ops: /docker ps|exec <container> <cmd>|run <image> <cmd>"),
+    ("/ps", "Background processes: /ps [list|start <cmd>|output <id>|stop <id>]"),
+    ("/ssh", "Run a remote command: /ssh <host> <cmd>"),
+    ("/docker", "Docker ops: /docker ps|exec <container> <cmd>|run <image> <cmd>"),
 ]
 
 EFFORT_OPTIONS = [
-    ("low",    "Fast, concise — max 1k tokens"),
+    ("low", "Fast, concise — max 1k tokens"),
     ("medium", "Balanced — max 4k tokens"),
-    ("high",   "Thorough — max 8k tokens, thinking on"),
-    ("xhigh",  "Extended reasoning — max 16k tokens"),
-    ("max",    "Maximum effort — max 32k tokens, full thinking"),
+    ("high", "Thorough — max 8k tokens, thinking on"),
+    ("xhigh", "Extended reasoning — max 16k tokens"),
+    ("max", "Maximum effort — max 32k tokens, full thinking"),
 ]
 
-PROVIDER_ORDER = ["dabba", "anthropic", "openai", "google", "nvidia", "huggingface", "ollama"]
+PROVIDER_ORDER = [
+    "dabba",
+    "anthropic",
+    "openai",
+    "google",
+    "nvidia",
+    "huggingface",
+    "ollama",
+]
 PROVIDER_LABELS = {
-    "dabba":        "⬡  DABBA (own model)",
-    "anthropic":    "◆  ANTHROPIC",
-    "openai":       "◈  OPENAI",
-    "google":       "◉  GOOGLE",
-    "nvidia":       "▶  NVIDIA NIM",
-    "huggingface":  "🤗 HUGGING FACE",
-    "ollama":       "○  LOCAL (Ollama)",
+    "dabba": "⬡  DABBA (own model)",
+    "anthropic": "◆  ANTHROPIC",
+    "openai": "◈  OPENAI",
+    "google": "◉  GOOGLE",
+    "nvidia": "▶  NVIDIA NIM",
+    "huggingface": "🤗 HUGGING FACE",
+    "ollama": "○  LOCAL (Ollama)",
 }
 TIER_COLOR = {
-    "low": "dim", "medium": "cyan", "high": "green", "xhigh": "yellow", "max": "red"
+    "low": "dim",
+    "medium": "cyan",
+    "high": "green",
+    "xhigh": "yellow",
+    "max": "red",
 }
 
 
@@ -359,13 +557,18 @@ AddMcpModal { align: center middle; }
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+
 class ChatSpacer(Widget):
     DEFAULT_CSS = "ChatSpacer { height: 1fr; background: #0b0b12; }"
-    def render(self): return ""
+
+    def render(self):
+        return ""
 
 
 class ChatMessage(Widget):
-    def __init__(self, role: str, content: str, model_label: str = "", timestamp: str = "") -> None:
+    def __init__(
+        self, role: str, content: str, model_label: str = "", timestamp: str = ""
+    ) -> None:
         super().__init__(classes="msg-block")
         self.role = role
         self.content = content
@@ -392,7 +595,7 @@ class ChatMessage(Widget):
 
 
 class ThinkingWidget(Widget):
-    _frames = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"]
+    _frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     _idx: reactive[int] = reactive(0)
     _timer = None
 
@@ -401,9 +604,12 @@ class ThinkingWidget(Widget):
 
     def render(self):
         from rich.text import Text
+
         t = Text()
         t.append("  dabba  ", style="bold green")
-        t.append(f"{self._frames[self._idx % len(self._frames)]} thinking...", style="dim")
+        t.append(
+            f"{self._frames[self._idx % len(self._frames)]} thinking...", style="dim"
+        )
         return t
 
     def start(self) -> None:
@@ -422,8 +628,12 @@ class ThinkingWidget(Widget):
 
 
 class SuggestionItem(Widget):
-    def __init__(self, cmd: str, desc: str, index: int = 0, highlighted: bool = False) -> None:
-        super().__init__(classes="suggestion-item" + (" --highlight" if highlighted else ""))
+    def __init__(
+        self, cmd: str, desc: str, index: int = 0, highlighted: bool = False
+    ) -> None:
+        super().__init__(
+            classes="suggestion-item" + (" --highlight" if highlighted else "")
+        )
         self.cmd = cmd
         self.desc = desc
         self.index = index
@@ -482,7 +692,11 @@ class SuggestionsPanel(Widget):
 
     def select_index(self, index: int) -> None:
         """Move the highlight to `index` (used by mouse hover/click)."""
-        if self._matches and 0 <= index < len(self._matches) and index != self._selected:
+        if (
+            self._matches
+            and 0 <= index < len(self._matches)
+            and index != self._selected
+        ):
             self._selected = index
 
     def get_selected(self) -> Optional[str]:
@@ -497,8 +711,17 @@ class SuggestionsPanel(Widget):
 
 # ── Modal screens ──────────────────────────────────────────────────────────────
 
+
 class ModelRow(Widget):
-    def __init__(self, model_id: str, name: str, tier: str, desc: str, active: bool, highlighted: bool) -> None:
+    def __init__(
+        self,
+        model_id: str,
+        name: str,
+        tier: str,
+        desc: str,
+        active: bool,
+        highlighted: bool,
+    ) -> None:
         super().__init__(classes="model-row" + (" --highlight" if highlighted else ""))
         self.model_id = model_id
         self._name = name
@@ -519,10 +742,10 @@ class ModelPicker(ModalScreen):
     """Full-screen model selector modal."""
 
     BINDINGS = [
-        Binding("up",     "move_up",   "", show=False),
-        Binding("down",   "move_down", "", show=False),
-        Binding("enter",  "select",    "", show=False),
-        Binding("escape", "dismiss",   "", show=False),
+        Binding("up", "move_up", "", show=False),
+        Binding("down", "move_down", "", show=False),
+        Binding("enter", "select", "", show=False),
+        Binding("escape", "dismiss", "", show=False),
     ]
 
     def __init__(self, current_model: str, config) -> None:
@@ -536,6 +759,7 @@ class ModelPicker(ModalScreen):
 
     def _load_models(self):
         from dabba.providers.registry import ProviderRegistry
+
         reg = ProviderRegistry(self._config)
         models = reg.list_all_models()
         by_provider: dict = {}
@@ -559,7 +783,10 @@ class ModelPicker(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="model-dialog"):
-            yield Label("  Select Model   ↑↓ navigate  Enter select  Esc cancel", id="model-title")
+            yield Label(
+                "  Select Model   ↑↓ navigate  Enter select  Esc cancel",
+                id="model-title",
+            )
             with Vertical(id="model-list"):
                 self._render_rows()
 
@@ -578,11 +805,16 @@ class ModelPicker(ModalScreen):
                 ml.mount(Static(f"  {item[2]}", classes="model-group"))
             else:
                 m = item[1]
-                ml.mount(ModelRow(
-                    m.id, m.name, m.tier, m.description,
-                    active=(m.id == self._current),
-                    highlighted=(i == self._idx),
-                ))
+                ml.mount(
+                    ModelRow(
+                        m.id,
+                        m.name,
+                        m.tier,
+                        m.description,
+                        active=(m.id == self._current),
+                        highlighted=(i == self._idx),
+                    )
+                )
 
     def action_move_up(self) -> None:
         self._idx = max(0, self._idx - 1)
@@ -611,16 +843,18 @@ class EffortPicker(ModalScreen):
     """Effort level selector modal."""
 
     BINDINGS = [
-        Binding("up",     "move_up",   "", show=False),
-        Binding("down",   "move_down", "", show=False),
-        Binding("enter",  "select",    "", show=False),
-        Binding("escape", "dismiss",   "", show=False),
+        Binding("up", "move_up", "", show=False),
+        Binding("down", "move_down", "", show=False),
+        Binding("enter", "select", "", show=False),
+        Binding("escape", "dismiss", "", show=False),
     ]
 
     def __init__(self, current: str) -> None:
         super().__init__()
         self._current = current
-        self._idx = next((i for i, (k, _) in enumerate(EFFORT_OPTIONS) if k == current), 1)
+        self._idx = next(
+            (i for i, (k, _) in enumerate(EFFORT_OPTIONS) if k == current), 1
+        )
 
     def compose(self) -> ComposeResult:
         with Container(id="effort-dialog"):
@@ -629,7 +863,9 @@ class EffortPicker(ModalScreen):
                 for i, (key, desc) in enumerate(EFFORT_OPTIONS):
                     dot = "●" if key == self._current else "○"
                     color = TIER_COLOR.get(key, "dim")
-                    row_classes = "effort-row" + (" --highlight" if i == self._idx else "")
+                    row_classes = "effort-row" + (
+                        " --highlight" if i == self._idx else ""
+                    )
                     with Container(classes=row_classes):
                         yield Label(dot, classes="effort-dot")
                         yield Label(f"[{color}]{key}[/{color}]", classes="effort-name")
@@ -669,10 +905,10 @@ class UploadModal(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "dismiss_modal", "", show=False),
-        Binding("enter",  "confirm",       "", show=False),
-        Binding("up",     "move_up",       "", show=False),
-        Binding("down",   "move_down",     "", show=False),
-        Binding("tab",    "complete_tab",  "", show=False),
+        Binding("enter", "confirm", "", show=False),
+        Binding("up", "move_up", "", show=False),
+        Binding("down", "move_down", "", show=False),
+        Binding("tab", "complete_tab", "", show=False),
     ]
 
     def __init__(self) -> None:
@@ -682,12 +918,16 @@ class UploadModal(ModalScreen):
 
     def _find_recent_files(self) -> list:
         """Find recently modified files in cwd for quick pick."""
-        import os
         from pathlib import Path
+
         try:
             cwd = Path.cwd()
             files = sorted(
-                [f for f in cwd.rglob("*") if f.is_file() and not any(p.startswith(".") for p in f.parts[-3:])],
+                [
+                    f
+                    for f in cwd.rglob("*")
+                    if f.is_file() and not any(p.startswith(".") for p in f.parts[-3:])
+                ],
                 key=lambda f: f.stat().st_mtime,
                 reverse=True,
             )[:8]
@@ -697,7 +937,10 @@ class UploadModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="upload-dialog"):
-            yield Label("  Attach File   Enter confirm  ↑↓ pick recent  Esc cancel", id="upload-title")
+            yield Label(
+                "  Attach File   Enter confirm  ↑↓ pick recent  Esc cancel",
+                id="upload-title",
+            )
             yield Input(placeholder="/path/to/file  or  filename.py", id="upload-input")
             if self._recent:
                 yield Label("  Recent files:", id="upload-attach")
@@ -709,8 +952,12 @@ class UploadModal(ModalScreen):
                         with Container(classes=f"upload-recent{hl}", id=f"urow-{i}"):
                             yield Label("📄", classes="upload-icon")
                             yield Label(f.name, classes="upload-name")
-                            yield Label(f"{f.parent.name}/{size_str}", classes="upload-size")
-            yield Label("  Ctrl+V to paste a path  ·  Tab to autocomplete", id="upload-hint")
+                            yield Label(
+                                f"{f.parent.name}/{size_str}", classes="upload-size"
+                            )
+            yield Label(
+                "  Ctrl+V to paste a path  ·  Tab to autocomplete", id="upload-hint"
+            )
 
     def on_mount(self) -> None:
         self.query_one("#upload-input", Input).focus()
@@ -720,18 +967,23 @@ class UploadModal(ModalScreen):
             self._idx = max(-1, self._idx - 1)
             self._refresh_rows()
             if self._idx >= 0:
-                self.query_one("#upload-input", Input).value = str(self._recent[self._idx])
+                self.query_one("#upload-input", Input).value = str(
+                    self._recent[self._idx]
+                )
 
     def action_move_down(self) -> None:
         if self._recent:
             self._idx = min(len(self._recent) - 1, self._idx + 1)
             self._refresh_rows()
             if self._idx >= 0:
-                self.query_one("#upload-input", Input).value = str(self._recent[self._idx])
+                self.query_one("#upload-input", Input).value = str(
+                    self._recent[self._idx]
+                )
 
     def action_complete_tab(self) -> None:
         """Tab = autocomplete path."""
         import glob
+
         inp = self.query_one("#upload-input", Input)
         val = inp.value
         matches = glob.glob(val + "*")
@@ -743,7 +995,8 @@ class UploadModal(ModalScreen):
             for m in matches[1:]:
                 for j, (a, b) in enumerate(zip(common, m)):
                     if a != b:
-                        common = common[:j]; break
+                        common = common[:j]
+                        break
             inp.value = common
             inp.cursor_position = len(common)
 
@@ -767,11 +1020,11 @@ class UploadModal(ModalScreen):
 
 
 _PROVIDERS = [
-    ("anthropic",    "Claude (Anthropic)",       "sk-ant-…"),
-    ("openai",       "GPT / o-series (OpenAI)",  "sk-…"),
-    ("google",       "Gemini (Google)",           "AIza…"),
-    ("nvidia",       "NVIDIA NIM",               "nvapi-…"),
-    ("huggingface",  "Hugging Face",             "hf_…"),
+    ("anthropic", "Claude (Anthropic)", "sk-ant-…"),
+    ("openai", "GPT / o-series (OpenAI)", "sk-…"),
+    ("google", "Gemini (Google)", "AIza…"),
+    ("nvidia", "NVIDIA NIM", "nvapi-…"),
+    ("huggingface", "Hugging Face", "hf_…"),
 ]
 
 
@@ -780,10 +1033,17 @@ class SetKeyModal(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "cancel", "", show=False),
-        Binding("ctrl+s", "save",   "", show=False),
+        Binding("ctrl+s", "save", "", show=False),
     ]
 
-    def __init__(self, provider_id: str, provider_label: str, placeholder: str, current_key: str, config) -> None:
+    def __init__(
+        self,
+        provider_id: str,
+        provider_label: str,
+        placeholder: str,
+        current_key: str,
+        config,
+    ) -> None:
         super().__init__()
         self._pid = provider_id
         self._plabel = provider_label
@@ -792,11 +1052,17 @@ class SetKeyModal(ModalScreen):
         self._config = config
 
     def compose(self) -> ComposeResult:
-        masked = (self._current[:8] + "…" + self._current[-4:]) if len(self._current) > 12 else (self._current[:4] + "…" if self._current else "")
+        masked = (
+            (self._current[:8] + "…" + self._current[-4:])
+            if len(self._current) > 12
+            else (self._current[:4] + "…" if self._current else "")
+        )
         with Container(id="setkey-dialog"):
-            yield Label(f"  Set API Key", id="setkey-title")
+            yield Label("  Set API Key", id="setkey-title")
             yield Label(f"  Provider: {self._plabel}", id="setkey-provider")
-            yield Label(f"  Paste your key below  (Ctrl+Shift+V to paste)", id="setkey-label")
+            yield Label(
+                "  Paste your key below  (Ctrl+Shift+V to paste)", id="setkey-label"
+            )
             yield Input(
                 placeholder=self._placeholder,
                 password=False,
@@ -811,7 +1077,10 @@ class SetKeyModal(ModalScreen):
                 if self._current:
                     yield Button("  Delete", id="setkey-delete", variant="error")
                 yield Button("  Cancel", id="setkey-cancel")
-            yield Label("  Ctrl+S to save  ·  Esc to cancel  ·  key is stored in ~/.config/dabba/cli_config.yaml", id="setkey-hint")
+            yield Label(
+                "  Ctrl+S to save  ·  Esc to cancel  ·  key is stored in ~/.config/dabba/cli_config.yaml",
+                id="setkey-hint",
+            )
 
     def on_mount(self) -> None:
         self.query_one("#setkey-input", Input).focus()
@@ -835,7 +1104,9 @@ class SetKeyModal(ModalScreen):
     def action_save(self) -> None:
         key = self.query_one("#setkey-input", Input).value.strip()
         if not key:
-            self.query_one("#setkey-masked", Label).update("  [red]Key cannot be empty[/red]")
+            self.query_one("#setkey-masked", Label).update(
+                "  [red]Key cannot be empty[/red]"
+            )
             return
         if not hasattr(self._config, "api_keys") or self._config.api_keys is None:
             self._config.api_keys = {}
@@ -852,9 +1123,9 @@ class KeysModal(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "dismiss_modal", "", show=False),
-        Binding("up",     "move_up",       "", show=False),
-        Binding("down",   "move_down",     "", show=False),
-        Binding("enter",  "select",        "", show=False),
+        Binding("up", "move_up", "", show=False),
+        Binding("down", "move_down", "", show=False),
+        Binding("enter", "select", "", show=False),
     ]
 
     def __init__(self, config) -> None:
@@ -865,7 +1136,9 @@ class KeysModal(ModalScreen):
     def compose(self) -> ComposeResult:
         keys = getattr(self._config, "api_keys", {}) or {}
         with Container(id="keys-dialog"):
-            yield Label("  API Keys   ↑↓ navigate  Enter edit  Esc close", id="keys-title")
+            yield Label(
+                "  API Keys   ↑↓ navigate  Enter edit  Esc close", id="keys-title"
+            )
             with Vertical(id="keys-list"):
                 for i, (pid, plabel, _ph) in enumerate(_PROVIDERS):
                     key = keys.get(pid, "")
@@ -922,11 +1195,15 @@ class KeysModal(ModalScreen):
         def _on_result(result) -> None:
             if result is None:
                 return
-            action = result[0]
+            result[0]
             # Refresh the row status
             keys2 = getattr(self._config, "api_keys", {}) or {}
             k = keys2.get(pid, "")
-            status_label = f"[green]● {k[:8]}…[/green]" if k else "[dim]○ not set — click to add[/dim]"
+            status_label = (
+                f"[green]● {k[:8]}…[/green]"
+                if k
+                else "[dim]○ not set — click to add[/dim]"
+            )
             try:
                 row = self.query_one(f"#krow-{idx}")
                 row.query_one(".keys-status", Label).update(status_label)
@@ -947,20 +1224,30 @@ class AddMcpModal(ModalScreen):
 
     BINDINGS = [
         Binding("escape", "cancel", "", show=False),
-        Binding("ctrl+s", "save",   "", show=False),
+        Binding("ctrl+s", "save", "", show=False),
     ]
 
     def compose(self) -> ComposeResult:
         with Container(id="addmcp-dialog"):
             yield Label("  Add MCP Server", id="addmcp-title")
             yield Label("  Name", classes="addmcp-label")
-            yield Input(placeholder="filesystem", id="addmcp-name", classes="addmcp-input")
+            yield Input(
+                placeholder="filesystem", id="addmcp-name", classes="addmcp-input"
+            )
             yield Label("  Command", classes="addmcp-label")
             yield Input(placeholder="npx", id="addmcp-command", classes="addmcp-input")
             yield Label("  Args (space-separated)", classes="addmcp-label")
-            yield Input(placeholder="-y @modelcontextprotocol/server-filesystem /path", id="addmcp-args", classes="addmcp-input")
-            yield Label("  Env (optional, KEY=value KEY2=value2)", classes="addmcp-label")
-            yield Input(placeholder="API_KEY=...", id="addmcp-env", classes="addmcp-input")
+            yield Input(
+                placeholder="-y @modelcontextprotocol/server-filesystem /path",
+                id="addmcp-args",
+                classes="addmcp-input",
+            )
+            yield Label(
+                "  Env (optional, KEY=value KEY2=value2)", classes="addmcp-label"
+            )
+            yield Input(
+                placeholder="API_KEY=...", id="addmcp-env", classes="addmcp-input"
+            )
             yield Label("", id="addmcp-error")
             with Container(classes="addmcp-btn-row"):
                 yield Button("  Save & Connect", id="addmcp-save", variant="success")
@@ -984,10 +1271,16 @@ class AddMcpModal(ModalScreen):
         env_text = self.query_one("#addmcp-env", Input).value.strip()
 
         if not name or not command:
-            self.query_one("#addmcp-error", Label).update("  [red]Name and command are required[/red]")
+            self.query_one("#addmcp-error", Label).update(
+                "  [red]Name and command are required[/red]"
+            )
             return
 
-        from dabba.agent.mcp_client import McpServerConfig, load_mcp_config, save_mcp_config
+        from dabba.agent.mcp_client import (
+            McpServerConfig,
+            load_mcp_config,
+            save_mcp_config,
+        )
 
         args = args_text.split() if args_text else []
         env = {}
@@ -1001,7 +1294,9 @@ class AddMcpModal(ModalScreen):
         try:
             save_mcp_config(configs)
         except OSError as exc:
-            self.query_one("#addmcp-error", Label).update(f"  [red]Could not save: {exc}[/red]")
+            self.query_one("#addmcp-error", Label).update(
+                f"  [red]Could not save: {exc}[/red]"
+            )
             return
 
         self.dismiss(("saved", name))
@@ -1023,12 +1318,12 @@ class McpModal(ModalScreen):
     """
 
     BINDINGS = [
-        Binding("escape", "dismiss_modal",  "", show=False),
-        Binding("up",     "move_up",        "", show=False),
-        Binding("down",   "move_down",      "", show=False),
-        Binding("a",      "add_server",     "", show=False),
-        Binding("d",      "delete_server",  "", show=False),
-        Binding("r",      "refresh_status", "", show=False),
+        Binding("escape", "dismiss_modal", "", show=False),
+        Binding("up", "move_up", "", show=False),
+        Binding("down", "move_down", "", show=False),
+        Binding("a", "add_server", "", show=False),
+        Binding("d", "delete_server", "", show=False),
+        Binding("r", "refresh_status", "", show=False),
     ]
 
     def __init__(self, agent) -> None:
@@ -1039,7 +1334,10 @@ class McpModal(ModalScreen):
 
     def compose(self) -> ComposeResult:
         with Container(id="mcp-dialog"):
-            yield Label("  MCP Servers   ↑↓ navigate  a add  d remove  r refresh  Esc close", id="mcp-title")
+            yield Label(
+                "  MCP Servers   ↑↓ navigate  a add  d remove  r refresh  Esc close",
+                id="mcp-title",
+            )
             yield Vertical(id="mcp-list")
             yield Label("  Config: ~/.config/dabba/mcp_servers.json", id="mcp-hint")
 
@@ -1064,7 +1362,12 @@ class McpModal(ModalScreen):
         await container.remove_children()
 
         if not self._names:
-            await container.mount(Label("  No MCP servers configured yet — press 'a' to add one", id="mcp-empty"))
+            await container.mount(
+                Label(
+                    "  No MCP servers configured yet — press 'a' to add one",
+                    id="mcp-empty",
+                )
+            )
             return
 
         rows = []
@@ -1072,10 +1375,18 @@ class McpModal(ModalScreen):
             cfg = configs[name]
             connected = name in live["servers"]
             tools = live["tools_by_server"].get(name, [])
-            status = "[green]● connected[/green]" if connected else "[dim]○ not connected[/dim]"
+            status = (
+                "[green]● connected[/green]"
+                if connected
+                else "[dim]○ not connected[/dim]"
+            )
             hl = " --highlight" if i == self._idx else ""
             cmd_line = f"{cfg.command} {' '.join(cfg.args)}"
-            tools_line = f"tools: {', '.join(tools)}" if tools else "tools: (none yet — press r to refresh)"
+            tools_line = (
+                f"tools: {', '.join(tools)}"
+                if tools
+                else "tools: (none yet — press r to refresh)"
+            )
             text = f"  {name}   {status}\n  [dim]{cmd_line}[/dim]\n  [dim]{tools_line}[/dim]"
             rows.append(Label(text, id=f"mcprow-{i}", classes=f"mcp-row{hl}"))
         await container.mount(*rows)
@@ -1094,6 +1405,7 @@ class McpModal(ModalScreen):
         async def _on_result(result) -> None:
             if result is not None:
                 await self._reconnect_and_refresh()
+
         self.app.push_screen(AddMcpModal(), _on_result)
 
     async def action_delete_server(self) -> None:
@@ -1129,24 +1441,33 @@ class McpModal(ModalScreen):
 
 # ── Messages ───────────────────────────────────────────────────────────────────
 
+
 class AgentResponse(Message):
     def __init__(self, text: str) -> None:
-        super().__init__(); self.text = text
+        super().__init__()
+        self.text = text
+
 
 class AgentError(Message):
     def __init__(self, error: str) -> None:
-        super().__init__(); self.error = error
+        super().__init__()
+        self.error = error
+
 
 class ModelChanged(Message):
     def __init__(self, model_id: str) -> None:
-        super().__init__(); self.model_id = model_id
+        super().__init__()
+        self.model_id = model_id
+
 
 class EffortChanged(Message):
     def __init__(self, effort: str) -> None:
-        super().__init__(); self.effort = effort
+        super().__init__()
+        self.effort = effort
 
 
 # ── Main App ───────────────────────────────────────────────────────────────────
+
 
 class DabbaTUI(App[None]):
     CSS = _CSS
@@ -1154,20 +1475,22 @@ class DabbaTUI(App[None]):
 
     BINDINGS = [
         # Use ctrl+q to quit so ctrl+c is free for copy in terminal
-        Binding("ctrl+q",  "quit",                "Quit",   show=True),
-        Binding("ctrl+l",  "clear_chat",           "Clear",  show=True),
-        Binding("f1",      "show_help",            "Help",   show=True),
-        Binding("f2",      "open_model_picker",    "Model",  show=True),
-        Binding("f3",      "open_effort_picker",   "Effort", show=True),
-        Binding("f4",      "open_upload",          "Upload", show=True),
+        Binding("ctrl+q", "quit", "Quit", show=True),
+        Binding("ctrl+l", "clear_chat", "Clear", show=True),
+        Binding("f1", "show_help", "Help", show=True),
+        Binding("f2", "open_model_picker", "Model", show=True),
+        Binding("f3", "open_effort_picker", "Effort", show=True),
+        Binding("f4", "open_upload", "Upload", show=True),
         # Suggestion navigation (only fires when input focused)
-        Binding("up",      "suggest_up",           "",       show=False),
-        Binding("down",    "suggest_down",          "",       show=False),
-        Binding("tab",     "suggest_tab",           "",       show=False),
-        Binding("escape",  "dismiss_suggestions",   "",       show=False),
+        Binding("up", "suggest_up", "", show=False),
+        Binding("down", "suggest_down", "", show=False),
+        Binding("tab", "suggest_tab", "", show=False),
+        Binding("escape", "dismiss_suggestions", "", show=False),
     ]
 
-    def __init__(self, agent: "AgentProxy", config: "CliConfig", version: str = "1.0") -> None:
+    def __init__(
+        self, agent: "AgentProxy", config: "CliConfig", version: str = "1.0"
+    ) -> None:
         super().__init__()
         self.agent = agent
         self.config = config
@@ -1182,7 +1505,10 @@ class DabbaTUI(App[None]):
         with Container(id="app-header"):
             yield Label("  ⌘  dabba", id="header-logo")
             yield Label(f"  {self.config.default_model}", id="header-model")
-            yield Label(f"[{TIER_COLOR.get(effort,'dim')}]{effort}[/{TIER_COLOR.get(effort,'dim')}]", id="header-effort")
+            yield Label(
+                f"[{TIER_COLOR.get(effort, 'dim')}]{effort}[/{TIER_COLOR.get(effort, 'dim')}]",
+                id="header-effort",
+            )
             yield Label(f"v{self.version}", id="header-meta")
             yield Label("● ready", id="header-status")
 
@@ -1194,14 +1520,22 @@ class DabbaTUI(App[None]):
 
         with Container(id="input-container"):
             yield Label("❯", id="input-prompt")
-            yield Input(placeholder="Message dabba…  (F2 model · F3 effort · F4 upload · /help)", id="user-input")
+            yield Input(
+                placeholder="Message dabba…  (F2 model · F3 effort · F4 upload · /help)",
+                id="user-input",
+            )
 
         with Container(id="app-footer"):
-            yield Label("  F2 model · F3 effort · F4 upload · /keys · /git · /view · /run · Ctrl+Q exit", id="footer-shortcuts")
+            yield Label(
+                "  F2 model · F3 effort · F4 upload · /keys · /git · /view · /run · Ctrl+Q exit",
+                id="footer-shortcuts",
+            )
             yield Label("", id="footer-session")
 
     def on_mount(self) -> None:
-        self._post_system("Type a message and press Enter  ·  F2 to switch model  ·  /help for all commands")
+        self._post_system(
+            "Type a message and press Enter  ·  F2 to switch model  ·  /help for all commands"
+        )
         self.query_one("#user-input", Input).focus()
         self._update_footer()
 
@@ -1217,7 +1551,11 @@ class DabbaTUI(App[None]):
         if not text:
             return
         suggestions = self.query_one(SuggestionsPanel)
-        if "visible" in suggestions.classes and text.startswith("/") and " " not in text:
+        if (
+            "visible" in suggestions.classes
+            and text.startswith("/")
+            and " " not in text
+        ):
             selected = suggestions.get_selected()
             if selected and selected != text:
                 event.input.value = selected + " "
@@ -1275,24 +1613,40 @@ class DabbaTUI(App[None]):
                 return
             # Check if this model's provider needs a key that isn't set yet
             from dabba.providers.registry import _MODEL_MAP
+
             info = _MODEL_MAP.get(model_id)
             if info and info.requires_key:
                 keys = getattr(self.config, "api_keys", {}) or {}
                 if not keys.get(info.provider, ""):
                     # Find provider label + placeholder for the modal
-                    entry = next(((p, l, ph) for p, l, ph in _PROVIDERS if p == info.provider), None)
+                    entry = next(
+                        (
+                            (provider, label, placeholder)
+                            for provider, label, placeholder in _PROVIDERS
+                            if provider == info.provider
+                        ),
+                        None,
+                    )
                     if entry:
                         p, label, ph = entry
+
                         def _on_key_result(result) -> None:
                             if result and result[0] == "saved":
                                 self._apply_model(model_id)
                             else:
-                                self._post_system(f"Key not saved — still using {self.config.default_model}")
-                        self.push_screen(SetKeyModal(p, label, ph, "", self.config), _on_key_result)
+                                self._post_system(
+                                    f"Key not saved — still using {self.config.default_model}"
+                                )
+
+                        self.push_screen(
+                            SetKeyModal(p, label, ph, "", self.config), _on_key_result
+                        )
                         return
             self._apply_model(model_id)
 
-        self.push_screen(ModelPicker(self.config.default_model, self.config), _on_result)
+        self.push_screen(
+            ModelPicker(self.config.default_model, self.config), _on_result
+        )
 
     def _apply_model(self, model_id: str) -> None:
         self.config.default_model = model_id
@@ -1310,7 +1664,9 @@ class DabbaTUI(App[None]):
                 self._update_header_effort(effort)
                 self._post_system(f"Effort → {effort}")
 
-        self.push_screen(EffortPicker(getattr(self.config, "effort", "medium")), _on_result)
+        self.push_screen(
+            EffortPicker(getattr(self.config, "effort", "medium")), _on_result
+        )
 
     def action_open_upload(self) -> None:
         def _on_result(path: Optional[str]) -> None:
@@ -1325,31 +1681,36 @@ class DabbaTUI(App[None]):
         parts = cmd.strip().split()
         c = parts[0].lower()
         handlers = {
-            "/exit":        lambda a: self.action_quit(),
-            "/quit":        lambda a: self.action_quit(),
-            "/help":        lambda a: self._cmd_help(),
-            "/?":           lambda a: self._cmd_help(),
-            "/clear":       lambda a: self.action_clear_chat(),
-            "/save":        self._cmd_save,
-            "/history":     lambda a: self._post_system(f"{self._message_count} messages this session."),
-            "/reset":       lambda a: (self.agent.reset(), self._post_system("Conversation reset.")),
-            "/metrics":     lambda a: self._cmd_metrics(),
-            "/model":       lambda a: self.action_open_model_picker(),
-            "/effort":      lambda a: self._cmd_effort(a),
-            "/keys":        self._cmd_keys,
-            "/tools":       lambda a: self._cmd_tools(),
-            "/mcp":         lambda a: self._cmd_mcp(),
-            "/mode":        self._cmd_mode,
+            "/exit": lambda a: self.action_quit(),
+            "/quit": lambda a: self.action_quit(),
+            "/help": lambda a: self._cmd_help(),
+            "/?": lambda a: self._cmd_help(),
+            "/clear": lambda a: self.action_clear_chat(),
+            "/save": self._cmd_save,
+            "/history": lambda a: self._post_system(
+                f"{self._message_count} messages this session."
+            ),
+            "/reset": lambda a: (
+                self.agent.reset(),
+                self._post_system("Conversation reset."),
+            ),
+            "/metrics": lambda a: self._cmd_metrics(),
+            "/model": lambda a: self.action_open_model_picker(),
+            "/effort": lambda a: self._cmd_effort(a),
+            "/keys": self._cmd_keys,
+            "/tools": lambda a: self._cmd_tools(),
+            "/mcp": lambda a: self._cmd_mcp(),
+            "/mode": self._cmd_mode,
             "/permissions": lambda a: self._cmd_permissions(),
-            "/git":         self._cmd_git,
-            "/view":        self._cmd_view,
-            "/create":      self._cmd_create,
-            "/run":         self._cmd_run,
-            "/upload":      self._cmd_upload,
-            "/powershell":  self._cmd_powershell,
-            "/ps":          self._cmd_ps,
-            "/ssh":         self._cmd_ssh,
-            "/docker":      self._cmd_docker,
+            "/git": self._cmd_git,
+            "/view": self._cmd_view,
+            "/create": self._cmd_create,
+            "/run": self._cmd_run,
+            "/upload": self._cmd_upload,
+            "/powershell": self._cmd_powershell,
+            "/ps": self._cmd_ps,
+            "/ssh": self._cmd_ssh,
+            "/docker": self._cmd_docker,
         }
         h = handlers.get(c)
         if h:
@@ -1363,13 +1724,19 @@ class DabbaTUI(App[None]):
         lines.append("|---------|-------------|")
         for cmd, desc in SLASH_COMMANDS:
             lines.append(f"| `{cmd}` | {desc} |")
-        lines.append("\n**Shortcuts:** F2 switch model · F3 effort · Tab autocomplete · ↑↓ suggestions · Ctrl+L clear · Ctrl+C exit")
+        lines.append(
+            "\n**Shortcuts:** F2 switch model · F3 effort · Tab autocomplete · ↑↓ suggestions · Ctrl+L clear · Ctrl+C exit"
+        )
         self._add_message("dabba", "\n".join(lines))
 
     def _cmd_save(self, args):
-        import json; from pathlib import Path
+        import json
+        from pathlib import Path
+
         path = args[0] if args else None
-        default = Path(self.config.history_file).parent / f"session_{int(time.time())}.jsonl"
+        default = (
+            Path(self.config.history_file).parent / f"session_{int(time.time())}.jsonl"
+        )
         save_path = Path(path) if path else default
         try:
             save_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1380,8 +1747,16 @@ class DabbaTUI(App[None]):
             with open(save_path, "w") as f:
                 if context is not None:
                     for entry in context.get("entries", []):
-                        f.write(json.dumps({"role": entry["role"], "content": entry["content"]}) + "\n")
-                    f.write(json.dumps({"__checkpoint__": True, "context_manager": context}) + "\n")
+                        f.write(
+                            json.dumps(
+                                {"role": entry["role"], "content": entry["content"]}
+                            )
+                            + "\n"
+                        )
+                    f.write(
+                        json.dumps({"__checkpoint__": True, "context_manager": context})
+                        + "\n"
+                    )
             self._post_system(f"Saved → {save_path}")
         except Exception as exc:
             self._post_system(f"Save failed: {exc}")
@@ -1391,7 +1766,10 @@ class DabbaTUI(App[None]):
         m, s = divmod(elapsed, 60)
         model = self.config.default_model
         effort = getattr(self.config, "effort", "medium")
-        self._add_message("dabba", f"**Session stats**\n- Time: {m}m {s}s\n- Messages: {self._message_count}\n- Model: `{model}`\n- Effort: `{effort}`")
+        self._add_message(
+            "dabba",
+            f"**Session stats**\n- Time: {m}m {s}s\n- Messages: {self._message_count}\n- Model: `{model}`\n- Effort: `{effort}`",
+        )
 
     def _cmd_effort(self, args):
         if args and args[0] in [k for k, _ in EFFORT_OPTIONS]:
@@ -1413,24 +1791,39 @@ class DabbaTUI(App[None]):
             if len(args) >= 2:
                 # Jump directly to the provider's entry screen
                 pid = args[1].lower()
-                entry = next(((p, l, ph) for p, l, ph in _PROVIDERS if p == pid), None)
+                entry = next(
+                    (
+                        (provider, label, placeholder)
+                        for provider, label, placeholder in _PROVIDERS
+                        if provider == pid
+                    ),
+                    None,
+                )
                 if not entry:
-                    self._post_system(f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface")
+                    self._post_system(
+                        f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface"
+                    )
                     return
                 p, label, ph = entry
                 keys = getattr(self.config, "api_keys", {}) or {}
+
                 def _on_result(result) -> None:
                     if result and result[0] == "saved":
                         if hasattr(self.agent, "_provider_registry"):
                             self.agent._provider_registry = None
                         self._post_system(f"Key saved for {result[1]}")
-                self.push_screen(SetKeyModal(p, label, ph, keys.get(p, ""), self.config), _on_result)
+
+                self.push_screen(
+                    SetKeyModal(p, label, ph, keys.get(p, ""), self.config), _on_result
+                )
             else:
                 self._open_keys_modal()
             return
         if args[0] == "delete" and len(args) >= 2:
             provider = args[1].lower()
-            if hasattr(self.config, "api_keys") and provider in (self.config.api_keys or {}):
+            if hasattr(self.config, "api_keys") and provider in (
+                self.config.api_keys or {}
+            ):
                 del self.config.api_keys[provider]
                 self.config.save()
                 if hasattr(self.agent, "_provider_registry"):
@@ -1446,6 +1839,7 @@ class DabbaTUI(App[None]):
         def _on_done(result) -> None:
             if hasattr(self.agent, "_provider_registry"):
                 self.agent._provider_registry = None
+
         self.push_screen(KeysModal(self.config), _on_done)
 
     def _cmd_tools(self):
@@ -1482,7 +1876,10 @@ class DabbaTUI(App[None]):
     def _cmd_permissions(self):
         try:
             s = self.agent.permissions.get_summary()
-            self._add_message("dabba", f"**Permissions**\n- Mode: `{s['mode']}`\n- Allowed: {', '.join(s['session_allowed']) or 'none'}\n- Denied: {', '.join(s['session_denied']) or 'none'}")
+            self._add_message(
+                "dabba",
+                f"**Permissions**\n- Mode: `{s['mode']}`\n- Allowed: {', '.join(s['session_allowed']) or 'none'}\n- Denied: {', '.join(s['session_denied']) or 'none'}",
+            )
         except Exception as e:
             self._post_system(f"Error: {e}")
 
@@ -1492,13 +1889,13 @@ class DabbaTUI(App[None]):
             self._post_system("Usage: /git status|diff|log|commit '<msg>'|push|branch")
             return
         subcmd = args[0].lower()
-        import subprocess
+
         cmds = {
             "status": ["git", "status", "--short"],
-            "diff":   ["git", "diff", "--stat"],
-            "log":    ["git", "log", "--oneline", "-10"],
+            "diff": ["git", "diff", "--stat"],
+            "log": ["git", "log", "--oneline", "-10"],
             "branch": ["git", "branch"],
-            "push":   ["git", "push"],
+            "push": ["git", "push"],
         }
         if subcmd == "commit":
             msg = " ".join(args[1:]) if len(args) > 1 else "update"
@@ -1516,6 +1913,7 @@ class DabbaTUI(App[None]):
             self._post_system("Usage: /view <path>")
             return
         from pathlib import Path
+
         path = Path(args[0])
         try:
             if not path.exists():
@@ -1527,7 +1925,9 @@ class DabbaTUI(App[None]):
             if len(lines) > 60:
                 preview += f"\n… ({len(lines)} lines total)"
             ext = path.suffix.lstrip(".")
-            self._add_message("dabba", f"**{path}** ({len(lines)} lines)\n\n```{ext}\n{preview}\n```")
+            self._add_message(
+                "dabba", f"**{path}** ({len(lines)} lines)\n\n```{ext}\n{preview}\n```"
+            )
         except Exception as e:
             self._post_system(f"Error: {e}")
 
@@ -1536,6 +1936,7 @@ class DabbaTUI(App[None]):
             self._post_system("Usage: /create <path>")
             return
         from pathlib import Path
+
         path = Path(args[0])
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -1564,11 +1965,14 @@ class DabbaTUI(App[None]):
             self._post_system("Usage: /powershell <command>")
             return
         from dabba.tools.shell_tools import execute_powershell
+
         command = " ".join(args)
         self._run_tool_cmd(
             lambda: execute_powershell(command),
             label=f"powershell {command}",
-            render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)",
+            render=lambda r: (
+                (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+            ),
         )
 
     def _cmd_ps(self, args):
@@ -1581,7 +1985,9 @@ class DabbaTUI(App[None]):
                 return
             lines = ["**Background processes**\n"]
             for p in procs:
-                lines.append(f"- `{p['process_id']}` [{p['status']}] pid={p['pid']} up={p['uptime_seconds']}s — {p['command'][:60]}")
+                lines.append(
+                    f"- `{p['process_id']}` [{p['status']}] pid={p['pid']} up={p['uptime_seconds']}s — {p['command'][:60]}"
+                )
             self._add_message("dabba", "\n".join(lines))
             return
 
@@ -1590,12 +1996,17 @@ class DabbaTUI(App[None]):
             self._run_tool_cmd(
                 lambda: process_tools.start_process(" ".join(args[1:])),
                 label=f"process start {' '.join(args[1:])}",
-                render=lambda r: f"Started `{r['process_id']}` (pid={r['pid']}, status={r['status']})",
+                render=lambda r: (
+                    f"Started `{r['process_id']}` (pid={r['pid']}, status={r['status']})"
+                ),
             )
         elif sub == "output" and len(args) > 1:
             try:
                 out = process_tools.get_process_output(args[1])
-                self._add_message("dabba", f"**{args[1]}** [{out['status']}]\n```\n{out['stdout']}\n{out['stderr']}\n```")
+                self._add_message(
+                    "dabba",
+                    f"**{args[1]}** [{out['status']}]\n```\n{out['stdout']}\n{out['stderr']}\n```",
+                )
             except KeyError as e:
                 self._post_system(str(e))
         elif sub == "stop" and len(args) > 1:
@@ -1613,43 +2024,58 @@ class DabbaTUI(App[None]):
             return
         host, command = args[0], " ".join(args[1:])
         from dabba.tools import ssh_tools
+
         self._run_tool_cmd(
             lambda: ssh_tools.ssh_exec(host, command),
             label=f"ssh {host} {command}",
-            render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)",
+            render=lambda r: (
+                (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+            ),
         )
 
     def _cmd_docker(self, args):
         if not args:
-            self._post_system("Usage: /docker ps|exec <container> <cmd>|run <image> <cmd>")
+            self._post_system(
+                "Usage: /docker ps|exec <container> <cmd>|run <image> <cmd>"
+            )
             return
         from dabba.tools import docker_tools
+
         sub = args[0]
         if sub == "ps":
             self._run_tool_cmd(
                 lambda: docker_tools.docker_list_containers(),
                 label="docker ps",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         elif sub == "exec" and len(args) > 2:
             container, command = args[1], " ".join(args[2:])
             self._run_tool_cmd(
                 lambda: docker_tools.docker_exec(container, command),
                 label=f"docker exec {container} {command}",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         elif sub == "run" and len(args) > 2:
             image, command = args[1], " ".join(args[2:])
             self._run_tool_cmd(
                 lambda: docker_tools.docker_run(image, command),
                 label=f"docker run {image} {command}",
-                render=lambda r: (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)",
+                render=lambda r: (
+                    (r.get("stdout", "") + r.get("stderr", "")).strip() or "(no output)"
+                ),
             )
         else:
-            self._post_system("Usage: /docker ps|exec <container> <cmd>|run <image> <cmd>")
+            self._post_system(
+                "Usage: /docker ps|exec <container> <cmd>|run <image> <cmd>"
+            )
 
     def _attach_file(self, path_str: str) -> None:
         from pathlib import Path
+
         path = Path(path_str.strip())
         if not path.exists():
             self._post_system(f"File not found: {path}")
@@ -1663,10 +2089,19 @@ class DabbaTUI(App[None]):
             lines = content.splitlines()
             preview = "\n".join(lines[:8]) + ("\n…" if len(lines) > 8 else "")
             # Store attachment for next message
-            self._pending_attachment = {"path": str(path), "content": content, "ext": ext}
-            self._post_system(f"Attached: {path.name} ({len(lines)} lines) — will be included in your next message")
+            self._pending_attachment = {
+                "path": str(path),
+                "content": content,
+                "ext": ext,
+            }
+            self._post_system(
+                f"Attached: {path.name} ({len(lines)} lines) — will be included in your next message"
+            )
             # Show preview
-            self._add_message("dabba", f"**{path.name}** ({len(lines)} lines)\n```{ext}\n{preview}\n```")
+            self._add_message(
+                "dabba",
+                f"**{path.name}** ({len(lines)} lines)\n```{ext}\n{preview}\n```",
+            )
         except Exception as e:
             self._post_system(f"Error reading file: {e}")
 
@@ -1701,6 +2136,7 @@ class DabbaTUI(App[None]):
                 formatting; defaults to pretty-printing the dict.
         """
         import json as _json
+
         try:
             result = asyncio.run(coro_factory())
             if render:
@@ -1722,6 +2158,7 @@ class DabbaTUI(App[None]):
         self._busy = True
         self.call_from_thread(self._set_thinking, True)
         try:
+
             async def stream_and_collect():
                 collected = ""
                 first = True
@@ -1737,15 +2174,25 @@ class DabbaTUI(App[None]):
                         else:
                             self.call_from_thread(self._update_stream, collected)
                     elif ctype == "tool_call":
-                        tool_name = content.get("name", "") if isinstance(content, dict) else ""
+                        tool_name = (
+                            content.get("name", "") if isinstance(content, dict) else ""
+                        )
                         self.call_from_thread(self._post_system, f"🔧 {tool_name}()")
                     elif ctype == "question":
                         # ask_user ends the turn here — render the question as
                         # the visible reply (see agent_loop.py's stream_chat)
                         # so the user can just type their answer next, same as
                         # any other assistant message.
-                        question = content.get("question", "") if isinstance(content, dict) else ""
-                        options = content.get("options") if isinstance(content, dict) else None
+                        question = (
+                            content.get("question", "")
+                            if isinstance(content, dict)
+                            else ""
+                        )
+                        options = (
+                            content.get("options")
+                            if isinstance(content, dict)
+                            else None
+                        )
                         text = f"❓ {question}"
                         if options:
                             text += "\n" + "\n".join(f"  • {o}" for o in options)
@@ -1791,7 +2238,9 @@ class DabbaTUI(App[None]):
             ts = datetime.now().strftime("%H:%M")
             container = Container(classes="msg-block")
             container.id = "stream-msg"
-            container.mount(Label(f"  {model}  {ts}", classes="msg-label msg-label-dabba"))
+            container.mount(
+                Label(f"  {model}  {ts}", classes="msg-label msg-label-dabba")
+            )
             sw = Static(text, markup=False, classes="msg-content-dabba")
             sw.id = "stream-content"
             container.mount(sw)
@@ -1806,7 +2255,8 @@ class DabbaTUI(App[None]):
             sw = self.query_one("#stream-content", Static)
             sw.update(text)
             self.call_after_refresh(
-                self.query_one("#chat-scroll", ScrollableContainer).scroll_end, animate=True
+                self.query_one("#chat-scroll", ScrollableContainer).scroll_end,
+                animate=True,
             )
         except NoMatches:
             pass
@@ -1826,7 +2276,9 @@ class DabbaTUI(App[None]):
     def _add_message(self, role: str, content: str, model_label: str = "") -> None:
         scroll = self.query_one("#chat-scroll", ScrollableContainer)
         thinking = self.query_one("#thinking", ThinkingWidget)
-        scroll.mount(ChatMessage(role, content, model_label=model_label), before=thinking)
+        scroll.mount(
+            ChatMessage(role, content, model_label=model_label), before=thinking
+        )
         self._message_count += 1
         self.call_after_refresh(scroll.scroll_end, animate=True)
         self._update_footer()
@@ -1834,7 +2286,10 @@ class DabbaTUI(App[None]):
     def _post_system(self, text: str) -> None:
         scroll = self.query_one("#chat-scroll", ScrollableContainer)
         thinking = self.query_one("#thinking", ThinkingWidget)
-        scroll.mount(Static(f"  [dim]{text}[/dim]", classes="msg-content-system"), before=thinking)
+        scroll.mount(
+            Static(f"  [dim]{text}[/dim]", classes="msg-content-system"),
+            before=thinking,
+        )
         self.call_after_refresh(scroll.scroll_end, animate=False)
 
     def _set_thinking(self, active: bool) -> None:
@@ -1845,7 +2300,8 @@ class DabbaTUI(App[None]):
         else:
             thinking.stop()
         self.call_after_refresh(
-            self.query_one("#chat-scroll", ScrollableContainer).scroll_end, animate=False
+            self.query_one("#chat-scroll", ScrollableContainer).scroll_end,
+            animate=False,
         )
 
     def _update_header_status(self, text: str) -> None:
@@ -1863,7 +2319,9 @@ class DabbaTUI(App[None]):
     def _update_header_effort(self, effort: str) -> None:
         color = TIER_COLOR.get(effort, "dim")
         try:
-            self.query_one("#header-effort", Label).update(f"[{color}]{effort}[/{color}]")
+            self.query_one("#header-effort", Label).update(
+                f"[{color}]{effort}[/{color}]"
+            )
         except NoMatches:
             pass
 
@@ -1871,7 +2329,9 @@ class DabbaTUI(App[None]):
         elapsed = int(time.time() - self._session_start)
         m, s = divmod(elapsed, 60)
         try:
-            self.query_one("#footer-session", Label).update(f"{self._message_count} msg  ·  {m}m {s}s ")
+            self.query_one("#footer-session", Label).update(
+                f"{self._message_count} msg  ·  {m}m {s}s "
+            )
         except NoMatches:
             pass
 
@@ -1901,6 +2361,7 @@ class DabbaTUI(App[None]):
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
+
 
 def run_tui(agent: "AgentProxy", config: "CliConfig", version: str = "1.0") -> None:
     DabbaTUI(agent=agent, config=config, version=version).run()

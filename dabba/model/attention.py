@@ -81,20 +81,18 @@ class MultiHeadAttention(nn.Module):
         self.causal = causal
         self._attention_dropout_p = attention_dropout
 
-        self.q_proj = nn.Linear(
-            hidden_size, num_heads * self.head_dim, bias=bias
-        )
+        self.q_proj = nn.Linear(hidden_size, num_heads * self.head_dim, bias=bias)
         self.k_proj = nn.Linear(
             hidden_size, self.num_key_value_heads * self.head_dim, bias=bias
         )
         self.v_proj = nn.Linear(
             hidden_size, self.num_key_value_heads * self.head_dim, bias=bias
         )
-        self.o_proj = nn.Linear(
-            num_heads * self.head_dim, hidden_size, bias=bias
-        )
+        self.o_proj = nn.Linear(num_heads * self.head_dim, hidden_size, bias=bias)
 
-        self.attn_dropout = nn.Dropout(attention_dropout) if attention_dropout > 0 else nn.Identity()
+        self.attn_dropout = (
+            nn.Dropout(attention_dropout) if attention_dropout > 0 else nn.Identity()
+        )
 
         rope_scaling_factor = 1.0
         if rope_scaling and isinstance(rope_scaling, dict):
@@ -168,7 +166,9 @@ class MultiHeadAttention(nn.Module):
             k_states_for_cache = key_states
             v_states_for_cache = value_states
             key_states = key_states.repeat_interleave(self.num_key_value_groups, dim=1)
-            value_states = value_states.repeat_interleave(self.num_key_value_groups, dim=1)
+            value_states = value_states.repeat_interleave(
+                self.num_key_value_groups, dim=1
+            )
         else:
             k_states_for_cache = key_states
             v_states_for_cache = value_states
@@ -182,24 +182,34 @@ class MultiHeadAttention(nn.Module):
         if self.causal:
             seq_q = query_states.shape[2]
             seq_k = key_states.shape[2]
-            causal_mask = torch.ones(seq_q, seq_k, device=query_states.device, dtype=torch.bool).tril()
+            causal_mask = torch.ones(
+                seq_q, seq_k, device=query_states.device, dtype=torch.bool
+            ).tril()
             attn_weights = attn_weights.masked_fill(~causal_mask, float("-inf"))
 
         if attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 
-        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+            query_states.dtype
+        )
         attn_weights = self._apply_attention_hook(attn_weights)
         attn_weights = self.attn_dropout(attn_weights)
         attn_output = torch.matmul(attn_weights, value_states)
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         seq_len_out = attn_output.shape[1]
-        attn_output = attn_output.reshape(batch_size, seq_len_out, self.num_heads * self.head_dim)
+        attn_output = attn_output.reshape(
+            batch_size, seq_len_out, self.num_heads * self.head_dim
+        )
         attn_output = self.o_proj(attn_output)
 
         if use_cache:
-            return attn_output, attn_weights, KVCache(k_states_for_cache, v_states_for_cache)
+            return (
+                attn_output,
+                attn_weights,
+                KVCache(k_states_for_cache, v_states_for_cache),
+            )
         return attn_output, attn_weights, None
 
     def _apply_attention_hook(self, attn_weights: torch.Tensor) -> torch.Tensor:
@@ -339,6 +349,7 @@ class MultiQueryAttention(MultiHeadAttention):
 
 class FlashAttention(MultiHeadAttention):
     """Flash Attention — falls back to standard MHA on CPU."""
+
     # causal and other kwargs are absorbed by MultiHeadAttention.__init__(**kwargs)
     pass
 
@@ -346,7 +357,9 @@ class FlashAttention(MultiHeadAttention):
 class SparseAttention(MultiHeadAttention):
     """Sparse Attention — zeroes out non-local attention positions."""
 
-    def __init__(self, *args, sparsity_factor: int = 2, sparsity_pattern: str = "local", **kwargs):
+    def __init__(
+        self, *args, sparsity_factor: int = 2, sparsity_pattern: str = "local", **kwargs
+    ):
         super().__init__(*args, **kwargs)
         self.sparsity_factor = sparsity_factor
         self.sparsity_pattern = sparsity_pattern
@@ -394,11 +407,14 @@ class AlibiAttention(MultiHeadAttention):
         # Compute ALiBi slopes: 2^(-8*h/num_heads) for head h
         slopes = torch.tensor(
             [2 ** (-8 * (h + 1) / num_heads) for h in range(num_heads)],
-            dtype=attn_weights.dtype, device=device
+            dtype=attn_weights.dtype,
+            device=device,
         ).view(1, num_heads, 1, 1)
         # Position bias: negative distance * slope
         i_idx = torch.arange(seq_q, device=device).unsqueeze(1)
         j_idx = torch.arange(seq_k, device=device).unsqueeze(0)
-        distance = (i_idx - j_idx).float().unsqueeze(0).unsqueeze(0)  # (1,1,seq_q,seq_k)
+        distance = (
+            (i_idx - j_idx).float().unsqueeze(0).unsqueeze(0)
+        )  # (1,1,seq_q,seq_k)
         alibi_bias = -distance.abs() * slopes
         return attn_weights + alibi_bias

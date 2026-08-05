@@ -230,16 +230,15 @@ class RagPipeline:
         )
 
         # Choose retrieval strategy
-        if (
-            self.hybrid_search is not None
-            and self.config.retrieval_mode == "hybrid"
-        ):
+        if self.hybrid_search is not None and self.config.retrieval_mode == "hybrid":
             results = self.hybrid_search.search(
                 query=query,
                 top_k=effective_top_k,
-                alpha=self.config.hybrid_search_alpha
-                if hasattr(self.config, "hybrid_search_alpha")
-                else 0.5,
+                alpha=(
+                    self.config.hybrid_search_alpha
+                    if hasattr(self.config, "hybrid_search_alpha")
+                    else 0.5
+                ),
                 score_threshold=effective_threshold,
                 filter_criteria=filter_criteria,
             )
@@ -317,9 +316,7 @@ class RagPipeline:
             prompt = self._build_prompt(
                 query=query,
                 context=context,
-                history=(
-                    self._conversation_history if add_to_history else None
-                ),
+                history=(self._conversation_history if add_to_history else None),
             )
 
             kwargs = generation_kwargs or {}
@@ -330,9 +327,7 @@ class RagPipeline:
                 logger.error("LLM generation failed: %s", exc)
                 answer = None
         else:
-            logger.info(
-                "No llm_generate_fn provided; returning context only."
-            )
+            logger.info("No llm_generate_fn provided; returning context only.")
 
         result: Dict[str, Any] = {
             "query": query,
@@ -343,9 +338,7 @@ class RagPipeline:
         }
 
         if add_to_history:
-            self._conversation_history.append(
-                {"role": "user", "content": query}
-            )
+            self._conversation_history.append({"role": "user", "content": query})
             if answer is not None:
                 self._conversation_history.append(
                     {"role": "assistant", "content": answer}
@@ -412,9 +405,7 @@ class RagPipeline:
             )
 
         if os.path.isdir(source):
-            result = self.document_indexer.index_directory(
-                source, metadata=metadata
-            )
+            result = self.document_indexer.index_directory(source, metadata=metadata)
             ids: List[str] = []
             for file_ids in result.values():
                 ids.extend(file_ids)
@@ -429,17 +420,17 @@ class RagPipeline:
 
     def clear_index(self) -> None:
         """Clear all documents from the vector store."""
-        if hasattr(self.vector_store, 'clear'):
+        if hasattr(self.vector_store, "clear"):
             self.vector_store.clear()
-        elif hasattr(self.vector_store, 'reset'):
+        elif hasattr(self.vector_store, "reset"):
             self.vector_store.reset()
 
     def get_stats(self) -> dict:
         """Return statistics about the pipeline."""
         count = 0
-        if hasattr(self.vector_store, '__len__'):
+        if hasattr(self.vector_store, "__len__"):
             count = len(self.vector_store)
-        elif hasattr(self.vector_store, 'count'):
+        elif hasattr(self.vector_store, "count"):
             count = self.vector_store.count()
         return {
             "document_count": count,

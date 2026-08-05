@@ -5,7 +5,7 @@ Provides a unified interface for encoding queries and documents into
 dense vector representations used throughout the RAG pipeline.
 """
 
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import numpy as np
 import numpy.typing as npt

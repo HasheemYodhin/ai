@@ -99,8 +99,11 @@ class HookManager:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 if isinstance(data, list):
                     self._hooks = [
-                        h for h in data
-                        if isinstance(h, dict) and h.get("event") in VALID_EVENTS and h.get("id")
+                        h
+                        for h in data
+                        if isinstance(h, dict)
+                        and h.get("event") in VALID_EVENTS
+                        and h.get("id")
                     ]
                     logger.info("Loaded %d hooks from %s", len(self._hooks), self._path)
         except Exception as exc:
@@ -131,7 +134,9 @@ class HookManager:
         enabled: bool = True,
     ) -> Dict[str, Any]:
         if event not in VALID_EVENTS:
-            raise ValueError(f"Unknown hook event: {event!r}. Must be one of {sorted(VALID_EVENTS)}")
+            raise ValueError(
+                f"Unknown hook event: {event!r}. Must be one of {sorted(VALID_EVENTS)}"
+            )
         if not command.strip():
             raise ValueError("Hook command cannot be empty.")
         hook = {
@@ -192,8 +197,11 @@ class HookManager:
         """
         tool_name = str(context.get("tool_name") or "")
         matching = [
-            h for h in self._hooks
-            if h.get("enabled", True) and h.get("event") == event and self._matches(h, tool_name)
+            h
+            for h in self._hooks
+            if h.get("enabled", True)
+            and h.get("event") == event
+            and self._matches(h, tool_name)
         ]
         if not matching:
             return {"blocked": False, "reason": ""}
@@ -201,21 +209,32 @@ class HookManager:
         payload = json.dumps(context, default=str)
         for hook in matching:
             result = await self._run_one(hook, event, payload)
-            self._recent_runs.append({
-                "hook_id": hook["id"], "event": event, "tool": tool_name,
-                "exit_code": result.exit_code, "blocked": result.blocked,
-                "stdout": result.stdout[:2000], "stderr": result.stderr[:2000],
-                "error": result.error, "duration_ms": round(result.duration_ms, 1),
-                "timestamp": time.time(),
-            })
+            self._recent_runs.append(
+                {
+                    "hook_id": hook["id"],
+                    "event": event,
+                    "tool": tool_name,
+                    "exit_code": result.exit_code,
+                    "blocked": result.blocked,
+                    "stdout": result.stdout[:2000],
+                    "stderr": result.stderr[:2000],
+                    "error": result.error,
+                    "duration_ms": round(result.duration_ms, 1),
+                    "timestamp": time.time(),
+                }
+            )
             del self._recent_runs[:-MAX_RUNS_LOGGED]
             if result.blocked:
-                reason = (result.stderr or result.stdout or f"Hook exited {result.exit_code}").strip()
+                reason = (
+                    result.stderr or result.stdout or f"Hook exited {result.exit_code}"
+                ).strip()
                 logger.info("Hook %s blocked %s: %s", hook["id"], event, reason[:200])
                 return {"blocked": True, "reason": reason[:500]}
         return {"blocked": False, "reason": ""}
 
-    async def _run_one(self, hook: Dict[str, Any], event: str, payload: str) -> HookRunResult:
+    async def _run_one(
+        self, hook: Dict[str, Any], event: str, payload: str
+    ) -> HookRunResult:
         start = time.monotonic()
         env = {**os.environ, "DABBA_HOOK_EVENT": event, "DABBA_HOOK_CONTEXT": payload}
         try:
@@ -235,21 +254,35 @@ class HookManager:
                 proc.kill()
                 await proc.wait()
                 duration = (time.monotonic() - start) * 1000
-                return HookRunResult(hook["id"], event, None, "", "", False, duration, error="Hook timed out")
+                return HookRunResult(
+                    hook["id"],
+                    event,
+                    None,
+                    "",
+                    "",
+                    False,
+                    duration,
+                    error="Hook timed out",
+                )
 
             duration = (time.monotonic() - start) * 1000
             exit_code = proc.returncode
             blocked = event in BLOCKING_EVENTS and exit_code not in (0, None)
             return HookRunResult(
-                hook["id"], event, exit_code,
+                hook["id"],
+                event,
+                exit_code,
                 stdout.decode("utf-8", errors="replace"),
                 stderr.decode("utf-8", errors="replace"),
-                blocked, duration,
+                blocked,
+                duration,
             )
         except Exception as exc:
             duration = (time.monotonic() - start) * 1000
             logger.warning("Hook %s failed to run: %s", hook["id"], exc)
-            return HookRunResult(hook["id"], event, None, "", "", False, duration, error=str(exc))
+            return HookRunResult(
+                hook["id"], event, None, "", "", False, duration, error=str(exc)
+            )
 
 
 # Module-level singleton — one shared instance for the whole server process.

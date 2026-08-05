@@ -6,7 +6,7 @@ sequence with the highest cumulative log probability, producing
 higher-quality output than greedy decoding.
 """
 
-from typing import List, Optional, Tuple
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -90,7 +90,7 @@ class BeamSearch:
             if logits.shape[0] != current.shape[0]:
                 repeat = current.shape[0] // max(1, logits.shape[0])
                 logits = logits.repeat_interleave(repeat, dim=0)
-                logits = logits[:current.shape[0]]
+                logits = logits[: current.shape[0]]
             log_probs = F.log_softmax(logits, dim=-1)
 
             scores = log_probs + beam_scores.unsqueeze(-1)
@@ -107,10 +107,12 @@ class BeamSearch:
                     flat = top_idx[b, i].item()
                     beam_i = flat // vocab_size
                     tok = flat % vocab_size
-                    new_seq = torch.cat([
-                        current[b * self.num_beams + beam_i],
-                        torch.tensor([tok], device=device)
-                    ])
+                    new_seq = torch.cat(
+                        [
+                            current[b * self.num_beams + beam_i],
+                            torch.tensor([tok], device=device),
+                        ]
+                    )
                     seqs.append(new_seq)
                     sc.append(top_scores[b, i].item())
                     if len(seqs) >= self.num_beams:
@@ -120,7 +122,7 @@ class BeamSearch:
                     seqs.append(seqs[0].clone())
                     sc.append(sc[0])
                 new_current.extend(seqs)
-                new_scores_list.extend(sc[:self.num_beams])
+                new_scores_list.extend(sc[: self.num_beams])
 
                 # Track best
                 best_seqs[b] = seqs[0].clone()

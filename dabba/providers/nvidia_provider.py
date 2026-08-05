@@ -2,14 +2,17 @@
 NVIDIA NIM provider — OpenAI-compatible API at integrate.api.nvidia.com/v1
 Model IDs verified against the live catalog (July 2026).
 """
+
 from __future__ import annotations
 import re
 from typing import Iterator, List, Optional
 from dabba.providers.base import (
-    BaseProvider, ModelInfo,
-    tools_to_openai_schema, openai_tool_calls_to_tags, remap_tool_role_for_provider,
+    BaseProvider,
+    ModelInfo,
+    tools_to_openai_schema,
+    openai_tool_calls_to_tags,
+    remap_tool_role_for_provider,
 )
-
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
@@ -21,7 +24,9 @@ SLOW_REASONING_TIMEOUT_SECONDS = 300.0
 # fixes that for any completion length instead of chasing an ever-bigger
 # fixed cap. Capped so a pathological model can't loop forever.
 MAX_LENGTH_CONTINUATIONS = 4
-_CONTINUE_PROMPT = "Continue exactly where you left off. Do not repeat any text already written."
+_CONTINUE_PROMPT = (
+    "Continue exactly where you left off. Do not repeat any text already written."
+)
 # NVIDIA's free-tier NIM endpoints (esp. newly-added models) hit worker
 # capacity limits under load — "ResourceExhausted: Worker local total
 # request limit reached" — that's usually gone within a few seconds, not a
@@ -41,37 +46,268 @@ CAPACITY_FALLBACKS = {
 
 MODELS = [
     # Meta Llama
-    ModelInfo("meta/llama-3.3-70b-instruct",              "Llama 3.3 70B",        "nvidia", "high",   "Meta Llama 3.3 70B Instruct",          128000, 0.23, 0.23,  False, True),
-    ModelInfo("meta/llama-3.1-8b-instruct",               "Llama 3.1 8B",         "nvidia", "medium", "Meta Llama 3.1 8B Instruct",           128000, 0.05, 0.05,  False, True),
-    ModelInfo("meta/llama-3.2-3b-instruct",               "Llama 3.2 3B",         "nvidia", "low",    "Meta Llama 3.2 3B fast",               128000, 0.04, 0.04,  False, True),
+    ModelInfo(
+        "meta/llama-3.3-70b-instruct",
+        "Llama 3.3 70B",
+        "nvidia",
+        "high",
+        "Meta Llama 3.3 70B Instruct",
+        128000,
+        0.23,
+        0.23,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "meta/llama-3.1-8b-instruct",
+        "Llama 3.1 8B",
+        "nvidia",
+        "medium",
+        "Meta Llama 3.1 8B Instruct",
+        128000,
+        0.05,
+        0.05,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "meta/llama-3.2-3b-instruct",
+        "Llama 3.2 3B",
+        "nvidia",
+        "low",
+        "Meta Llama 3.2 3B fast",
+        128000,
+        0.04,
+        0.04,
+        False,
+        True,
+    ),
     # NVIDIA Nemotron
-    ModelInfo("nvidia/llama-3.1-nemotron-70b-instruct",   "Nemotron 70B",         "nvidia", "xhigh",  "NVIDIA Nemotron reasoning model",      128000, 0.35, 0.35,  False, True),
-    ModelInfo("nvidia/llama-3.3-nemotron-super-49b-v1",   "Nemotron Super 49B",   "nvidia", "high",   "NVIDIA Nemotron Super",                128000, 0.42, 0.42,  False, True),
-    ModelInfo("nvidia/nemotron-3-ultra-550b-a55b",        "Nemotron-3 Ultra 550B", "nvidia", "max",   "NVIDIA Nemotron-3 Ultra 550B model",   8192,  0.0,  0.0,   False, True),
+    ModelInfo(
+        "nvidia/llama-3.1-nemotron-70b-instruct",
+        "Nemotron 70B",
+        "nvidia",
+        "xhigh",
+        "NVIDIA Nemotron reasoning model",
+        128000,
+        0.35,
+        0.35,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "nvidia/llama-3.3-nemotron-super-49b-v1",
+        "Nemotron Super 49B",
+        "nvidia",
+        "high",
+        "NVIDIA Nemotron Super",
+        128000,
+        0.42,
+        0.42,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "nvidia/nemotron-3-ultra-550b-a55b",
+        "Nemotron-3 Ultra 550B",
+        "nvidia",
+        "max",
+        "NVIDIA Nemotron-3 Ultra 550B model",
+        8192,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
     # DeepSeek — only the full R1 is confirmed live on NVIDIA NIM
-    ModelInfo("deepseek-ai/deepseek-r1",                  "DeepSeek R1",          "nvidia", "max",    "DeepSeek R1 full reasoning model",     128000, 0.55, 2.19,  True,  True),
-    ModelInfo("deepseek-ai/deepseek-r1-distill-qwen-7b",  "DeepSeek R1 Qwen 7B",  "nvidia", "high",   "DeepSeek R1 distilled (Qwen base)",    128000, 0.08, 0.08,  True,  True),
-    ModelInfo("deepseek-ai/deepseek-v4-flash",             "DeepSeek V4 Flash",    "nvidia", "high",   "284B MoE, 1M context, fast coding & agents", 1000000, 0.0, 0.0, False, True),
+    ModelInfo(
+        "deepseek-ai/deepseek-r1",
+        "DeepSeek R1",
+        "nvidia",
+        "max",
+        "DeepSeek R1 full reasoning model",
+        128000,
+        0.55,
+        2.19,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "deepseek-ai/deepseek-r1-distill-qwen-7b",
+        "DeepSeek R1 Qwen 7B",
+        "nvidia",
+        "high",
+        "DeepSeek R1 distilled (Qwen base)",
+        128000,
+        0.08,
+        0.08,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "deepseek-ai/deepseek-v4-flash",
+        "DeepSeek V4 Flash",
+        "nvidia",
+        "high",
+        "284B MoE, 1M context, fast coding & agents",
+        1000000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
     # Mistral
-    ModelInfo("mistralai/mistral-7b-instruct-v0.3",       "Mistral 7B",           "nvidia", "medium", "Mistral 7B Instruct",                  32768,  0.04, 0.04,  False, True),
-    ModelInfo("mistralai/mixtral-8x7b-instruct-v0.1",     "Mixtral 8x7B",         "nvidia", "high",   "Mixtral MoE 8x7B",                     32768,  0.24, 0.24,  False, True),
-    ModelInfo("mistralai/mistral-large-2-instruct",       "Mistral Large 2",      "nvidia", "xhigh",  "Mistral Large 2",                      128000, 2.00, 6.00,  False, True),
+    ModelInfo(
+        "mistralai/mistral-7b-instruct-v0.3",
+        "Mistral 7B",
+        "nvidia",
+        "medium",
+        "Mistral 7B Instruct",
+        32768,
+        0.04,
+        0.04,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "mistralai/mixtral-8x7b-instruct-v0.1",
+        "Mixtral 8x7B",
+        "nvidia",
+        "high",
+        "Mixtral MoE 8x7B",
+        32768,
+        0.24,
+        0.24,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "mistralai/mistral-large-2-instruct",
+        "Mistral Large 2",
+        "nvidia",
+        "xhigh",
+        "Mistral Large 2",
+        128000,
+        2.00,
+        6.00,
+        False,
+        True,
+    ),
     # Microsoft Phi
-    ModelInfo("microsoft/phi-3.5-mini-instruct",          "Phi-3.5 Mini",         "nvidia", "medium", "Microsoft Phi-3.5 Mini 128K",          128000, 0.05, 0.05,  False, True),
-    ModelInfo("microsoft/phi-3-medium-128k-instruct",     "Phi-3 Medium",         "nvidia", "high",   "Microsoft Phi-3 Medium 128K",          128000, 0.12, 0.12,  False, True),
+    ModelInfo(
+        "microsoft/phi-3.5-mini-instruct",
+        "Phi-3.5 Mini",
+        "nvidia",
+        "medium",
+        "Microsoft Phi-3.5 Mini 128K",
+        128000,
+        0.05,
+        0.05,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "microsoft/phi-3-medium-128k-instruct",
+        "Phi-3 Medium",
+        "nvidia",
+        "high",
+        "Microsoft Phi-3 Medium 128K",
+        128000,
+        0.12,
+        0.12,
+        False,
+        True,
+    ),
     # Qwen
-    ModelInfo("qwen/qwen2.5-72b-instruct",                "Qwen 2.5 72B",         "nvidia", "high",   "Qwen 2.5 72B Instruct",                32768,  0.35, 0.35,  False, True),
-    ModelInfo("qwen/qwen2.5-coder-32b-instruct",          "Qwen 2.5 Coder 32B",   "nvidia", "high",   "Qwen 2.5 Coder specialized",           32768,  0.20, 0.20,  False, True),
+    ModelInfo(
+        "qwen/qwen2.5-72b-instruct",
+        "Qwen 2.5 72B",
+        "nvidia",
+        "high",
+        "Qwen 2.5 72B Instruct",
+        32768,
+        0.35,
+        0.35,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "qwen/qwen2.5-coder-32b-instruct",
+        "Qwen 2.5 Coder 32B",
+        "nvidia",
+        "high",
+        "Qwen 2.5 Coder specialized",
+        32768,
+        0.20,
+        0.20,
+        False,
+        True,
+    ),
     # Z.ai GLM — free endpoint on NVIDIA NIM (build.nvidia.com/z-ai/glm-5.2)
-    ModelInfo("z-ai/glm-5.2",                             "GLM 5.2",              "nvidia", "max",    "Flagship LLM for agentic workflows, coding, and long-horizon reasoning", 1000000, 0.0, 0.0,  True,  True),
+    ModelInfo(
+        "z-ai/glm-5.2",
+        "GLM 5.2",
+        "nvidia",
+        "max",
+        "Flagship LLM for agentic workflows, coding, and long-horizon reasoning",
+        1000000,
+        0.0,
+        0.0,
+        True,
+        True,
+    ),
     # ThinkingMachines
-    ModelInfo("thinkingmachines/inkling",                 "Inkling",              "nvidia", "max",    "ThinkingMachines Inkling model",       8192,   0.0, 0.0,  False, True),
+    ModelInfo(
+        "thinkingmachines/inkling",
+        "Inkling",
+        "nvidia",
+        "max",
+        "ThinkingMachines Inkling model",
+        8192,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
     # MiniMax
-    ModelInfo("minimaxai/minimax-m3",                     "MiniMax M3",           "nvidia", "high",   "MiniMax M3 model",                     1000000, 0.0, 0.0,  True,  True),  # 428B MoE, up to 1M context / 512K output
+    ModelInfo(
+        "minimaxai/minimax-m3",
+        "MiniMax M3",
+        "nvidia",
+        "high",
+        "MiniMax M3 model",
+        1000000,
+        0.0,
+        0.0,
+        True,
+        True,
+    ),  # 428B MoE, up to 1M context / 512K output
     # Google Gemma
-    ModelInfo("google/gemma-2-2b-it",                     "Gemma-2 2B It",        "nvidia", "low",    "Google Gemma-2 2B Instruct model",     8192,   0.0, 0.0,    False, True),
+    ModelInfo(
+        "google/gemma-2-2b-it",
+        "Gemma-2 2B It",
+        "nvidia",
+        "low",
+        "Google Gemma-2 2B Instruct model",
+        8192,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
     # Image generation (FLUX.1-dev via NVIDIA NIM ai.api.nvidia.com)
-    ModelInfo("black-forest-labs/flux.1-dev",              "FLUX.1-dev (Image)",   "nvidia", "high",  "FLUX.1-dev image generation via NVIDIA NIM", 0, 0.0, 0.0, False, True),
+    ModelInfo(
+        "black-forest-labs/flux.1-dev",
+        "FLUX.1-dev (Image)",
+        "nvidia",
+        "high",
+        "FLUX.1-dev image generation via NVIDIA NIM",
+        0,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
 ]
 
 # Models confirmed EOL on NVIDIA NIM — kept here as reference, NOT in active list:
@@ -99,13 +335,19 @@ class NvidiaProvider(BaseProvider):
 
         fallback = self._capacity_fallback(model)
         blocked_until = self._capacity_blocked_until.get(model, 0.0)
-        if fallback and params.get("model") == model and _time.monotonic() < blocked_until:
+        if (
+            fallback
+            and params.get("model") == model
+            and _time.monotonic() < blocked_until
+        ):
             params["model"] = fallback
 
     def _mark_capacity_cooldown(self, model: str) -> None:
         import time as _time
 
-        self._capacity_blocked_until[model] = _time.monotonic() + CAPACITY_COOLDOWN_SECONDS
+        self._capacity_blocked_until[model] = (
+            _time.monotonic() + CAPACITY_COOLDOWN_SECONDS
+        )
 
     def _timeout_for_model(self, model: str) -> float:
         # Reuse _is_reasoning_model rather than a second hand-maintained list —
@@ -114,7 +356,10 @@ class NvidiaProvider(BaseProvider):
         # and every model gets a lot slower once auto-continuation can chain
         # several full-budget completions back to back.
         model_l = model.lower()
-        is_slow = self._is_reasoning_model(model) or model_l == "deepseek-ai/deepseek-v4-flash"
+        is_slow = (
+            self._is_reasoning_model(model)
+            or model_l == "deepseek-ai/deepseek-v4-flash"
+        )
         return SLOW_REASONING_TIMEOUT_SECONDS if is_slow else DEFAULT_TIMEOUT_SECONDS
 
     def _is_reasoning_model(self, model: str) -> bool:
@@ -128,7 +373,9 @@ class NvidiaProvider(BaseProvider):
             or model_l == "z-ai/glm-5.2"
         )
 
-    def _build_params(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> dict:
+    def _build_params(
+        self, messages, model, max_tokens=4096, temperature=0.7, **kwargs
+    ) -> dict:
         model_lower = model.lower()
         processed_messages = remap_tool_role_for_provider(messages)
         if "gemma" in model_lower:
@@ -146,18 +393,31 @@ class NvidiaProvider(BaseProvider):
                 for msg in other_messages:
                     if msg.get("role") == "user":
                         if isinstance(msg["content"], str):
-                            msg["content"] = f"[System Prompt]\n{joined_system}\n\n{msg['content']}"
+                            msg["content"] = (
+                                f"[System Prompt]\n{joined_system}\n\n{msg['content']}"
+                            )
                         elif isinstance(msg["content"], list):
-                            msg["content"].insert(0, {"type": "text", "text": f"[System Prompt]\n{joined_system}\n\n"})
+                            msg["content"].insert(
+                                0,
+                                {
+                                    "type": "text",
+                                    "text": f"[System Prompt]\n{joined_system}\n\n",
+                                },
+                            )
                         break
                 else:
-                    other_messages.insert(0, {
-                        "role": "user",
-                        "content": f"[System Prompt]\n{joined_system}"
-                    })
+                    other_messages.insert(
+                        0,
+                        {
+                            "role": "user",
+                            "content": f"[System Prompt]\n{joined_system}",
+                        },
+                    )
                 processed_messages = other_messages
 
-        params: dict = dict(model=model, messages=processed_messages, max_tokens=max_tokens)
+        params: dict = dict(
+            model=model, messages=processed_messages, max_tokens=max_tokens
+        )
 
         # NVIDIA's GLM runtime enables its long reasoning phase by default.
         # With the UI's deliberately small output limit (256 tokens), that can
@@ -181,7 +441,9 @@ class NvidiaProvider(BaseProvider):
         if "minimax" in model.lower():
             params["extra_body"] = {
                 "chat_template_kwargs": {
-                    "thinking_mode": "enabled" if kwargs.get("thinking", False) else "disabled",
+                    "thinking_mode": (
+                        "enabled" if kwargs.get("thinking", False) else "disabled"
+                    ),
                 }
             }
 
@@ -198,6 +460,7 @@ class NvidiaProvider(BaseProvider):
 
     def _client(self, key: str, model: str):
         from openai import OpenAI
+
         return OpenAI(
             base_url=NVIDIA_BASE_URL,
             api_key=key,
@@ -231,9 +494,15 @@ class NvidiaProvider(BaseProvider):
         of them, not just the first."""
         if resp_usage is None:
             return total
-        total["prompt_tokens"] = total.get("prompt_tokens", 0) + (getattr(resp_usage, "prompt_tokens", 0) or 0)
-        total["completion_tokens"] = total.get("completion_tokens", 0) + (getattr(resp_usage, "completion_tokens", 0) or 0)
-        total["total_tokens"] = total.get("total_tokens", 0) + (getattr(resp_usage, "total_tokens", 0) or 0)
+        total["prompt_tokens"] = total.get("prompt_tokens", 0) + (
+            getattr(resp_usage, "prompt_tokens", 0) or 0
+        )
+        total["completion_tokens"] = total.get("completion_tokens", 0) + (
+            getattr(resp_usage, "completion_tokens", 0) or 0
+        )
+        total["total_tokens"] = total.get("total_tokens", 0) + (
+            getattr(resp_usage, "total_tokens", 0) or 0
+        )
         return total
 
     @staticmethod
@@ -241,7 +510,9 @@ class NvidiaProvider(BaseProvider):
         msg = str(exc).lower()
         return "resourceexhausted" in msg or ("503" in msg and "limit reached" in msg)
 
-    def _create_with_retries(self, client, params: dict, model: str, stream: bool = False):
+    def _create_with_retries(
+        self, client, params: dict, model: str, stream: bool = False
+    ):
         """
         client.chat.completions.create(**params[, stream=True]) with two
         transient-failure retries layered in: a max_tokens ceiling clamp
@@ -266,14 +537,23 @@ class NvidiaProvider(BaseProvider):
                     params["max_tokens"] = ceiling
                     continue
 
-                if self._is_resource_exhausted(exc) and attempt < RESOURCE_EXHAUSTED_RETRIES:
+                if (
+                    self._is_resource_exhausted(exc)
+                    and attempt < RESOURCE_EXHAUSTED_RETRIES
+                ):
                     attempt += 1
-                    _time.sleep(RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (attempt - 1)))
+                    _time.sleep(
+                        RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                    )
                     continue
 
                 msg = str(exc)
                 fallback = self._capacity_fallback(model)
-                if self._is_resource_exhausted(exc) and fallback and params.get("model") == model:
+                if (
+                    self._is_resource_exhausted(exc)
+                    and fallback
+                    and params.get("model") == model
+                ):
                     self._mark_capacity_cooldown(model)
                     params["model"] = fallback
                     attempt = 0
@@ -349,7 +629,9 @@ class NvidiaProvider(BaseProvider):
 
                 if not emitted_text and lazy_attempt < RESOURCE_EXHAUSTED_RETRIES:
                     lazy_attempt += 1
-                    _time.sleep(RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (lazy_attempt - 1)))
+                    _time.sleep(
+                        RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (lazy_attempt - 1))
+                    )
                     continue
 
                 if not emitted_text and can_fallback:
@@ -393,7 +675,9 @@ class NvidiaProvider(BaseProvider):
         # can cold-start or spend longer reasoning, so they get a larger single
         # request window while ordinary NVIDIA models still fail quickly.
         client = self._client(key, model)
-        params = self._build_params(messages, model, max_tokens=max_tokens, temperature=temperature, **kwargs)
+        params = self._build_params(
+            messages, model, max_tokens=max_tokens, temperature=temperature, **kwargs
+        )
 
         resp = self._create_with_retries(client, params, model)
 
@@ -420,9 +704,12 @@ class NvidiaProvider(BaseProvider):
             # to show for it — nothing to continue from, so retry the same
             # request fresh (thinking forced off below) instead of building
             # on an empty turn.
-            cont_params = {**self._continuation_params(model, params), "messages": continuation_messages}
+            cont_params = {
+                **self._continuation_params(model, params),
+                "messages": continuation_messages,
+            }
             cont_resp = self._create_with_retries(client, cont_params, model)
-            more = (cont_resp.choices[0].message.content or "")
+            more = cont_resp.choices[0].message.content or ""
             text = (text + more).strip()
             finish_reason = cont_resp.choices[0].finish_reason
             self._accumulate_usage(usage_total, cont_resp.usage)
@@ -433,7 +720,9 @@ class NvidiaProvider(BaseProvider):
         tag_text = openai_tool_calls_to_tags(message)
         return (text + "\n" + tag_text).strip() if tag_text else text
 
-    def stream_chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> Iterator[str]:
+    def stream_chat(
+        self, messages, model, max_tokens=4096, temperature=0.7, **kwargs
+    ) -> Iterator[str]:
         usage_out = kwargs.pop("usage_out", None)
         key = kwargs.get("api_key", "")
         if not key:
@@ -443,7 +732,9 @@ class NvidiaProvider(BaseProvider):
             )
 
         client = self._client(key, model)
-        params = self._build_params(messages, model, max_tokens=max_tokens, temperature=temperature, **kwargs)
+        params = self._build_params(
+            messages, model, max_tokens=max_tokens, temperature=temperature, **kwargs
+        )
 
         # include_usage: ask for a trailing usage-only chunk (empty choices,
         # populated .usage) — without it, streaming never reports real token
@@ -477,7 +768,10 @@ class NvidiaProvider(BaseProvider):
             # else: thinking consumed the entire budget with nothing visible
             # streamed — retry the same request fresh (thinking forced off
             # below) instead of continuing from an empty turn.
-            cont_params = {**self._continuation_params(model, params), "messages": continuation_messages}
+            cont_params = {
+                **self._continuation_params(model, params),
+                "messages": continuation_messages,
+            }
             finish_reason = None
             for chunk in self._stream_with_recovery(client, cont_params, model):
                 if getattr(chunk, "usage", None):
@@ -532,7 +826,12 @@ class NvidiaProvider(BaseProvider):
         if resp.status_code != 200:
             try:
                 err = resp.json()
-                msg = err.get("detail") or err.get("message") or err.get("title") or str(err)
+                msg = (
+                    err.get("detail")
+                    or err.get("message")
+                    or err.get("title")
+                    or str(err)
+                )
             except Exception:
                 msg = resp.text or f"HTTP {resp.status_code}"
             raise RuntimeError(f"NVIDIA NIM image generation failed: {msg}")
@@ -563,8 +862,6 @@ class NvidiaProvider(BaseProvider):
                     break
 
         if not images:
-            raise RuntimeError(
-                f"NVIDIA NIM returned no images. Full response: {data}"
-            )
+            raise RuntimeError(f"NVIDIA NIM returned no images. Full response: {data}")
 
         return {"created": int(time.time()), "data": images}

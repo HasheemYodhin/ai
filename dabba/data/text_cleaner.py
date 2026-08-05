@@ -127,6 +127,7 @@ class TextCleaner:
         """
         try:
             from langdetect import detect
+
             return detect(text)
         except ImportError:
             return None

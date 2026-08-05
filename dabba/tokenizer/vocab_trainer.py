@@ -5,7 +5,7 @@ from various sources, sampling, and training the tokenizer vocabulary.
 
 import random
 from pathlib import Path
-from typing import Iterator, List, Optional, Union
+from typing import Iterator, List, Optional
 from dabba.tokenizer.bpe_tokenizer import BPETokenizer
 from dabba.utils.logging import get_logger
 
@@ -103,6 +103,7 @@ class VocabTrainer:
             Number of texts loaded.
         """
         import json
+
         count = 0
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -182,9 +183,7 @@ class VocabTrainer:
 
         tokenizer.train(self.texts, verbose=True)
 
-        self.logger.info(
-            f"Tokenizer trained. Vocabulary size: {len(tokenizer.vocab)}"
-        )
+        self.logger.info(f"Tokenizer trained. Vocabulary size: {len(tokenizer.vocab)}")
         return tokenizer
 
     def clear(self) -> None:

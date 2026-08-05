@@ -6,8 +6,8 @@ scheduling, mixed precision, gradient clipping, checkpointing,
 validation, early stopping, and TensorBoard logging.
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn.functional as F
@@ -44,7 +44,9 @@ class Trainer:
             weight_decay=config.weight_decay,
         )
 
-    def train(self, train_data: List[Dict], eval_data: Optional[List[Dict]] = None) -> Dict:
+    def train(
+        self, train_data: List[Dict], eval_data: Optional[List[Dict]] = None
+    ) -> Dict:
         history: Dict[str, List] = {"train_loss": []}
         for epoch in range(self.config.num_epochs):
             self.model.train()
@@ -62,7 +64,9 @@ class Trainer:
                     loss = F.mse_loss(out, lbl)
                     loss.backward()
                     epoch_losses.append(loss.item())
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.max_grad_norm
+                )
                 self.optimizer.step()
             history["train_loss"].extend(epoch_losses)
 

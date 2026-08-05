@@ -6,14 +6,10 @@ Combines StreamingDataset, SequencePacker, and standard PyTorch
 DataLoader into a simple interface.
 """
 
-from typing import Dict, Iterator, Optional, Union
-
 import torch
-from torch.utils.data import DataLoader, DistributedSampler, IterableDataset
+from torch.utils.data import DataLoader
 
 from dabba.data.streaming_dataset import StreamingDataset
-from dabba.data.packer import SequencePacker
-from dabba.utils.distributed import is_distributed, get_world_size
 
 
 def create_dataloader(

@@ -1,5 +1,5 @@
 import torch
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
+from unittest.mock import MagicMock
 from dabba.inference import Generator, GenerationConfig
 from dabba.inference.samplers import (
     SamplerBase,
@@ -287,7 +287,9 @@ class TestStreamingHandler:
 
     def test_generate_streaming(self):
         model = MagicMock()
-        model.forward.side_effect = [{"logits": torch.randn(1, 1, 100)} for _ in range(10)]
+        model.forward.side_effect = [
+            {"logits": torch.randn(1, 1, 100)} for _ in range(10)
+        ]
         gen = Generator(model)
         tokens = []
         input_ids = torch.randint(0, 100, (1, 5))

@@ -1,6 +1,10 @@
 import pytest
 
-from dabba.platform.coding import SchemaValidationError, SubagentCoordinator, validate_json_schema
+from dabba.platform.coding import (
+    SchemaValidationError,
+    SubagentCoordinator,
+    validate_json_schema,
+)
 
 
 def test_run_fans_out_in_parallel_and_isolates_failures():
@@ -12,9 +16,13 @@ def test_run_fans_out_in_parallel_and_isolates_failures():
         return f"{role} handled: {prompt}"
 
     results = coordinator.run(
-        {"reviewer": "check auth.py", "writer": "add tests", "broken": "x"}, runner,
+        {"reviewer": "check auth.py", "writer": "add tests", "broken": "x"},
+        runner,
     )
-    assert results["reviewer"] == {"success": True, "result": "reviewer handled: check auth.py"}
+    assert results["reviewer"] == {
+        "success": True,
+        "result": "reviewer handled: check auth.py",
+    }
     assert results["writer"] == {"success": True, "result": "writer handled: add tests"}
     assert results["broken"] == {"success": False, "error": "boom"}
 
@@ -34,9 +42,15 @@ def test_pipeline_chains_stage_output_into_the_next_prompt():
     results = coordinator.pipeline(stages, runner, initial_input="dabba release notes")
 
     assert seen_prompts[0] == ("draft", "write about: dabba release notes")
-    assert seen_prompts[1] == ("edit", "polish this: [draft]write about: dabba release notes")
+    assert seen_prompts[1] == (
+        "edit",
+        "polish this: [draft]write about: dabba release notes",
+    )
     assert results[0]["success"] and results[1]["success"]
-    assert results[1]["result"] == "[edit]polish this: [draft]write about: dabba release notes"
+    assert (
+        results[1]["result"]
+        == "[edit]polish this: [draft]write about: dabba release notes"
+    )
 
 
 def test_pipeline_stops_at_a_broken_stage_and_does_not_run_the_rest():
@@ -75,10 +89,13 @@ def test_pipeline_validates_structured_output_against_schema():
 
     results = coordinator.pipeline(
         [{"role": "finder", "prompt_template": "{input}", "output_schema": schema}],
-        good_runner, initial_input="scan the repo",
+        good_runner,
+        initial_input="scan the repo",
     )
     assert results[0]["success"] is True
-    assert results[0]["result"] == {"bugs": ["off-by-one in loop", "missing null check"]}
+    assert results[0]["result"] == {
+        "bugs": ["off-by-one in loop", "missing null check"]
+    }
 
     def bad_runner(role, prompt):
         return '{"wrong_key": []}'
@@ -92,12 +109,20 @@ def test_pipeline_validates_structured_output_against_schema():
 
 
 def test_validate_json_schema_directly():
-    validate_json_schema({"name": "x", "count": 3}, {
-        "type": "object", "required": ["name"],
-        "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
-    })
+    validate_json_schema(
+        {"name": "x", "count": 3},
+        {
+            "type": "object",
+            "required": ["name"],
+            "properties": {"name": {"type": "string"}, "count": {"type": "integer"}},
+        },
+    )
     with pytest.raises(SchemaValidationError):
-        validate_json_schema({"count": "not a number"}, {
-            "type": "object", "required": ["name"],
-            "properties": {"count": {"type": "integer"}},
-        })
+        validate_json_schema(
+            {"count": "not a number"},
+            {
+                "type": "object",
+                "required": ["name"],
+                "properties": {"count": {"type": "integer"}},
+            },
+        )

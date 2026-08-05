@@ -105,8 +105,10 @@ from dabba.inference import StreamingHandler
 
 handler = StreamingHandler()
 
+
 def on_token(token):
     print(token, end="", flush=True)
+
 
 handler.on_next_token = on_token
 

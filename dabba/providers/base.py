@@ -1,25 +1,25 @@
 from __future__ import annotations
 import json as _json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 TIERS = ["low", "medium", "high", "xhigh", "max"]
 
 EFFORT_PARAMS: Dict[str, Dict] = {
-    "low":    {"max_tokens": 1024,  "temperature": 1.0},
-    "medium": {"max_tokens": 4096,  "temperature": 0.7},
-    "high":   {"max_tokens": 8192,  "temperature": 0.3},
-    "xhigh":  {"max_tokens": 16384, "temperature": 0.1},
-    "max":    {"max_tokens": 32768, "temperature": 0.0},
+    "low": {"max_tokens": 1024, "temperature": 1.0},
+    "medium": {"max_tokens": 4096, "temperature": 0.7},
+    "high": {"max_tokens": 8192, "temperature": 0.3},
+    "xhigh": {"max_tokens": 16384, "temperature": 0.1},
+    "max": {"max_tokens": 32768, "temperature": 0.0},
 }
 
 TIER_LABELS: Dict[str, str] = {
-    "low":   "low   ",
-    "medium":"medium",
-    "high":  "high  ",
+    "low": "low   ",
+    "medium": "medium",
+    "high": "high  ",
     "xhigh": "xhigh ",
-    "max":   "max   ",
+    "max": "max   ",
 }
 
 
@@ -28,10 +28,10 @@ class ModelInfo:
     id: str
     name: str
     provider: str
-    tier: str               # recommended tier
+    tier: str  # recommended tier
     description: str
     context_window: int = 8192
-    cost_input: float = 0.0   # USD per 1M tokens
+    cost_input: float = 0.0  # USD per 1M tokens
     cost_output: float = 0.0
     supports_thinking: bool = False
     requires_key: bool = True
@@ -93,6 +93,7 @@ class BaseProvider(ABC):
 # unchanged — from their point of view, nothing about the response shape
 # is any different than a model that emitted the tag on its own.
 
+
 def tools_to_openai_schema(tool_dicts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Convert dabba's tool dicts (name/description/parameters) to OpenAI's tools= schema."""
     return [
@@ -101,7 +102,8 @@ def tools_to_openai_schema(tool_dicts: List[Dict[str, Any]]) -> List[Dict[str, A
             "function": {
                 "name": t["name"],
                 "description": t.get("description", ""),
-                "parameters": t.get("parameters") or {"type": "object", "properties": {}},
+                "parameters": t.get("parameters")
+                or {"type": "object", "properties": {}},
             },
         }
         for t in tool_dicts
@@ -156,7 +158,9 @@ def anthropic_tool_use_to_tags(content_blocks: Any) -> str:
     return "\n".join(blocks)
 
 
-def remap_tool_role_for_provider(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def remap_tool_role_for_provider(
+    messages: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
     """
     Rewrite any {"role": "tool", ...} message into {"role": "user", ...}
     with a "[Tool Result]" marker, dropping tool_call_id.
@@ -177,7 +181,9 @@ def remap_tool_role_for_provider(messages: List[Dict[str, Any]]) -> List[Dict[st
     remapped = []
     for m in messages:
         if m.get("role") == "tool":
-            remapped.append({"role": "user", "content": f"[Tool Result]\n{m.get('content', '')}"})
+            remapped.append(
+                {"role": "user", "content": f"[Tool Result]\n{m.get('content', '')}"}
+            )
         else:
             remapped.append(m)
     return remapped

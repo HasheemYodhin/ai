@@ -76,11 +76,18 @@ class AgentConfig:
     require_tool_approval: bool = True
     dangerous_tools: List[str] = field(
         default_factory=lambda: [
-            "shell_exec", "powershell_exec", "file_write",
+            "shell_exec",
+            "powershell_exec",
+            "file_write",
             "transactional_edit",
-            "process_start", "process_stop",
-            "ssh_exec", "scp_copy", "docker_exec", "docker_run",
-            "markdown_to_pdf", "markdown_to_docx",
+            "process_start",
+            "process_stop",
+            "ssh_exec",
+            "scp_copy",
+            "docker_exec",
+            "docker_run",
+            "markdown_to_pdf",
+            "markdown_to_docx",
         ]
     )
 
@@ -88,16 +95,44 @@ class AgentConfig:
     sandbox_shell: bool = True
     allowed_commands: List[str] = field(
         default_factory=lambda: [
-            "ls", "cat", "head", "tail", "echo", "grep", "find",
-            "python", "python3", "node", "npm", "git", "curl", "wget",
-            "mkdir", "cp", "mv", "rm", "touch", "chmod",
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "echo",
+            "grep",
+            "find",
+            "python",
+            "python3",
+            "node",
+            "npm",
+            "git",
+            "curl",
+            "wget",
+            "mkdir",
+            "cp",
+            "mv",
+            "rm",
+            "touch",
+            "chmod",
         ]
     )
     blocked_commands: List[str] = field(
         default_factory=lambda: [
-            "sudo", "su", "chown", "passwd", "kill", "pkill",
-            "shutdown", "reboot", "init", "systemctl",
-            "dd", "mkfs", "fdisk", "mount",
+            "sudo",
+            "su",
+            "chown",
+            "passwd",
+            "kill",
+            "pkill",
+            "shutdown",
+            "reboot",
+            "init",
+            "systemctl",
+            "dd",
+            "mkfs",
+            "fdisk",
+            "mount",
         ]
     )
 

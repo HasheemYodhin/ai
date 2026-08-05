@@ -1,6 +1,5 @@
 import torch
-import numpy as np
-from unittest.mock import Mock, patch, MagicMock, PropertyMock
+from unittest.mock import Mock, PropertyMock
 from dabba.multimodal import MultimodalProcessor
 from dabba.multimodal.image_processor import ImageProcessor
 from dabba.multimodal.vision_encoder import VisionEncoder
@@ -248,7 +247,9 @@ class TestMultimodalProcessor:
 
     def test_available_modalities(self):
         processor = Mock(spec=MultimodalProcessor)
-        type(processor).modalities = PropertyMock(return_value=["text", "image", "audio"])
+        type(processor).modalities = PropertyMock(
+            return_value=["text", "image", "audio"]
+        )
         assert "image" in processor.modalities
         assert "audio" in processor.modalities
 
@@ -258,5 +259,7 @@ class TestMultimodalProcessor:
             "text_output": "Configurable result.",
             "modality": "image+text",
         }
-        result = processor.process(text="Test", image_path="test.jpg", max_tokens=50, temperature=0.5)
+        result = processor.process(
+            text="Test", image_path="test.jpg", max_tokens=50, temperature=0.5
+        )
         assert result is not None

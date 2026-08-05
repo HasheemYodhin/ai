@@ -12,7 +12,7 @@ import type { UploadedFile, Project, ExtractedDocument, DocumentAttachment } fro
 
 interface InputAreaProps {
   onSend: (content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => void
-  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; viaVoice?: boolean; planMode?: boolean }) => void
+  onRunAgentMode: (content: string, opts: { label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean; planMode?: boolean }) => void
   onGenerateImage: (prompt: string) => void
   onStop: () => void
   isLoading: boolean
@@ -27,7 +27,27 @@ interface InputAreaProps {
 }
 
 const MAX_FILES = 5
-const MAX_FILE_SIZE = 10 * 1024 * 1024
+const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024
+const MAX_DOCUMENT_FILE_SIZE = 100 * 1024 * 1024
+const MAX_ZIP_FILE_SIZE = 10 * 1024 * 1024 * 1024
+
+function isZipFile(file: File): boolean {
+  return file.type === 'application/zip'
+    || file.type === 'application/x-zip-compressed'
+    || file.name.toLowerCase().endsWith('.zip')
+}
+
+function attachmentLimit(file: File): number {
+  if (isZipFile(file)) return MAX_ZIP_FILE_SIZE
+  if (file.type.startsWith('image/')) return MAX_IMAGE_FILE_SIZE
+  return MAX_DOCUMENT_FILE_SIZE
+}
+
+function attachmentLimitLabel(file: File): string {
+  if (isZipFile(file)) return '10 GB ZIP attachment limit'
+  if (file.type.startsWith('image/')) return '10 MB image attachment limit'
+  return '100 MB document attachment limit'
+}
 
 export function InputArea({
   onSend,
@@ -123,24 +143,37 @@ export function InputArea({
     const toProcess = Array.from(fileList).slice(0, remaining)
 
     const accepted = toProcess.filter(f => {
-      if (f.size > MAX_FILE_SIZE) {
-        setFileError(`"${f.name}" exceeds the 10 MB limit`)
+      if (f.size > attachmentLimit(f)) {
+        setFileError(`"${f.name}" exceeds the ${attachmentLimitLabel(f)}`)
         return false
       }
       return true
     })
 
-    // Read every file to a base64 data URL up-front so send stays synchronous
-    // and images survive serialization (object URLs don't).
+    // Only small images are base64 encoded. Documents and multi-GB ZIP files
+    // retain their browser File handle and are streamed as multipart uploads.
     const next: UploadedFile[] = await Promise.all(
-      accepted.map(async f => ({
-        id: crypto.randomUUID(),
-        name: f.name,
-        size: f.size,
-        type: f.type,
-        dataUrl: await fileToDataUrl(f),
-        preview: f.type.startsWith('image/') ? await fileToDataUrl(f) : undefined,
-      }))
+      accepted.map(async f => {
+        if (f.type.startsWith('image/')) {
+          const dataUrl = await fileToDataUrl(f)
+          return {
+            id: crypto.randomUUID(),
+            name: f.name,
+            size: f.size,
+            type: f.type,
+            file: f,
+            dataUrl,
+            preview: dataUrl,
+          }
+        }
+        return {
+          id: crypto.randomUUID(),
+          name: f.name,
+          size: f.size,
+          type: f.type,
+          file: f,
+        }
+      })
     )
 
     if (toProcess.length < fileList.length) {
@@ -182,7 +215,7 @@ export function InputArea({
     if ((!trimmed && files.length === 0) || isLoading || isExtractingDocuments || disabled) return
 
     if (mode.kind === 'agent') {
-      onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, viaVoice: pendingViaVoice, planMode: planModeEnabled })
+      onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, allowedTools: mode.allowedTools, viaVoice: pendingViaVoice, planMode: planModeEnabled })
     } else if (mode.kind === 'image') {
       onGenerateImage(trimmed)
     } else {
@@ -338,7 +371,7 @@ export function InputArea({
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.json,.jsonl,.csv"
+            accept="image/*,.zip,.pdf,.docx,.xlsx,.pptx,.txt,.md,.markdown,.json,.jsonl,.csv"
             className="hidden"
             onChange={handleFileInputChange}
           />

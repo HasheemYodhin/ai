@@ -17,9 +17,7 @@ class ApiConfig:
     host: str = "0.0.0.0"
     port: int = 8080
     workers: int = 1
-    cors_origins: List[str] = field(
-        default_factory=lambda: ["*"]
-    )
+    cors_origins: List[str] = field(default_factory=lambda: ["*"])
 
     # Model serving
     default_model: str = "dabba"

@@ -21,6 +21,7 @@ _HAS_TORCHVISION_MODELS = False
 
 try:
     import timm
+
     _HAS_TIMM = True
 except ImportError:
     timm = None
@@ -31,6 +32,7 @@ try:
         resnet50,
         ResNet50_Weights,
     )
+
     _HAS_TORCHVISION_MODELS = True
 except Exception:
     resnet50 = None
@@ -167,7 +169,10 @@ class VisionEncoder(nn.Module):
                     pretrained=True,
                     num_classes=0,
                 )
-                if "vit" in self.model_name.lower() or "siglip" in self.model_name.lower():
+                if (
+                    "vit" in self.model_name.lower()
+                    or "siglip" in self.model_name.lower()
+                ):
                     model_kwargs["img_size"] = self.image_size
 
                 model = timm.create_model(**model_kwargs)
@@ -191,12 +196,15 @@ class VisionEncoder(nn.Module):
 
                 logger.info(
                     "Loaded timm encoder '%s' with %d patches, hidden=%d",
-                    self.model_name, num_patches, self.hidden_size,
+                    self.model_name,
+                    num_patches,
+                    self.hidden_size,
                 )
             except Exception as exc:
                 logger.warning(
                     "Failed to load timm model '%s': %s. Trying torchvision.",
-                    self.model_name, exc,
+                    self.model_name,
+                    exc,
                 )
 
         if encoder is None and _HAS_TORCHVISION_MODELS:
@@ -211,14 +219,16 @@ class VisionEncoder(nn.Module):
                 )
             except Exception as exc:
                 logger.warning(
-                    "torchvision fallback failed: %s", exc,
+                    "torchvision fallback failed: %s",
+                    exc,
                 )
 
         if encoder is None:
             encoder = self._build_fallback_encoder()
             self._num_patches = (self.image_size // 16) ** 2
             logger.info(
-                "Using fallback CNN encoder with %d patches", self._num_patches,
+                "Using fallback CNN encoder with %d patches",
+                self._num_patches,
             )
 
         module = nn.Module()
@@ -250,10 +260,14 @@ class VisionEncoder(nn.Module):
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
-            nn.Conv2d(128, self.hidden_size, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.Conv2d(
+                128, self.hidden_size, kernel_size=3, stride=1, padding=1, bias=False
+            ),
             nn.BatchNorm2d(self.hidden_size),
             nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool2d((int(math.sqrt(num_patches)), int(math.sqrt(num_patches)))),
+            nn.AdaptiveAvgPool2d(
+                (int(math.sqrt(num_patches)), int(math.sqrt(num_patches)))
+            ),
         )
 
         def forward_fn(x: torch.Tensor) -> torch.Tensor:
@@ -289,8 +303,7 @@ class VisionEncoder(nn.Module):
             or pooled embeddings of shape (batch_size, hidden_size).
         """
         output_patches = (
-            output_patches if output_patches is not None
-            else self.output_patches
+            output_patches if output_patches is not None else self.output_patches
         )
 
         pixel_values = pixel_values.to(device=self.device, dtype=self.dtype)

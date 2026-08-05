@@ -9,13 +9,11 @@ and LLM inference.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-import traceback
 from typing import Any, Callable, Dict, List, Optional
 
 from dabba.agent.context_manager import ContextManager
-from dabba.agent.executor import Executor, ExecutionStats
+from dabba.agent.executor import Executor
 from dabba.agent.mcp_handler import McpHandler
 from dabba.agent.planner import ExecutionPlan, Planner
 from dabba.agent.tool_schema import ToolCall, ToolResult
@@ -151,22 +149,31 @@ class AgentLoop:
                     "parameters": t.parameters_to_json_schema(),
                 }
                 for t in self.registry.list_tools()
-                if hasattr(t, "name") and t.name in visible and (not allowed or t.name in allowed)
+                if hasattr(t, "name")
+                and t.name in visible
+                and (not allowed or t.name in allowed)
             ]
             if "tool_search" in visible and (not allowed or "tool_search" in allowed):
-                dicts.append({
-                    "name": "tool_search",
-                    "description": (
-                        "Search for tools not currently visible and bring their full schema "
-                        "into view so you can call them. Use this before assuming a capability "
-                        "doesn't exist."
-                    ),
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"query": {"type": "string", "description": "What capability you need."}},
-                        "required": ["query"],
-                    },
-                })
+                dicts.append(
+                    {
+                        "name": "tool_search",
+                        "description": (
+                            "Search for tools not currently visible and bring their full schema "
+                            "into view so you can call them. Use this before assuming a capability "
+                            "doesn't exist."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "What capability you need.",
+                                }
+                            },
+                            "required": ["query"],
+                        },
+                    }
+                )
             return dicts
 
         return [
@@ -188,22 +195,37 @@ class AgentLoop:
         root = getattr(self.config, "workspace_root", None)
         if not root:
             return ""
-        
+
         tree_lines = []
         instruction_sections = []
         try:
             from pathlib import Path
+
             root_path = Path(root).expanduser().resolve()
-            exclude_dirs = {".git", ".venv", "venv", "node_modules", "__pycache__", "out", "dist", "build", ".dabba", ".vscode"}
-            
+            exclude_dirs = {
+                ".git",
+                ".venv",
+                "venv",
+                "node_modules",
+                "__pycache__",
+                "out",
+                "dist",
+                "build",
+                ".dabba",
+                ".vscode",
+            }
+
             def get_tree(dir_path: Path, prefix: str = "", depth: int = 0):
                 if depth > 2:
                     return
                 try:
-                    entries = sorted(list(dir_path.iterdir()), key=lambda e: (not e.is_dir(), e.name.lower()))
+                    entries = sorted(
+                        list(dir_path.iterdir()),
+                        key=lambda e: (not e.is_dir(), e.name.lower()),
+                    )
                 except OSError:
                     return
-                
+
                 for entry in entries:
                     if entry.name in exclude_dirs:
                         continue
@@ -212,11 +234,13 @@ class AgentLoop:
                         get_tree(entry, prefix + "  ", depth + 1)
                     else:
                         tree_lines.append(f"{prefix}📄 {entry.name}")
-            
+
             get_tree(root_path)
 
             active_file = getattr(self.config, "active_file", None)
-            target = Path(active_file).expanduser().resolve() if active_file else root_path
+            target = (
+                Path(active_file).expanduser().resolve() if active_file else root_path
+            )
             cursor = target if target.is_dir() else target.parent
             instruction_dirs = []
             while cursor == root_path or root_path in cursor.parents:
@@ -236,19 +260,23 @@ class AgentLoop:
                         )
         except Exception:
             pass
-        
+
         tree_str = "\n".join(tree_lines[:100])
         if len(tree_lines) > 100:
             tree_str += f"\n  ... and {len(tree_lines) - 100} more files/directories."
-            
-        workspace_map = f"\n\nHere is a structural map of the current workspace:\n{tree_str}" if tree_str else ""
+
+        workspace_map = (
+            f"\n\nHere is a structural map of the current workspace:\n{tree_str}"
+            if tree_str
+            else ""
+        )
         instructions = (
             "\n\nApply these repository instructions, with deeper files taking precedence:\n\n"
             + "\n\n".join(instruction_sections)
             if instruction_sections
             else ""
         )
-        
+
         return (
             f"Your current working directory / workspace root is: {root}\n"
             "Resolve every relative path and directory reference against this root unless the user gives an "
@@ -309,10 +337,13 @@ class AgentLoop:
         await self._fire_session_start_once()
 
         self.context_manager.add_entry(role="user", content=user_input)
-        await get_hook_manager().run("user_prompt_submit", {
-            "prompt": user_input,
-            "workspace_root": getattr(self.config, "workspace_root", None),
-        })
+        await get_hook_manager().run(
+            "user_prompt_submit",
+            {
+                "prompt": user_input,
+                "workspace_root": getattr(self.config, "workspace_root", None),
+            },
+        )
 
         if self.config.use_planning:
             await self._try_planning(user_input)
@@ -352,7 +383,8 @@ class AgentLoop:
                 self._current_plan = plan
                 logger.info(
                     "Executing plan '%s' with %d steps",
-                    plan.plan_id, plan.total_steps,
+                    plan.plan_id,
+                    plan.total_steps,
                 )
 
                 stats = await self.executor.execute_plan(plan, max_concurrent=1)
@@ -370,9 +402,7 @@ class AgentLoop:
                         f"{step.description or step.tool_name}"
                     )
                     if step.result is not None and step.status.value == "succeeded":
-                        summary_parts.append(
-                            f"    Result: {str(step.result)[:200]}"
-                        )
+                        summary_parts.append(f"    Result: {str(step.result)[:200]}")
                     if step.error:
                         summary_parts.append(f"    Error: {step.error[:200]}")
 
@@ -384,9 +414,7 @@ class AgentLoop:
                 )
 
                 if stats.failed > 0:
-                    failed_steps = [
-                        s for s in plan.steps if s.status.value == "failed"
-                    ]
+                    failed_steps = [s for s in plan.steps if s.status.value == "failed"]
                     if failed_steps and self._step_count < self.config.max_steps:
                         new_plan = self.planner.replan(
                             plan, failed_steps[0], tool_dicts
@@ -448,7 +476,11 @@ class AgentLoop:
                         "plan_id": plan.plan_id,
                         "objective": plan.objective,
                         "steps": [
-                            {"step_id": s.step_id, "tool": s.tool_name, "description": s.description}
+                            {
+                                "step_id": s.step_id,
+                                "tool": s.tool_name,
+                                "description": s.description,
+                            }
                             for s in plan.steps
                         ],
                     },
@@ -464,23 +496,31 @@ class AgentLoop:
 
             self._current_plan = plan
             logger.info(
-                "Executing plan '%s' with %d steps", plan.plan_id, plan.total_steps,
+                "Executing plan '%s' with %d steps",
+                plan.plan_id,
+                plan.total_steps,
             )
 
             step_events: List[Dict[str, Any]] = []
 
             def _record_step(_plan: ExecutionPlan, step) -> None:
-                step_events.append({
-                    "type": "plan_step",
-                    "content": {
-                        "step_id": step.step_id,
-                        "tool": step.tool_name,
-                        "description": step.description,
-                        "status": step.status.value,
-                        "result": str(step.result)[:500] if step.result is not None else None,
-                        "error": step.error or None,
-                    },
-                })
+                step_events.append(
+                    {
+                        "type": "plan_step",
+                        "content": {
+                            "step_id": step.step_id,
+                            "tool": step.tool_name,
+                            "description": step.description,
+                            "status": step.status.value,
+                            "result": (
+                                str(step.result)[:500]
+                                if step.result is not None
+                                else None
+                            ),
+                            "error": step.error or None,
+                        },
+                    }
+                )
 
             original_callback = self.executor.progress_callback
             self.executor.progress_callback = _record_step
@@ -515,7 +555,10 @@ class AgentLoop:
                 content=summary,
                 metadata={"type": "plan_execution_summary"},
             )
-            yield {"type": "plan_summary", "content": {"plan_id": plan.plan_id, "summary": summary}}
+            yield {
+                "type": "plan_summary",
+                "content": {"plan_id": plan.plan_id, "summary": summary},
+            }
 
             if stats.failed > 0:
                 failed_steps = [s for s in plan.steps if s.status.value == "failed"]
@@ -544,7 +587,9 @@ class AgentLoop:
 
         while self._step_count < self.config.max_steps:
             self._step_count += 1
-            logger.debug("Agent loop iteration %d/%d", self._step_count, self.config.max_steps)
+            logger.debug(
+                "Agent loop iteration %d/%d", self._step_count, self.config.max_steps
+            )
 
             await self._maybe_compact_context()
 
@@ -648,15 +693,19 @@ class AgentLoop:
         last_exc: Optional[Exception] = None
         for attempt in range(attempts):
             try:
-                return await asyncio.to_thread(self.llm_generate, messages, generation_params)
+                return await asyncio.to_thread(
+                    self.llm_generate, messages, generation_params
+                )
             except Exception as exc:
                 last_exc = exc
                 if attempt < attempts - 1:
                     logger.warning(
                         "LLM generation attempt %d/%d failed, retrying: %s",
-                        attempt + 1, attempts, exc,
+                        attempt + 1,
+                        attempts,
+                        exc,
                     )
-                    await asyncio.sleep(min(2 ** attempt, 8))
+                    await asyncio.sleep(min(2**attempt, 8))
         raise last_exc
 
     def _summarize_messages(self, messages: List[Dict[str, Any]]) -> str:
@@ -669,7 +718,8 @@ class AgentLoop:
         """
         transcript = "\n\n".join(
             f"{m.get('role', 'user').upper()}: {str(m.get('content', ''))[:4000]}"
-            for m in messages if str(m.get("content", "")).strip()
+            for m in messages
+            if str(m.get("content", "")).strip()
         )
         if not transcript.strip():
             return ""
@@ -714,7 +764,12 @@ class AgentLoop:
         if folded <= 0:
             return None
         after = self.context_manager.total_tokens
-        logger.info("Proactive compaction folded %d entries (%d→%d tokens)", folded, before, after)
+        logger.info(
+            "Proactive compaction folded %d entries (%d→%d tokens)",
+            folded,
+            before,
+            after,
+        )
         return {
             "type": "context_compacted",
             "content": {
@@ -745,7 +800,9 @@ class AgentLoop:
         for call in calls:
             self._tool_call_count += 1
 
-            if call.tool_name == "tool_search" and getattr(self.config, "use_tool_search", False):
+            if call.tool_name == "tool_search" and getattr(
+                self.config, "use_tool_search", False
+            ):
                 query = str(call.arguments.get("query", ""))
                 matches = self.registry.search_tools(query)
                 if allowed:
@@ -753,25 +810,30 @@ class AgentLoop:
                 self._activated_tools.update(m["name"] for m in matches)
                 output = (
                     "\n".join(f"- {m['name']}: {m['description']}" for m in matches)
-                    if matches else "No matching tools found."
+                    if matches
+                    else "No matching tools found."
                 )
-                results.append(ToolResult(
-                    tool_name="tool_search",
-                    call_id=call.call_id,
-                    success=True,
-                    output=output,
-                    execution_time_ms=0.0,
-                ))
+                results.append(
+                    ToolResult(
+                        tool_name="tool_search",
+                        call_id=call.call_id,
+                        success=True,
+                        output=output,
+                        execution_time_ms=0.0,
+                    )
+                )
                 continue
 
             if allowed and call.tool_name not in allowed:
-                results.append(ToolResult(
-                    tool_name=call.tool_name,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"Tool '{call.tool_name}' is not in this agent's allowed tool list.",
-                    execution_time_ms=0.0,
-                ))
+                results.append(
+                    ToolResult(
+                        tool_name=call.tool_name,
+                        call_id=call.call_id,
+                        success=False,
+                        error=f"Tool '{call.tool_name}' is not in this agent's allowed tool list.",
+                        execution_time_ms=0.0,
+                    )
+                )
                 continue
 
             if self.config.require_tool_approval:
@@ -780,45 +842,55 @@ class AgentLoop:
                         "Tool '%s' requires approval (dangerous tool)",
                         call.tool_name,
                     )
-                    results.append(ToolResult(
+                    results.append(
+                        ToolResult(
+                            tool_name=call.tool_name,
+                            call_id=call.call_id,
+                            success=False,
+                            error=(
+                                f"Tool '{call.tool_name}' requires manual approval. "
+                                "Please confirm in a separate message."
+                            ),
+                            execution_time_ms=0.0,
+                        )
+                    )
+                    continue
+
+            pre = await hooks.run(
+                "pre_tool_call",
+                {
+                    "tool_name": call.tool_name,
+                    "arguments": call.arguments,
+                    "call_id": call.call_id,
+                    "workspace_root": getattr(self.config, "workspace_root", None),
+                },
+            )
+            if pre["blocked"]:
+                results.append(
+                    ToolResult(
                         tool_name=call.tool_name,
                         call_id=call.call_id,
                         success=False,
-                        error=(
-                            f"Tool '{call.tool_name}' requires manual approval. "
-                            "Please confirm in a separate message."
-                        ),
+                        error=f"Blocked by hook: {pre['reason']}",
                         execution_time_ms=0.0,
-                    ))
-                    continue
-
-            pre = await hooks.run("pre_tool_call", {
-                "tool_name": call.tool_name,
-                "arguments": call.arguments,
-                "call_id": call.call_id,
-                "workspace_root": getattr(self.config, "workspace_root", None),
-            })
-            if pre["blocked"]:
-                results.append(ToolResult(
-                    tool_name=call.tool_name,
-                    call_id=call.call_id,
-                    success=False,
-                    error=f"Blocked by hook: {pre['reason']}",
-                    execution_time_ms=0.0,
-                ))
+                    )
+                )
                 continue
 
             result = await self.registry.execute(call)
             results.append(result)
 
-            await hooks.run("post_tool_call", {
-                "tool_name": call.tool_name,
-                "arguments": call.arguments,
-                "call_id": call.call_id,
-                "success": result.success,
-                "error": result.error,
-                "workspace_root": getattr(self.config, "workspace_root", None),
-            })
+            await hooks.run(
+                "post_tool_call",
+                {
+                    "tool_name": call.tool_name,
+                    "arguments": call.arguments,
+                    "call_id": call.call_id,
+                    "success": result.success,
+                    "error": result.error,
+                    "workspace_root": getattr(self.config, "workspace_root", None),
+                },
+            )
 
         return results
 
@@ -865,11 +937,16 @@ class AgentLoop:
         self._ensure_system_prompt(system_prompt)
         await self._fire_session_start_once()
 
-        user_entry = self.context_manager.add_entry(role="user", content=message, metadata={"stream": True})
-        await get_hook_manager().run("user_prompt_submit", {
-            "prompt": message,
-            "workspace_root": getattr(self.config, "workspace_root", None),
-        })
+        user_entry = self.context_manager.add_entry(
+            role="user", content=message, metadata={"stream": True}
+        )
+        await get_hook_manager().run(
+            "user_prompt_submit",
+            {
+                "prompt": message,
+                "workspace_root": getattr(self.config, "workspace_root", None),
+            },
+        )
 
         if self.config.use_planning:
             plan_gen = self._stream_planning(message)
@@ -937,7 +1014,9 @@ class AgentLoop:
 
             if natural_response.strip():
                 yield {"type": "text", "content": natural_response}
-                self.context_manager.add_entry(role="assistant", content=natural_response)
+                self.context_manager.add_entry(
+                    role="assistant", content=natural_response
+                )
 
             if not tool_calls:
                 break
@@ -956,7 +1035,11 @@ class AgentLoop:
                 options = ask.arguments.get("options") or None
                 yield {
                     "type": "question",
-                    "content": {"question": question, "options": options, "call_id": ask.call_id},
+                    "content": {
+                        "question": question,
+                        "options": options,
+                        "call_id": ask.call_id,
+                    },
                 }
                 # Record it in context so the model sees its own question
                 # when the user's next message (the answer) arrives.
@@ -967,14 +1050,18 @@ class AgentLoop:
                 )
                 break
 
-            for tc in tool_calls[:self.config.max_tool_calls_per_step]:
+            for tc in tool_calls[: self.config.max_tool_calls_per_step]:
                 yield {
                     "type": "tool_call",
-                    "content": {"name": tc.tool_name, "arguments": tc.arguments, "call_id": tc.call_id},
+                    "content": {
+                        "name": tc.tool_name,
+                        "arguments": tc.arguments,
+                        "call_id": tc.call_id,
+                    },
                 }
 
             results = await self._execute_tool_calls(
-                tool_calls[:self.config.max_tool_calls_per_step]
+                tool_calls[: self.config.max_tool_calls_per_step]
             )
 
             result_text = self.mcp_handler.format_results(results)
@@ -1004,20 +1091,28 @@ class AgentLoop:
             Dictionary with steps, tool calls, context usage, etc.
         """
         metrics = dict(self._metrics)
-        metrics.update({
-            "step_count": self._step_count,
-            "tool_call_count": self._tool_call_count,
-            "context_usage_ratio": self.context_manager.usage_ratio,
-            "context_total_tokens": self.context_manager.total_tokens,
-            "context_entry_count": self.context_manager.entry_count,
-        })
+        metrics.update(
+            {
+                "step_count": self._step_count,
+                "tool_call_count": self._tool_call_count,
+                "context_usage_ratio": self.context_manager.usage_ratio,
+                "context_total_tokens": self.context_manager.total_tokens,
+                "context_entry_count": self.context_manager.entry_count,
+            }
+        )
         if self._session_start > 0:
-            metrics["session_duration_ms"] = (time.monotonic() - self._session_start) * 1000
+            metrics["session_duration_ms"] = (
+                time.monotonic() - self._session_start
+            ) * 1000
         return metrics
 
     def _record_metrics(self, final_response: str) -> None:
         """Record session metrics after completion."""
-        duration = (time.monotonic() - self._session_start) * 1000 if self._session_start > 0 else 0
+        duration = (
+            (time.monotonic() - self._session_start) * 1000
+            if self._session_start > 0
+            else 0
+        )
         self._metrics = {
             "steps_used": self._step_count,
             "tool_calls_made": self._tool_call_count,
@@ -1030,9 +1125,12 @@ class AgentLoop:
     def reset(self) -> None:
         """Reset the agent state for a new session."""
         if self._session_started:
-            self._fire_and_forget_hook("session_end", {
-                "workspace_root": getattr(self.config, "workspace_root", None),
-            })
+            self._fire_and_forget_hook(
+                "session_end",
+                {
+                    "workspace_root": getattr(self.config, "workspace_root", None),
+                },
+            )
         self.context_manager.reset()
         self._current_plan = None
         self._step_count = 0
@@ -1047,9 +1145,12 @@ class AgentLoop:
         if self._session_started:
             return
         self._session_started = True
-        await get_hook_manager().run("session_start", {
-            "workspace_root": getattr(self.config, "workspace_root", None),
-        })
+        await get_hook_manager().run(
+            "session_start",
+            {
+                "workspace_root": getattr(self.config, "workspace_root", None),
+            },
+        )
 
     @staticmethod
     def _fire_and_forget_hook(event: str, context: Dict[str, Any]) -> None:

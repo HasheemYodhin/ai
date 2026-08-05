@@ -189,6 +189,7 @@ curl http://localhost:8000/health
 ```python
 # Server-side logging
 import logging
+
 logging.basicConfig(level=logging.INFO)
 ```
 

@@ -4,6 +4,7 @@ CRUD + run-log API for user-configured agent hooks (dabba.utils.hook_manager).
 Mounted at /v1/hooks — used by the web frontend's Hooks settings page and
 by the same events the CLI eventually wires up too.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -42,8 +43,11 @@ def create_hooks_router() -> APIRouter:
     async def create_hook(req: CreateHookRequest):
         try:
             return manager.create(
-                event=req.event, command=req.command, matcher=req.matcher,
-                timeout=req.timeout, enabled=req.enabled,
+                event=req.event,
+                command=req.command,
+                matcher=req.matcher,
+                timeout=req.timeout,
+                enabled=req.enabled,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

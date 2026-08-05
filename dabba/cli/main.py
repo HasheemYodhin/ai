@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from dabba import __version__
 from dabba.cli.config import CliConfig
@@ -18,12 +18,14 @@ from dabba.cli.config import CliConfig
 def _get_logger():
     """Lazy logger to avoid importing torch through dabba.utils."""
     from dabba.utils.logging import get_logger
+
     return get_logger("dabba.cli.main")
 
 
 def _setup_logger(level: str = "info"):
     """Lazy logger setup."""
     from dabba.utils.logging import setup_logger
+
     setup_logger(level=level)
 
 
@@ -243,7 +245,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     prompt = _resolve_prompt(args)
     if not prompt:
-        print("Error: No prompt provided. Use 'dabba run \"your prompt\"' or --file.", file=sys.stderr)
+        print(
+            "Error: No prompt provided. Use 'dabba run \"your prompt\"' or --file.",
+            file=sys.stderr,
+        )
         return 1
 
     config = _build_config(args)
@@ -302,7 +307,10 @@ def cmd_session(args: argparse.Namespace) -> int:
         session.start()
         return 0
 
-    print("Use --resume <path> to resume a session, or --list to see available sessions.", file=sys.stderr)
+    print(
+        "Use --resume <path> to resume a session, or --list to see available sessions.",
+        file=sys.stderr,
+    )
     return 1
 
 
@@ -400,6 +408,7 @@ def _build_output(args: argparse.Namespace, config: CliConfig):
         OutputHandler instance.
     """
     from dabba.cli.output_handler import OutputHandler  # noqa: F811
+
     return OutputHandler(
         config=config,
         no_color=getattr(args, "no_color", False),
@@ -417,6 +426,7 @@ def _build_permissions(config: CliConfig):
         PermissionManager instance.
     """
     from dabba.cli.permissions import PermissionManager  # noqa: F811
+
     return PermissionManager(mode=config.permission_mode)
 
 
@@ -496,6 +506,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         Exit code (0 on success, non-zero on error).
     """
     import logging
+
     # Suppress all logs by default unless --verbose
     logging.disable(logging.CRITICAL)
 

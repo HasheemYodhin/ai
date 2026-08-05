@@ -5,9 +5,9 @@ Provides GET /v1/models for listing available models, following the
 OpenAI API format for model discovery.
 """
 
-from typing import Dict, List, Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from dabba.api.openai_compat import ModelInfo, ModelList
 
@@ -37,10 +37,7 @@ def create_model_router(
         Returns a list of model objects in OpenAI-compatible format.
         """
         model_list = ModelList(
-            data=[
-                ModelInfo(id=name, owned_by="dabba")
-                for name in models
-            ]
+            data=[ModelInfo(id=name, owned_by="dabba") for name in models]
         )
         return model_list.to_dict()
 

@@ -14,7 +14,6 @@ means running commands on a machine that isn't this one.
 from __future__ import annotations
 
 import asyncio
-import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -47,6 +46,7 @@ class SSHPermissionManager:
     @classmethod
     def from_cli_config(cls) -> "SSHPermissionManager":
         from dabba.cli.config import CliConfig
+
         config = CliConfig.load()
         return cls(allowed_hosts=set(getattr(config, "allowed_ssh_hosts", []) or []))
 
@@ -71,7 +71,12 @@ async def _run_argv(argv: List[str], timeout: int) -> Dict[str, object]:
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        return {"returncode": -1, "stdout": "", "stderr": f"Timed out after {timeout}s", "timed_out": True}
+        return {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"Timed out after {timeout}s",
+            "timed_out": True,
+        }
 
 
 async def ssh_exec(
@@ -114,10 +119,14 @@ async def ssh_exec(
     target = f"{user}@{host}" if user else host
     argv = [
         "ssh",
-        "-p", str(port),
-        "-o", "BatchMode=yes",
-        "-o", "ConnectTimeout=10",
-        "-o", "StrictHostKeyChecking=accept-new",
+        "-p",
+        str(port),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-o",
+        "StrictHostKeyChecking=accept-new",
         target,
         command,
     ]
@@ -164,9 +173,25 @@ async def scp_copy(
 
     target = f"{user}@{host}" if user else host
     if direction == "upload":
-        argv = ["scp", "-P", str(port), "-o", "StrictHostKeyChecking=accept-new", source, f"{target}:{destination}"]
+        argv = [
+            "scp",
+            "-P",
+            str(port),
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            source,
+            f"{target}:{destination}",
+        ]
     else:
-        argv = ["scp", "-P", str(port), "-o", "StrictHostKeyChecking=accept-new", f"{target}:{source}", destination]
+        argv = [
+            "scp",
+            "-P",
+            str(port),
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            f"{target}:{source}",
+            destination,
+        ]
 
     logger.info("SCP %s: %s -> %s", direction, source, destination)
     result = await _run_argv(argv, timeout)
@@ -185,11 +210,37 @@ def register_ssh_tools(registry: ToolRegistry) -> None:
             name="ssh_exec",
             description="Execute a command on a remote host over SSH. Host must be pre-approved in the allowlist.",
             parameters=[
-                ToolParameter(name="host", type="string", description="Hostname or SSH config alias."),
-                ToolParameter(name="command", type="string", description="Command to run remotely."),
-                ToolParameter(name="user", type="string", description="Remote username.", required=False, default=None),
-                ToolParameter(name="port", type="integer", description="SSH port.", required=False, default=22),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=30),
+                ToolParameter(
+                    name="host",
+                    type="string",
+                    description="Hostname or SSH config alias.",
+                ),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="Command to run remotely.",
+                ),
+                ToolParameter(
+                    name="user",
+                    type="string",
+                    description="Remote username.",
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="port",
+                    type="integer",
+                    description="SSH port.",
+                    required=False,
+                    default=22,
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=30,
+                ),
             ],
             handler=ssh_exec,
             handler_sync=False,
@@ -201,13 +252,49 @@ def register_ssh_tools(registry: ToolRegistry) -> None:
             name="scp_copy",
             description="Copy a file to/from a remote host over SCP. Host must be pre-approved in the allowlist.",
             parameters=[
-                ToolParameter(name="source", type="string", description="Local path (upload) or remote path (download)."),
-                ToolParameter(name="destination", type="string", description="Remote path (upload) or local path (download)."),
-                ToolParameter(name="host", type="string", description="Hostname or SSH config alias."),
-                ToolParameter(name="user", type="string", description="Remote username.", required=False, default=None),
-                ToolParameter(name="port", type="integer", description="SSH port.", required=False, default=22),
-                ToolParameter(name="direction", type="string", description="'upload' or 'download'.", required=False, default="upload"),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=60),
+                ToolParameter(
+                    name="source",
+                    type="string",
+                    description="Local path (upload) or remote path (download).",
+                ),
+                ToolParameter(
+                    name="destination",
+                    type="string",
+                    description="Remote path (upload) or local path (download).",
+                ),
+                ToolParameter(
+                    name="host",
+                    type="string",
+                    description="Hostname or SSH config alias.",
+                ),
+                ToolParameter(
+                    name="user",
+                    type="string",
+                    description="Remote username.",
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="port",
+                    type="integer",
+                    description="SSH port.",
+                    required=False,
+                    default=22,
+                ),
+                ToolParameter(
+                    name="direction",
+                    type="string",
+                    description="'upload' or 'download'.",
+                    required=False,
+                    default="upload",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=60,
+                ),
             ],
             handler=scp_copy,
             handler_sync=False,

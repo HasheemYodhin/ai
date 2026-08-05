@@ -6,16 +6,21 @@ video formats (MP4, AVI, MOV, MKV, WebM). Uses OpenCV as the primary
 backend with a safe fallback when cv2 is unavailable.
 """
 
+from __future__ import annotations
+
 import logging
 import os
-import tempfile
-from typing import List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
 _HAS_CV2 = False
 try:
     import cv2
+
     _HAS_CV2 = True
 except ImportError:
     cv2 = None
@@ -24,12 +29,14 @@ except ImportError:
 _HAS_PIL = False
 try:
     from PIL import Image
+
     _HAS_PIL = True
 except ImportError:
     Image = None
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     np = None
@@ -73,6 +80,7 @@ class VideoProcessor:
 
         if dtype is None:
             import torch
+
             dtype = torch.float32
         self.dtype = dtype
 
@@ -108,7 +116,8 @@ class VideoProcessor:
         return duration, total_frames, fps_native
 
     def _extract_frames_uniform(
-        self, video_path: str,
+        self,
+        video_path: str,
     ) -> List["np.ndarray"]:
         """
         Extract frames evenly spaced throughout the video duration.
@@ -153,13 +162,16 @@ class VideoProcessor:
         if len(frames) < self.min_frames and total_frames > 0:
             logger.warning(
                 "Only %d frames extracted from '%s' (min %d required).",
-                len(frames), video_path, self.min_frames,
+                len(frames),
+                video_path,
+                self.min_frames,
             )
 
         return frames
 
     def _extract_frames_keyframe(
-        self, video_path: str,
+        self,
+        video_path: str,
     ) -> List["np.ndarray"]:
         """
         Extract keyframes (I-frames) from the video.
@@ -204,7 +216,8 @@ class VideoProcessor:
         if len(frames) < self.min_frames and frame_count > 0:
             logger.warning(
                 "Only %d keyframes found in '%s'. Falling back to uniform sampling.",
-                len(frames), video_path,
+                len(frames),
+                video_path,
             )
             return self._extract_frames_uniform(video_path)
 
@@ -216,11 +229,13 @@ class VideoProcessor:
         """
         if _HAS_CV2:
             return cv2.resize(
-                frame, (self.target_size, self.target_size),
+                frame,
+                (self.target_size, self.target_size),
                 interpolation=cv2.INTER_LINEAR,
             )
         if HAS_NUMPY:
             from PIL import Image
+
             pil_img = Image.fromarray(frame)
             pil_img = pil_img.resize(
                 (self.target_size, self.target_size), Image.BILINEAR
@@ -267,6 +282,7 @@ class VideoProcessor:
             logger.warning("No frames extracted from '%s'.", video_path)
             if return_tensors:
                 import torch
+
                 return torch.zeros(0, 3, self.target_size, self.target_size)
             return []
 
@@ -278,6 +294,7 @@ class VideoProcessor:
             return [Image.fromarray(f) for f in resized]
 
         import torch
+
         tensor = torch.from_numpy(np.stack(resized, axis=0)).float()
         tensor = tensor.permute(0, 3, 1, 2).to(device=self.device, dtype=self.dtype)
         tensor = tensor / 255.0
@@ -299,8 +316,7 @@ class VideoProcessor:
             List of results, one per input video.
         """
         return [
-            self.extract_frames(p, return_tensors=return_tensors)
-            for p in video_paths
+            self.extract_frames(p, return_tensors=return_tensors) for p in video_paths
         ]
 
     def __repr__(self) -> str:

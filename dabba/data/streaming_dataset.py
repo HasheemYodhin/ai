@@ -8,12 +8,10 @@ with torch DataLoader.
 """
 
 import json
-import os
 import random
 import struct
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple, Union
-import numpy as np
+from typing import Dict, Iterator, List, Optional
 
 import torch
 from torch.utils.data import IterableDataset, get_worker_info
@@ -221,14 +219,18 @@ class StreamingDataset(IterableDataset):
         Yields:
             Dictionary with "input_ids", "labels", and "attention_mask".
         """
-        source = self._shuffle_generator() if self.shuffle_buffer > 0 else self._token_generator()
+        source = (
+            self._shuffle_generator()
+            if self.shuffle_buffer > 0
+            else self._token_generator()
+        )
 
         token_buffer = []
         for token in source:
             token_buffer.append(token)
             while len(token_buffer) >= self.seq_length + 1:
-                tokens = token_buffer[:self.seq_length + 1]
-                token_buffer = token_buffer[self.seq_length:]
+                tokens = token_buffer[: self.seq_length + 1]
+                token_buffer = token_buffer[self.seq_length :]
 
                 input_ids = torch.tensor(tokens[:-1], dtype=torch.long)
                 labels = torch.tensor(tokens[1:], dtype=torch.long)

@@ -11,7 +11,7 @@ import json
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 
@@ -42,6 +42,7 @@ class SuiteConfig:
         num_latency_runs: Number of runs for latency profiling.
         seq_length: Sequence length for memory profiling.
     """
+
     name: str = "default"
     batch_sizes: List[int] = field(default_factory=lambda: [1, 2, 4, 8])
     input_lengths: List[int] = field(default_factory=lambda: [64, 128, 256, 512])
@@ -72,6 +73,7 @@ class SuiteResults:
         comparison: Comparison results dict (before/after).
         config_snapshot: Model configuration.
     """
+
     suite_name: str = ""
     start_time: str = ""
     end_time: str = ""
@@ -80,7 +82,9 @@ class SuiteResults:
     latency: Optional[LatencyReport] = None
     memory: Optional[MemoryReport] = None
     comparison: Dict[str, Dict[str, float]] = field(default_factory=dict)
-    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(default_factory=dict)
+    config_snapshot: Dict[str, Union[int, float, str, bool, None]] = field(
+        default_factory=dict
+    )
 
 
 class BenchmarkSuite:
@@ -200,7 +204,8 @@ class BenchmarkSuite:
             if verbose:
                 print("\n[3/4] Running latency profiling...")
             dummy_input = torch.randint(
-                0, self.model.config.vocab_size - 1,
+                0,
+                self.model.config.vocab_size - 1,
                 (1, 128),
                 device=self.device,
             )
@@ -251,8 +256,12 @@ class BenchmarkSuite:
                 "before": baseline.perplexity["perplexity"],
                 "after": optimized.perplexity["perplexity"],
                 "change_pct": (
-                    (optimized.perplexity["perplexity"] - baseline.perplexity["perplexity"])
-                    / baseline.perplexity["perplexity"] * 100
+                    (
+                        optimized.perplexity["perplexity"]
+                        - baseline.perplexity["perplexity"]
+                    )
+                    / baseline.perplexity["perplexity"]
+                    * 100
                 ),
             }
 
@@ -265,23 +274,31 @@ class BenchmarkSuite:
                     "throughput_before": b.throughput_tps,
                     "throughput_after": a.throughput_tps,
                     "throughput_change_pct": (
-                        (a.throughput_tps - b.throughput_tps) / b.throughput_tps * 100
-                    ) if b.throughput_tps > 0 else 0,
+                        ((a.throughput_tps - b.throughput_tps) / b.throughput_tps * 100)
+                        if b.throughput_tps > 0
+                        else 0
+                    ),
                     "ttft_before": b.ttft_ms,
                     "ttft_after": a.ttft_ms,
                     "ttft_change_pct": (
-                        (a.ttft_ms - b.ttft_ms) / b.ttft_ms * 100
-                    ) if b.ttft_ms > 0 else 0,
+                        ((a.ttft_ms - b.ttft_ms) / b.ttft_ms * 100)
+                        if b.ttft_ms > 0
+                        else 0
+                    ),
                     "tpot_before": b.tpot_ms,
                     "tpot_after": a.tpot_ms,
                     "tpot_change_pct": (
-                        (a.tpot_ms - b.tpot_ms) / b.tpot_ms * 100
-                    ) if b.tpot_ms > 0 else 0,
+                        ((a.tpot_ms - b.tpot_ms) / b.tpot_ms * 100)
+                        if b.tpot_ms > 0
+                        else 0
+                    ),
                     "peak_memory_before": b.peak_memory_mb,
                     "peak_memory_after": a.peak_memory_mb,
                     "peak_memory_change_pct": (
-                        (a.peak_memory_mb - b.peak_memory_mb) / b.peak_memory_mb * 100
-                    ) if b.peak_memory_mb > 0 else 0,
+                        ((a.peak_memory_mb - b.peak_memory_mb) / b.peak_memory_mb * 100)
+                        if b.peak_memory_mb > 0
+                        else 0
+                    ),
                 }
 
         # Compare memory
@@ -290,8 +307,12 @@ class BenchmarkSuite:
                 "params_before": baseline.memory.total_parameter_mb,
                 "params_after": optimized.memory.total_parameter_mb,
                 "params_change_pct": (
-                    (optimized.memory.total_parameter_mb - baseline.memory.total_parameter_mb)
-                    / baseline.memory.total_parameter_mb * 100
+                    (
+                        optimized.memory.total_parameter_mb
+                        - baseline.memory.total_parameter_mb
+                    )
+                    / baseline.memory.total_parameter_mb
+                    * 100
                 ),
                 "activation_before": baseline.memory.activation_estimation_mb,
                 "activation_after": optimized.memory.activation_estimation_mb,
@@ -343,13 +364,15 @@ class BenchmarkSuite:
             lines.append(f"  {k}: {v}")
 
         if results.perplexity:
-            lines.extend([
-                "",
-                "Perplexity:",
-                f"  Perplexity: {results.perplexity['perplexity']:.4f}",
-                f"  Loss:       {results.perplexity['loss']:.4f}",
-                f"  Tokens:     {results.perplexity['num_tokens']:,}",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Perplexity:",
+                    f"  Perplexity: {results.perplexity['perplexity']:.4f}",
+                    f"  Loss:       {results.perplexity['loss']:.4f}",
+                    f"  Tokens:     {results.perplexity['num_tokens']:,}",
+                ]
+            )
 
         if results.throughput and detailed:
             lines.extend(["", "Throughput Benchmarks:", "-" * 70])
@@ -371,32 +394,38 @@ class BenchmarkSuite:
                     lines.append(f"    TPOT: {res.tpot_ms:.2f} ms")
 
         if results.latency and detailed:
-            lines.extend([
-                "",
-                "Latency Profiling:",
-                f"  Total forward (mean): {results.latency.total_stats.mean_ms:.3f} ms",
-                f"  P50:  {results.latency.total_stats.median_ms:.3f} ms",
-                f"  P90:  {results.latency.total_stats.p90_ms:.3f} ms",
-                f"  P99:  {results.latency.total_stats.p99_ms:.3f} ms",
-                f"  P99.9: {results.latency.total_stats.p999_ms:.3f} ms",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Latency Profiling:",
+                    f"  Total forward (mean): {results.latency.total_stats.mean_ms:.3f} ms",
+                    f"  P50:  {results.latency.total_stats.median_ms:.3f} ms",
+                    f"  P90:  {results.latency.total_stats.p90_ms:.3f} ms",
+                    f"  P99:  {results.latency.total_stats.p99_ms:.3f} ms",
+                    f"  P99.9: {results.latency.total_stats.p999_ms:.3f} ms",
+                ]
+            )
 
         if results.memory:
-            lines.extend([
-                "",
-                "Memory:",
-                f"  Model Size: {results.memory.model_size_mb:.2f} MiB",
-                f"  Peak CUDA:  {results.memory.peak_allocated_mb:.2f} MiB",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Memory:",
+                    f"  Model Size: {results.memory.model_size_mb:.2f} MiB",
+                    f"  Peak CUDA:  {results.memory.peak_allocated_mb:.2f} MiB",
+                ]
+            )
 
         if results.comparison:
-            lines.extend([
-                "",
-                "Comparison (Before vs After):",
-                "-" * 70,
-                f"{'Metric':<30} {'Before':>12} {'After':>12} {'Change':>10}",
-                "-" * 70,
-            ])
+            lines.extend(
+                [
+                    "",
+                    "Comparison (Before vs After):",
+                    "-" * 70,
+                    f"{'Metric':<30} {'Before':>12} {'After':>12} {'Change':>10}",
+                    "-" * 70,
+                ]
+            )
             for key, vals in results.comparison.items():
                 if key == "perplexity":
                     lines.append(

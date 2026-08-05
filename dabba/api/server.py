@@ -11,7 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,7 +43,11 @@ class ModelEngine:
         model_path: Optional[str] = None,
         device: str = "cpu",
     ):
-        self.model_path = model_path or os.environ.get("DABBA_MODEL_PATH") or "./checkpoints/dabba-model/final"
+        self.model_path = (
+            model_path
+            or os.environ.get("DABBA_MODEL_PATH")
+            or "./checkpoints/dabba-model/final"
+        )
         self.device = device
         self.model = None
         self.tokenizer = None
@@ -74,11 +78,19 @@ class ModelEngine:
                 raise FileNotFoundError(f"Model not found at {model_path}")
 
             # Load config and model
-            config_data = torch.load(model_path / "config.pt", map_location=self.device, weights_only=False)
+            config_data = torch.load(
+                model_path / "config.pt", map_location=self.device, weights_only=False
+            )
             config = config_data["config"]
 
             model = Transformer(config).to(self.device)
-            model.load_state_dict(torch.load(model_path / "model.pt", map_location=self.device, weights_only=False))
+            model.load_state_dict(
+                torch.load(
+                    model_path / "model.pt",
+                    map_location=self.device,
+                    weights_only=False,
+                )
+            )
             model.eval()
 
             # Load the saved tokenizer (must match vocab_size used during training)
@@ -95,7 +107,9 @@ class ModelEngine:
                     "Run train_dabba.py to retrain with consistent sizes."
                 )
 
-            self.model = Generator(model, tokenizer=tokenizer, eos_token_id=2, pad_token_id=0)
+            self.model = Generator(
+                model, tokenizer=tokenizer, eos_token_id=2, pad_token_id=0
+            )
             self.tokenizer = tokenizer
             self.config = config
 
@@ -103,7 +117,9 @@ class ModelEngine:
             logging.info(f"   Model: {config.num_params / 1e6:.1f}M parameters")
             logging.info(f"   Layers: {config.num_layers}")
         except Exception as e:
-            logging.warning(f"Dabba loading failed: {e}. Falling back to knowledge base.")
+            logging.warning(
+                f"Dabba loading failed: {e}. Falling back to knowledge base."
+            )
             self.model = "rule_based"
             self.tokenizer = None
 
@@ -120,14 +136,18 @@ class ModelEngine:
             )
             self._gguf.load()
             self.model = "gguf"
-            logging.info("✨ Dabba GGUF model loaded successfully — running natively, no Ollama!")
+            logging.info(
+                "✨ Dabba GGUF model loaded successfully — running natively, no Ollama!"
+            )
         except ImportError:
             logging.warning(
                 "llama-cpp-python not installed. Run: pip install llama-cpp-python"
             )
             self.model = "rule_based"
         except Exception as e:
-            logging.warning(f"GGUF loading failed: {e}. Falling back to knowledge base.")
+            logging.warning(
+                f"GGUF loading failed: {e}. Falling back to knowledge base."
+            )
             self.model = "rule_based"
 
     def _is_garbage(self, text: str) -> bool:
@@ -152,7 +172,13 @@ class ModelEngine:
                     return True
         return False
 
-    def chat(self, messages: list, temperature: float = 0.7, max_tokens: Optional[int] = None, **kwargs) -> str:
+    def chat(
+        self,
+        messages: list,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        **kwargs,
+    ) -> str:
         """
         Full-conversation chat.
 
@@ -164,7 +190,9 @@ class ModelEngine:
         """
         if self.model == "gguf" and self._gguf is not None:
             try:
-                return self._gguf.chat(messages, max_tokens=max_tokens or 512, temperature=temperature)
+                return self._gguf.chat(
+                    messages, max_tokens=max_tokens or 512, temperature=temperature
+                )
             except Exception as e:
                 logging.error(f"GGUF chat failed: {e}. Falling back.")
 
@@ -182,13 +210,19 @@ class ModelEngine:
                 tool_results.append(content)
 
         # Native trained checkpoint gets a real shot before the regex fallback
-        if self.model not in ("rule_based", "gguf", None) and not isinstance(self.model, str):
+        if self.model not in ("rule_based", "gguf", None) and not isinstance(
+            self.model, str
+        ):
             try:
-                generated = self.generate(last_user, max_tokens=max_tokens or 200, temperature=temperature)
+                generated = self.generate(
+                    last_user, max_tokens=max_tokens or 200, temperature=temperature
+                )
                 if generated and not self._is_garbage(generated):
                     return generated
             except Exception as e:
-                logging.error(f"Native chat generation failed: {e}. Falling back to rule-based.")
+                logging.error(
+                    f"Native chat generation failed: {e}. Falling back to rule-based."
+                )
 
         if tool_results:
             return self._summarize_tool_results(last_user, tool_results)
@@ -221,7 +255,9 @@ class ModelEngine:
             # attribute 'device'", silently falling back to the rule-based engine).
             input_ids = self.tokenizer.encode(prompt)
             model_device = next(self.model.model.parameters()).device
-            input_tensor = torch.tensor([input_ids], dtype=torch.long, device=model_device)
+            input_tensor = torch.tensor(
+                [input_ids], dtype=torch.long, device=model_device
+            )
 
             response = self.model.generate(
                 input_tensor,
@@ -237,7 +273,11 @@ class ModelEngine:
             generated_text = self.tokenizer.decode(generated_tokens)
 
             # If we got substantial and non-garbage output, use it
-            if generated_text and len(generated_text) > 10 and not self._is_garbage(generated_text):
+            if (
+                generated_text
+                and len(generated_text) > 10
+                and not self._is_garbage(generated_text)
+            ):
                 return generated_text.strip()
             else:
                 return self._generate_rule_based(prompt)
@@ -315,20 +355,21 @@ class ModelEngine:
     def _generate_rule_based(self, prompt: str) -> str:
         """Generate responses from the knowledge base or smart fallback."""
         import re as _re
+
         p = prompt.lower().strip()
 
         # Identity and social responses
-        if _re.search(r'\b(who are you|your name|what are you)\b', p):
+        if _re.search(r"\b(who are you|your name|what are you)\b", p):
             return "I'm Dabba, a personal AI assistant built by Hasheem. I can explain AI and programming concepts, answer general knowledge questions, read files, and run shell commands. What would you like to know?"
-        if _re.search(r'\b(hi|hello|hey|howdy)\b', p):
+        if _re.search(r"\b(hi|hello|hey|howdy)\b", p):
             return "Hey there! I'm Dabba AI. Ask me anything — AI concepts, programming, science, everyday topics, or let me explore files for you."
-        if _re.search(r'\bhow are you\b', p):
+        if _re.search(r"\bhow are you\b", p):
             return "Running smoothly, thanks! What can I help you with?"
-        if _re.search(r'\b(thanks|thank you)\b', p):
+        if _re.search(r"\b(thanks|thank you)\b", p):
             return "You're welcome! Feel free to ask anything else."
-        if _re.search(r'\b(bye|goodbye|see you)\b', p):
+        if _re.search(r"\b(bye|goodbye|see you)\b", p):
             return "Goodbye! Come back anytime."
-        if _re.search(r'\bhelp\b', p) and len(p) < 15:
+        if _re.search(r"\bhelp\b", p) and len(p) < 15:
             return "I can help with: AI and ML concepts, programming topics, general science, everyday questions, reading files, and running shell commands. Just ask!"
 
         # Match knowledge base (longest key wins to avoid partial matches)
@@ -343,11 +384,11 @@ class ModelEngine:
 
         # Extract topic from "what is X", "explain X", "tell me about X"
         topic_match = _re.search(
-            r'(?:what is|what are|explain|define|tell me about|describe|how does|how do)\s+(?:a |an |the )?(.+?)(?:\?|$)',
+            r"(?:what is|what are|explain|define|tell me about|describe|how does|how do)\s+(?:a |an |the )?(.+?)(?:\?|$)",
             p,
         )
         if topic_match:
-            extracted = topic_match.group(1).strip().rstrip('?.!')
+            extracted = topic_match.group(1).strip().rstrip("?.!")
             # Try the extracted topic against knowledge base
             for key in sorted(kb.keys(), key=len, reverse=True):
                 if key in extracted or extracted in key:
@@ -385,12 +426,25 @@ class ModelEngine:
             m = _re.search(pat, pl)
             if m:
                 path = m.group(1)
-                return '<tool_call>' + _json.dumps({"name": "file_read", "arguments": {"path": path}}) + '</tool_call>'
+                return (
+                    "<tool_call>"
+                    + _json.dumps({"name": "file_read", "arguments": {"path": path}})
+                    + "</tool_call>"
+                )
 
         # --- folder/directory capability questions ---
-        if _re.search(r"what\s+(?:does|can|is|are)\s+(?:this|the)?\s*(?:folder|dir(?:ectory)?|project|repo|codebase)", pl) or \
-           _re.search(r"what\s+(?:this|the)\s+(?:folder|dir(?:ectory)?|project)\s+(?:can|does|do)", pl):
-            return '<tool_call>' + _json.dumps({"name": "file_list", "arguments": {"path": "."}}) + '</tool_call>'
+        if _re.search(
+            r"what\s+(?:does|can|is|are)\s+(?:this|the)?\s*(?:folder|dir(?:ectory)?|project|repo|codebase)",
+            pl,
+        ) or _re.search(
+            r"what\s+(?:this|the)\s+(?:folder|dir(?:ectory)?|project)\s+(?:can|does|do)",
+            pl,
+        ):
+            return (
+                "<tool_call>"
+                + _json.dumps({"name": "file_list", "arguments": {"path": "."}})
+                + "</tool_call>"
+            )
 
         # --- file list / ls ---
         for pat in [
@@ -406,7 +460,11 @@ class ModelEngine:
                     path = ""
                 if not path or path in ("this", "the", "my", "current"):
                     path = "."
-                return '<tool_call>' + _json.dumps({"name": "file_list", "arguments": {"path": path}}) + '</tool_call>'
+                return (
+                    "<tool_call>"
+                    + _json.dumps({"name": "file_list", "arguments": {"path": path}})
+                    + "</tool_call>"
+                )
 
         # --- shell / run command ---
         shell_pats = [
@@ -417,34 +475,67 @@ class ModelEngine:
             m = _re.match(pat, pl)
             if m:
                 cmd = m.group(1).strip()
-                return '<tool_call>' + _json.dumps({"name": "shell_exec", "arguments": {"command": cmd}}) + '</tool_call>'
+                return (
+                    "<tool_call>"
+                    + _json.dumps({"name": "shell_exec", "arguments": {"command": cmd}})
+                    + "</tool_call>"
+                )
 
         # Plain shell commands (start with common shell words)
-        if _re.match(r"^(ls|pwd|echo|mkdir|cp|mv|rm|grep|find|cat|head|tail|python|pip|git|npm|node)\b", pl):
-            return '<tool_call>' + _json.dumps({"name": "shell_exec", "arguments": {"command": p}}) + '</tool_call>'
+        if _re.match(
+            r"^(ls|pwd|echo|mkdir|cp|mv|rm|grep|find|cat|head|tail|python|pip|git|npm|node)\b",
+            pl,
+        ):
+            return (
+                "<tool_call>"
+                + _json.dumps({"name": "shell_exec", "arguments": {"command": p}})
+                + "</tool_call>"
+            )
 
         # --- file write ---
-        m = _re.search(r"(?:write|create|save)\s+(?:a\s+)?file\s+['\"]?([^\s'\"]+)['\"]?", pl)
+        m = _re.search(
+            r"(?:write|create|save)\s+(?:a\s+)?file\s+['\"]?([^\s'\"]+)['\"]?", pl
+        )
         if m:
             path = m.group(1)
-            return '<tool_call>' + _json.dumps({"name": "file_write", "arguments": {"path": path, "content": ""}}) + '</tool_call>'
+            return (
+                "<tool_call>"
+                + _json.dumps(
+                    {"name": "file_write", "arguments": {"path": path, "content": ""}}
+                )
+                + "</tool_call>"
+            )
 
         # --- search files ---
-        m = _re.search(r"(?:search|find|grep)\s+(?:for\s+)?['\"]?([^'\"]+)['\"]?\s+in\s+files?", pl)
+        m = _re.search(
+            r"(?:search|find|grep)\s+(?:for\s+)?['\"]?([^'\"]+)['\"]?\s+in\s+files?", pl
+        )
         if m:
             pattern = m.group(1).strip()
-            return '<tool_call>' + _json.dumps({"name": "file_search", "arguments": {"pattern": f"*{pattern}*"}}) + '</tool_call>'
+            return (
+                "<tool_call>"
+                + _json.dumps(
+                    {"name": "file_search", "arguments": {"pattern": f"*{pattern}*"}}
+                )
+                + "</tool_call>"
+            )
 
         return ""
 
-    def _summarize_tool_results(self, original_request: str, tool_results: List[str]) -> str:
+    def _summarize_tool_results(
+        self, original_request: str, tool_results: List[str]
+    ) -> str:
         """Generate a natural-language summary of tool execution results."""
         if not tool_results:
             return "Done."
 
         MAX_SHOWN = 3000
         combined = "\n\n".join(tool_results)
-        shown = combined if len(combined) <= MAX_SHOWN else combined[:MAX_SHOWN] + "\n… (truncated)"
+        shown = (
+            combined
+            if len(combined) <= MAX_SHOWN
+            else combined[:MAX_SHOWN] + "\n… (truncated)"
+        )
 
         if "file_read" in combined or "Tool 'file_read'" in combined:
             return f"Here is the file content:\n\n{shown}"
@@ -471,7 +562,7 @@ async def lifespan(app: FastAPI):
     if engine and config:
         try:
             engine.load()
-            app.state.logger.info(f"Model engine loaded")
+            app.state.logger.info("Model engine loaded")
         except Exception as e:
             app.state.logger.warning(f"Could not load model: {e}")
 
@@ -511,6 +602,7 @@ def create_app(
     )
 
     import logging as py_logging
+
     logger = py_logging.getLogger("dabba.api")
     logger.setLevel(getattr(py_logging, config.log_level.upper()))
 
@@ -546,6 +638,7 @@ def create_app(
 
     try:
         from dabba.platform.services import TelemetryService
+
         telemetry = TelemetryService()
     except Exception:
         telemetry = None
@@ -597,6 +690,7 @@ def create_app(
         """Readiness includes durable platform storage, not local-model availability."""
         try:
             from dabba.platform.core import get_platform_store
+
             get_platform_store().fetchone("SELECT 1 AS ok")
             storage_ready = True
         except Exception:
@@ -631,10 +725,13 @@ def create_app(
             return JSONResponse(
                 status_code=exc.status_code,
                 content={"error": exc.as_dict()},
-                headers={
-                    "Retry-After": str(max(1, (exc.retry_after_ms or 1000) // 1000))
-                } if exc.retryable else None,
+                headers=(
+                    {"Retry-After": str(max(1, (exc.retry_after_ms or 1000) // 1000))}
+                    if exc.retryable
+                    else None
+                ),
             )
+
     except ImportError:
         pass
 
@@ -655,29 +752,37 @@ def create_app(
 
     models = available_models or config.available_models
 
-    app.include_router(create_chat_router(
-        model_engine=app.state.model_engine,
-        auth=auth,
-        rate_limiter=rate_limiter,
-    ))
+    app.include_router(
+        create_chat_router(
+            model_engine=app.state.model_engine,
+            auth=auth,
+            rate_limiter=rate_limiter,
+        )
+    )
 
-    app.include_router(create_embedding_router(
-        embedding_engine=app.state.embedding_engine,
-        auth=auth,
-        rate_limiter=rate_limiter,
-    ))
+    app.include_router(
+        create_embedding_router(
+            embedding_engine=app.state.embedding_engine,
+            auth=auth,
+            rate_limiter=rate_limiter,
+        )
+    )
 
-    app.include_router(create_model_router(
-        available_models=models,
-        auth=auth,
-    ))
+    app.include_router(
+        create_model_router(
+            available_models=models,
+            auth=auth,
+        )
+    )
 
     from dabba.api.execution_endpoints import create_execution_router
+
     app.include_router(create_execution_router(auth=auth, rate_limiter=rate_limiter))
 
     # Agent streaming endpoint for the VSCode extension (tool-using agent loop)
     try:
         from dabba.api.agent_endpoints import create_agent_router
+
         app.include_router(create_agent_router())
     except Exception as _agent_exc:
         logger.warning(f"Agent endpoints unavailable: {_agent_exc}")
@@ -685,6 +790,7 @@ def create_app(
     # Voice input transcription for the VSCode extension's mic button
     try:
         from dabba.api.audio_endpoints import create_audio_router
+
         app.include_router(create_audio_router())
     except Exception as _audio_exc:
         logger.warning(f"Audio endpoints unavailable: {_audio_exc}")
@@ -692,6 +798,7 @@ def create_app(
     # Image generation (proxies to a key-configured image provider, e.g. OpenAI)
     try:
         from dabba.api.image_endpoints import create_image_router
+
         app.include_router(create_image_router())
     except Exception as _image_exc:
         logger.warning(f"Image endpoints unavailable: {_image_exc}")
@@ -699,6 +806,7 @@ def create_app(
     # Server-side conversation storage for the web frontend (SQLite, scoped by user_id)
     try:
         from dabba.api.conversations_endpoints import create_conversations_router
+
         app.include_router(create_conversations_router())
     except Exception as _conv_exc:
         logger.warning(f"Conversation endpoints unavailable: {_conv_exc}")
@@ -706,6 +814,7 @@ def create_app(
     # Text-to-speech for spoken replies (offline Piper TTS)
     try:
         from dabba.api.tts_endpoints import create_tts_router
+
         app.include_router(create_tts_router())
     except Exception as _tts_exc:
         logger.warning(f"Speech endpoints unavailable: {_tts_exc}")
@@ -713,6 +822,7 @@ def create_app(
     # PDF, Word, and text extraction for web-chat attachments.
     try:
         from dabba.api.document_endpoints import create_document_router
+
         app.include_router(create_document_router())
     except Exception as _document_exc:
         logger.warning(f"Document endpoints unavailable: {_document_exc}")
@@ -720,6 +830,7 @@ def create_app(
     # Shared durable platform services used by web, CLI, and extensions.
     try:
         from dabba.api.platform_endpoints import create_platform_router
+
         app.include_router(create_platform_router())
     except Exception as _platform_exc:
         logger.warning(f"Platform endpoints unavailable: {_platform_exc}")
@@ -727,6 +838,7 @@ def create_app(
     # User-configurable event hooks (session/tool-call shell commands)
     try:
         from dabba.api.hooks_endpoints import create_hooks_router
+
         app.include_router(create_hooks_router())
     except Exception as _hooks_exc:
         logger.warning(f"Hooks endpoints unavailable: {_hooks_exc}")
@@ -735,6 +847,7 @@ def create_app(
     if frontend_dir and Path(frontend_dir).is_dir():
         app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
     else:
+
         @app.get("/")
         async def root():
             """Root endpoint with API information."""
@@ -776,6 +889,7 @@ def run_server(
 
     if config_path and os.path.exists(config_path):
         import yaml
+
         with open(config_path) as f:
             data = yaml.safe_load(f)
         config = ApiConfig(**data.get("api", {}))
@@ -800,6 +914,7 @@ def run_server(
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Run the dabba API server")
     parser.add_argument("--config", type=str, help="Path to config file")
     parser.add_argument("--model", type=str, help="Path to model")

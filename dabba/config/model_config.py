@@ -4,9 +4,8 @@ decoder-only transformer architecture, supporting model sizes from
 10M to 7B+ parameters.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-import math
 
 
 @dataclass
@@ -141,9 +140,7 @@ class ModelConfig:
             self.head_dim = self.hidden_size // self.num_attention_heads
         if self.intermediate_size is None:
             self.intermediate_size = int(self.hidden_size * 8 / 3)
-            self.intermediate_size = (
-                (self.intermediate_size + 63) // 64 * 64
-            )
+            self.intermediate_size = (self.intermediate_size + 63) // 64 * 64
         assert self.hidden_size % self.num_attention_heads == 0, (
             f"hidden_size ({self.hidden_size}) must be divisible by "
             f"num_attention_heads ({self.num_attention_heads})"
@@ -161,12 +158,27 @@ class ModelConfig:
     def num_params(self) -> int:
         """Estimate total parameter count."""
         n = 0
-        n += self.vocab_size * self.hidden_size * 2 if self.tie_word_embeddings else self.vocab_size * self.hidden_size
-        kv_mult = self.num_key_value_heads / self.num_attention_heads
+        n += (
+            self.vocab_size * self.hidden_size * 2
+            if self.tie_word_embeddings
+            else self.vocab_size * self.hidden_size
+        )
+        self.num_key_value_heads / self.num_attention_heads
         for _ in range(self.num_layers):
             n += 4 * self.hidden_size  # RMSNorm x2 (approx)
-            n += self.hidden_size * self.hidden_size // self.num_attention_heads * self.num_attention_heads  # Q
-            n += self.hidden_size * self.hidden_size // self.num_attention_heads * self.num_key_value_heads * 2  # K, V
+            n += (
+                self.hidden_size
+                * self.hidden_size
+                // self.num_attention_heads
+                * self.num_attention_heads
+            )  # Q
+            n += (
+                self.hidden_size
+                * self.hidden_size
+                // self.num_attention_heads
+                * self.num_key_value_heads
+                * 2
+            )  # K, V
             n += self.hidden_size * self.hidden_size  # O
             n += self.hidden_size * self.intermediate_size * 2  # gate + up in SwiGLU
             n += self.intermediate_size * self.hidden_size  # down
@@ -176,7 +188,9 @@ class ModelConfig:
     def from_preset(cls, name: str, **overrides) -> "ModelConfig":
         """Create a ModelConfig from a named preset with optional overrides."""
         if name not in cls._presets:
-            raise ValueError(f"Unknown preset '{name}'. Options: {list(cls._presets.keys())}")
+            raise ValueError(
+                f"Unknown preset '{name}'. Options: {list(cls._presets.keys())}"
+            )
         config = cls(**cls._presets[name])
         for k, v in overrides.items():
             if hasattr(config, k):

@@ -9,11 +9,9 @@ from __future__ import annotations
 
 import atexit
 import json
-import os
 import shutil
 import signal
 import subprocess
-import sys
 import time
 import uuid
 from datetime import datetime
@@ -30,6 +28,7 @@ from dabba.cli.permissions import PermissionManager
 def _get_logger():
     """Lazy logger to avoid importing torch through dabba.utils."""
     from dabba.utils.logging import get_logger
+
     return get_logger("dabba.cli.session")
 
 
@@ -38,36 +37,214 @@ def _is_likely_command(text: str) -> bool:
     if not text or len(text) < 2:
         return False
     stripped = text.strip()
-    q_starters = {"what", "why", "how", "when", "where", "who", "whom", "whose", "which",
-                  "is", "are", "was", "were", "do", "does", "did", "can", "could",
-                  "will", "would", "shall", "should", "may", "might", "must",
-                  "has", "have", "had", "explain", "describe", "tell", "show",
-                  "define", "list", "find", "search", "summarize"}
+    q_starters = {
+        "what",
+        "why",
+        "how",
+        "when",
+        "where",
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "is",
+        "are",
+        "was",
+        "were",
+        "do",
+        "does",
+        "did",
+        "can",
+        "could",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "may",
+        "might",
+        "must",
+        "has",
+        "have",
+        "had",
+        "explain",
+        "describe",
+        "tell",
+        "show",
+        "define",
+        "list",
+        "find",
+        "search",
+        "summarize",
+    }
     first_word = stripped.split()[0].lower().rstrip("?,.;:!")
     if first_word in q_starters:
         return False
     common_commands = {
-        "ls", "df", "du", "ps", "top", "htop", "who", "whoami", "pwd", "id",
-        "uname", "date", "cal", "clear", "env", "printenv", "which", "whereis",
-        "type", "time", "sleep", "yes", "seq", "shuf", "sort", "uniq", "wc",
-        "head", "tail", "cat", "tac", "rev", "cut", "tr", "fmt", "pr", "fold",
-        "nl", "od", "base64", "cksum", "sum", "md5sum", "sha1sum", "sha256sum",
-        "git", "curl", "wget", "ssh", "scp", "rsync", "tar", "gzip", "gunzip",
-        "zip", "unzip", "make", "cmake", "ninja", "meson", "npm", "yarn",
-        "pnpm", "pip", "pip3", "cargo", "go", "rustc", "gcc", "g++", "clang",
-        "clang++", "python", "python3", "node", "deno", "bun", "ruby", "perl",
-        "php", "swift", "kotlin", "docker", "podman", "kubectl", "helm",
-        "terraform", "ansible", "vagrant", "chmod", "chown", "cp", "mv", "rm",
-        "mkdir", "rmdir", "touch", "ln", "mount", "umount", "dd", "find",
-        "locate", "grep", "egrep", "fgrep", "awk", "sed", "xargs", "tee",
-        "echo", "printf", "read", "test", "expr", "let", "set", "export",
-        "source", ".", "exec", "eval", "trap", "kill", "pkill", "killall",
-        "nohup", "disown", "fg", "bg", "jobs", "screen", "tmux", "sudo",
-        "doas", "su", "passwd", "useradd", "usermod", "groupadd", "systemctl",
-        "journalctl", "service", "iptables", "ufw", "ping", "traceroute",
-        "nslookup", "dig", "host", "netstat", "ss", "ip", "ifconfig",
-        "nmcli", "nmtui", "iwctl", "bluetoothctl", "alsamixer", "pactl",
-        "xrandr", "xset", "xinput", "xdg-open", "open",
+        "ls",
+        "df",
+        "du",
+        "ps",
+        "top",
+        "htop",
+        "who",
+        "whoami",
+        "pwd",
+        "id",
+        "uname",
+        "date",
+        "cal",
+        "clear",
+        "env",
+        "printenv",
+        "which",
+        "whereis",
+        "type",
+        "time",
+        "sleep",
+        "yes",
+        "seq",
+        "shuf",
+        "sort",
+        "uniq",
+        "wc",
+        "head",
+        "tail",
+        "cat",
+        "tac",
+        "rev",
+        "cut",
+        "tr",
+        "fmt",
+        "pr",
+        "fold",
+        "nl",
+        "od",
+        "base64",
+        "cksum",
+        "sum",
+        "md5sum",
+        "sha1sum",
+        "sha256sum",
+        "git",
+        "curl",
+        "wget",
+        "ssh",
+        "scp",
+        "rsync",
+        "tar",
+        "gzip",
+        "gunzip",
+        "zip",
+        "unzip",
+        "make",
+        "cmake",
+        "ninja",
+        "meson",
+        "npm",
+        "yarn",
+        "pnpm",
+        "pip",
+        "pip3",
+        "cargo",
+        "go",
+        "rustc",
+        "gcc",
+        "g++",
+        "clang",
+        "clang++",
+        "python",
+        "python3",
+        "node",
+        "deno",
+        "bun",
+        "ruby",
+        "perl",
+        "php",
+        "swift",
+        "kotlin",
+        "docker",
+        "podman",
+        "kubectl",
+        "helm",
+        "terraform",
+        "ansible",
+        "vagrant",
+        "chmod",
+        "chown",
+        "cp",
+        "mv",
+        "rm",
+        "mkdir",
+        "rmdir",
+        "touch",
+        "ln",
+        "mount",
+        "umount",
+        "dd",
+        "find",
+        "locate",
+        "grep",
+        "egrep",
+        "fgrep",
+        "awk",
+        "sed",
+        "xargs",
+        "tee",
+        "echo",
+        "printf",
+        "read",
+        "test",
+        "expr",
+        "let",
+        "set",
+        "export",
+        "source",
+        ".",
+        "exec",
+        "eval",
+        "trap",
+        "kill",
+        "pkill",
+        "killall",
+        "nohup",
+        "disown",
+        "fg",
+        "bg",
+        "jobs",
+        "screen",
+        "tmux",
+        "sudo",
+        "doas",
+        "su",
+        "passwd",
+        "useradd",
+        "usermod",
+        "groupadd",
+        "systemctl",
+        "journalctl",
+        "service",
+        "iptables",
+        "ufw",
+        "ping",
+        "traceroute",
+        "nslookup",
+        "dig",
+        "host",
+        "netstat",
+        "ss",
+        "ip",
+        "ifconfig",
+        "nmcli",
+        "nmtui",
+        "iwctl",
+        "bluetoothctl",
+        "alsamixer",
+        "pactl",
+        "xrandr",
+        "xset",
+        "xinput",
+        "xdg-open",
+        "open",
     }
     tokens = stripped.split()
     first = tokens[0]
@@ -182,10 +359,12 @@ class InteractiveSession:
         try:
             from dabba.cli.tui import run_tui
             from dabba import __version__
+
             run_tui(agent=self.agent, config=self.config, version=__version__)
             return
         except Exception as _tui_err:
             import sys
+
             print(f"TUI error: {_tui_err}", file=sys.stderr)
 
         # Classic REPL fallback
@@ -217,6 +396,7 @@ class InteractiveSession:
     def _print_welcome(self) -> None:
         """Print the welcome banner."""
         from dabba import __version__
+
         self.output.welcome(
             version=__version__,
             model=self.config.default_model,
@@ -267,7 +447,6 @@ class InteractiveSession:
             "/mcp": self._cmd_mcp,
             "/view": self._cmd_view,
             "/run": self._cmd_run,
-            "/save": self._cmd_save,
         }
 
         handler = command_map.get(command)
@@ -409,24 +588,28 @@ class InteractiveSession:
             providers = ["anthropic", "openai", "google", "nvidia", "huggingface"]
             rows = []
             for p in providers:
-                status = "✅ set" if (keys.get(p) or keys.get(p.lower())) else "⬜ not set"
+                status = (
+                    "✅ set" if (keys.get(p) or keys.get(p.lower())) else "⬜ not set"
+                )
                 rows.append([p, status])
             for k in sorted(keys.keys()):
                 if k.lower() not in providers:
                     rows.append([k, "✅ set (model-specific)"])
             self.output.table(["Provider / Model ID", "Key Status"], rows)
-            self.output.info("Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>")
+            self.output.info(
+                "Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>"
+            )
             return
 
         if args[0] == "set" and len(args) >= 3:
             provider = args[1]
             key_value = args[2]
-            
+
             registry = self.agent._get_registry()
             valid_model_ids = {m.id for m in registry.list_all_models()}
             valid_model_ids_lower = {m.id.lower() for m in registry.list_all_models()}
             valid_providers = {"anthropic", "openai", "google", "nvidia", "huggingface"}
-            
+
             is_valid = (
                 provider.lower() in valid_providers
                 or provider in valid_model_ids
@@ -435,7 +618,7 @@ class InteractiveSession:
             if not is_valid:
                 self.output.error(f"Unknown provider or model ID: {provider}")
                 return
-                
+
             api_keys = getattr(self.config, "api_keys", {})
             if api_keys is None:
                 api_keys = {}
@@ -461,7 +644,9 @@ class InteractiveSession:
                 self.output.error(f"No key set for {provider}")
             return
 
-        self.output.info("Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>")
+        self.output.info(
+            "Usage: /keys set <provider_or_model> <key>  or  /keys delete <provider_or_model>"
+        )
 
     def _cmd_model(self, args: List[str]) -> None:
         """Set or show the active model."""
@@ -501,7 +686,9 @@ class InteractiveSession:
             status = self.agent.mcp_manager.status()
             if not status.get("servers"):
                 self.output.info("No MCP servers connected.")
-                self.output.info("Configure servers in ~/.config/dabba/mcp_servers.json")
+                self.output.info(
+                    "Configure servers in ~/.config/dabba/mcp_servers.json"
+                )
                 return
             rows = []
             for name in status["servers"]:
@@ -517,6 +704,7 @@ class InteractiveSession:
             self.output.info("Usage: /view <path>")
             return
         from pathlib import Path
+
         path = Path(args[0])
         if not path.exists():
             self.output.error(f"File not found: {path}")
@@ -542,7 +730,9 @@ class InteractiveSession:
     def _exec_shell(self, command: str) -> None:
         """Execute a shell command and display output."""
         self.output.info(f"$ {command}")
-        self.history.append({"role": "user", "content": f"$ {command}", "timestamp": time.time()})
+        self.history.append(
+            {"role": "user", "content": f"$ {command}", "timestamp": time.time()}
+        )
         try:
             result = subprocess.run(
                 command, shell=True, capture_output=True, text=True, timeout=30
@@ -558,11 +748,13 @@ class InteractiveSession:
                 self.output.code_block(output.strip(), language="bash")
             else:
                 self.output.info(f"Command completed (exit code {result.returncode})")
-            self.history.append({
-                "role": "assistant",
-                "content": output.strip() or f"(exit code {result.returncode})",
-                "timestamp": time.time(),
-            })
+            self.history.append(
+                {
+                    "role": "assistant",
+                    "content": output.strip() or f"(exit code {result.returncode})",
+                    "timestamp": time.time(),
+                }
+            )
         except subprocess.TimeoutExpired:
             self.output.error("Command timed out (30s limit)")
         except Exception as exc:
@@ -596,7 +788,9 @@ class InteractiveSession:
             self._exec_shell(message)
             return
 
-        self.history.append({"role": "user", "content": message, "timestamp": time.time()})
+        self.history.append(
+            {"role": "user", "content": message, "timestamp": time.time()}
+        )
         self.output.user_message(message)
 
         try:
@@ -607,7 +801,9 @@ class InteractiveSession:
                     response = self.agent.run(message)
                 self.output.assistant_message(response)
 
-            self.history.append({"role": "assistant", "content": response, "timestamp": time.time()})
+            self.history.append(
+                {"role": "assistant", "content": response, "timestamp": time.time()}
+            )
             self._check_auto_save()
 
         except Exception as exc:
@@ -692,16 +888,24 @@ class InteractiveSession:
                         "context_manager": context,
                         "permissions": {
                             "mode": self.permissions.mode,
-                            "session_allowed": sorted(self.permissions._session_allowed),
+                            "session_allowed": sorted(
+                                self.permissions._session_allowed
+                            ),
                             "session_denied": sorted(self.permissions._session_denied),
                         },
-                        "workspace_root": getattr(self.agent.agent_config, "workspace_root", None),
-                        "active_file": getattr(self.agent.agent_config, "active_file", None),
+                        "workspace_root": getattr(
+                            self.agent.agent_config, "workspace_root", None
+                        ),
+                        "active_file": getattr(
+                            self.agent.agent_config, "active_file", None
+                        ),
                     }
                     f.write(json.dumps(checkpoint) + "\n")
 
             if not quiet:
-                self.output.info(f"History saved to {path} ({len(self.history)} entries).")
+                self.output.info(
+                    f"History saved to {path} ({len(self.history)} entries)."
+                )
         except OSError as exc:
             self.output.error(f"Failed to save history: {exc}")
 
@@ -751,7 +955,9 @@ class InteractiveSession:
             if checkpoint:
                 workspace = checkpoint.get("workspace_root")
                 if checkpoint.get("context_manager"):
-                    self.agent.restore_context(checkpoint["context_manager"], workspace=workspace)
+                    self.agent.restore_context(
+                        checkpoint["context_manager"], workspace=workspace
+                    )
                 perms = checkpoint.get("permissions") or {}
                 if perms.get("mode"):
                     self.permissions.set_mode(perms["mode"])
@@ -763,7 +969,9 @@ class InteractiveSession:
                     self.agent.agent_config.workspace_root = workspace
                 if checkpoint.get("active_file"):
                     self.agent.agent_config.active_file = checkpoint["active_file"]
-                self.output.info("Restored full agent context and permission grants from checkpoint.")
+                self.output.info(
+                    "Restored full agent context and permission grants from checkpoint."
+                )
         except (json.JSONDecodeError, OSError) as exc:
             self.output.error(f"Failed to load history: {exc}")
 
@@ -781,7 +989,7 @@ class InteractiveSession:
                 reverse=True,
             )
 
-            for old_file in history_files[self.config.max_history_files:]:
+            for old_file in history_files[self.config.max_history_files :]:
                 old_file.unlink()
                 _get_logger().info("Removed old history file: %s", old_file)
         except OSError as exc:

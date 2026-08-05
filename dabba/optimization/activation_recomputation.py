@@ -12,13 +12,11 @@ References:
       (Korthikanti et al., 2022) - https://arxiv.org/abs/2205.05198
 """
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set
 
 import torch
-import torch.nn as nn
 from torch.utils.checkpoint import checkpoint
 
 from dabba.model.transformer import Transformer
@@ -37,6 +35,7 @@ class RecomputationPolicy(Enum):
         SELECTIVE_ATTN_FFN: Recompute both attention and FFN.
         AUTO: Automatically select based on memory budget.
     """
+
     NONE = "none"
     FULL = "full"
     SELECTIVE_ATTN = "selective_attn"
@@ -56,6 +55,7 @@ class ActivationMemoryBreakdown:
         normalization_mb: Memory for normalization outputs.
         total_mb: Total activation memory for the layer.
     """
+
     attention_mb: float = 0.0
     ffn_mb: float = 0.0
     normalization_mb: float = 0.0
@@ -161,7 +161,7 @@ class ActivationRecomputation:
         # Calculate how much each policy saves
         attn_pct = breakdown["attention_frac"]
         ffn_pct = breakdown["ffn_frac"]
-        norm_pct = breakdown["normalization_frac"]
+        breakdown["normalization_frac"]
 
         # Sort savings by impact
         savings = [
@@ -279,16 +279,16 @@ class ActivationRecomputation:
         attn_qkv = bs * sl * (num_heads + 2 * kv_heads) * head_dim * bpe
         attn_scores = bs * num_heads * sl * sl * bpe
         attn_output = bs * sl * hidden * bpe
-        attention_mb = (attn_qkv + attn_scores + attn_output) / (1024 ** 2)
+        attention_mb = (attn_qkv + attn_scores + attn_output) / (1024**2)
 
         # FFN activations (SwiGLU: gate, up, down)
         ffn_gate = bs * sl * intermediate * bpe
         ffn_up = bs * sl * intermediate * bpe
         ffn_down = bs * sl * hidden * bpe
-        ffn_mb = (ffn_gate + ffn_up + ffn_down) / (1024 ** 2)
+        ffn_mb = (ffn_gate + ffn_up + ffn_down) / (1024**2)
 
         # Normalization activations (2 per layer: input_layernorm, post_attn_layernorm)
-        norm_mb = (2 * bs * sl * hidden * bpe) / (1024 ** 2)
+        norm_mb = (2 * bs * sl * hidden * bpe) / (1024**2)
 
         per_layer_mb = attention_mb + ffn_mb + norm_mb
         total_mb = per_layer_mb * cfg.num_layers
@@ -336,7 +336,8 @@ class ActivationRecomputation:
 
         device = next(self.model.parameters()).device
         dummy_input = torch.randint(
-            0, self.model.config.vocab_size - 1,
+            0,
+            self.model.config.vocab_size - 1,
             (batch_size, seq_length),
             device=device,
         )
@@ -360,7 +361,9 @@ class ActivationRecomputation:
             end_event.record()
             torch.cuda.synchronize()
             before_times.append(start_event.elapsed_time(end_event))
-            before_peak = max(before_peak, torch.cuda.max_memory_allocated() / (1024 ** 2))
+            before_peak = max(
+                before_peak, torch.cuda.max_memory_allocated() / (1024**2)
+            )
 
         # After: re-enable recomputation
         self.apply_policy(old_policy)
@@ -380,7 +383,7 @@ class ActivationRecomputation:
             end_event.record()
             torch.cuda.synchronize()
             after_times.append(start_event.elapsed_time(end_event))
-            after_peak = max(after_peak, torch.cuda.max_memory_allocated() / (1024 ** 2))
+            after_peak = max(after_peak, torch.cuda.max_memory_allocated() / (1024**2))
 
         avg_before = sum(before_times) / len(before_times)
         avg_after = sum(after_times) / len(after_times)
@@ -389,10 +392,16 @@ class ActivationRecomputation:
             "before_peak_memory_mb": before_peak,
             "after_peak_memory_mb": after_peak,
             "memory_saved_mb": before_peak - after_peak,
-            "memory_saved_pct": ((before_peak - after_peak) / before_peak * 100) if before_peak > 0 else 0,
+            "memory_saved_pct": (
+                ((before_peak - after_peak) / before_peak * 100)
+                if before_peak > 0
+                else 0
+            ),
             "before_avg_time_ms": avg_before,
             "after_avg_time_ms": avg_after,
-            "time_overhead_pct": ((avg_after - avg_before) / avg_before * 100) if avg_before > 0 else 0,
+            "time_overhead_pct": (
+                ((avg_after - avg_before) / avg_before * 100) if avg_before > 0 else 0
+            ),
             "policy": self._policy.value,
             "recomputed_components": list(self._recomputation_enabled),
         }
@@ -415,9 +424,9 @@ class ActivationRecomputation:
             f"  Recomputed:          {', '.join(self._recomputation_enabled) if self._recomputation_enabled else 'None'}",
             "",
             "Per-Layer Activation Breakdown:",
-            f"  Attention total:     {estimate['attention_mb']:.3f} MiB ({estimate['attention_frac']*100:.1f}%)",
-            f"  FFN total:           {estimate['ffn_mb']:.3f} MiB ({estimate['ffn_frac']*100:.1f}%)",
-            f"  Normalization total: {estimate['normalization_mb']:.3f} MiB ({estimate['normalization_frac']*100:.1f}%)",
+            f"  Attention total:     {estimate['attention_mb']:.3f} MiB ({estimate['attention_frac'] * 100:.1f}%)",
+            f"  FFN total:           {estimate['ffn_mb']:.3f} MiB ({estimate['ffn_frac'] * 100:.1f}%)",
+            f"  Normalization total: {estimate['normalization_mb']:.3f} MiB ({estimate['normalization_frac'] * 100:.1f}%)",
             f"  Per-layer total:     {estimate['per_layer_mb']:.3f} MiB",
             f"  All layers total:    {estimate['total_mb']:.2f} MiB",
             "",

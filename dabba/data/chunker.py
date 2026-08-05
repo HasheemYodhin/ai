@@ -4,7 +4,7 @@ using paragraph, sentence, token-based, or fixed-size strategies.
 """
 
 import re
-from typing import Iterator, List, Optional
+from typing import Iterator, List
 
 
 class TextChunker:
@@ -167,7 +167,7 @@ class TextChunker:
         chunks = []
         step = max(1, self.chunk_size - self.chunk_overlap)
         for i in range(0, len(tokens), step):
-            chunk_tokens = tokens[i:i + self.chunk_size]
+            chunk_tokens = tokens[i : i + self.chunk_size]
             if chunk_tokens:
                 chunks.append(" ".join(chunk_tokens))
         return chunks

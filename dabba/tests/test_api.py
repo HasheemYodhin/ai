@@ -1,5 +1,4 @@
-import json
-from unittest.mock import Mock, patch, MagicMock, AsyncMock, PropertyMock
+from unittest.mock import Mock
 from fastapi.testclient import TestClient
 from dabba.api import create_app
 from dabba.api.auth import authenticate_request
@@ -41,11 +40,14 @@ class TestAuth:
 
 
 def test_local_greeting_responds_without_slow_model_engine():
-    assert _generate_response(
-        [{"role": "user", "content": "Hi"}],
-        model_engine=Mock(),
-        model_name="dabba",
-    ) == "Hi! How can I help you today?"
+    assert (
+        _generate_response(
+            [{"role": "user", "content": "Hi"}],
+            model_engine=Mock(),
+            model_name="dabba",
+        )
+        == "Hi! How can I help you today?"
+    )
 
 
 class TestRateLimiter:
@@ -117,7 +119,9 @@ class TestChatEndpoint:
         endpoint.chat.return_value = {
             "choices": [{"message": {"content": "Creative response"}}]
         }
-        response = endpoint.chat(messages=[{"role": "user", "content": "Write a poem"}], temperature=0.9)
+        response = endpoint.chat(
+            messages=[{"role": "user", "content": "Write a poem"}], temperature=0.9
+        )
         assert response is not None
 
     def test_chat_empty_messages(self):
@@ -134,12 +138,16 @@ class TestChatEndpoint:
         endpoint.chat.return_value = {
             "choices": [{"message": {"content": "Short reply"}}]
         }
-        response = endpoint.chat(messages=[{"role": "user", "content": "Hello"}], max_tokens=10)
+        response = endpoint.chat(
+            messages=[{"role": "user", "content": "Hello"}], max_tokens=10
+        )
         assert response is not None
 
     def test_chat_streaming(self):
         handler = Mock(spec=StreamingHandler)
-        handler.create_chunk.return_value = "data: {\"choices\": [{\"delta\": {\"content\": \"Hello\"}}]}\n\n"
+        handler.create_chunk.return_value = (
+            'data: {"choices": [{"delta": {"content": "Hello"}}]}\n\n'
+        )
         result = handler.create_chunk("Hello", index=0)
         assert "Hello" in result
 
@@ -165,7 +173,9 @@ class TestFastAPIApp:
             data = response.json()
             assert "status" in data
 
-    def test_artifact_publish_serves_publicly_and_enforces_ownership(self, tmp_path, monkeypatch):
+    def test_artifact_publish_serves_publicly_and_enforces_ownership(
+        self, tmp_path, monkeypatch
+    ):
         import base64
         import dabba.platform.core as platform_core
 
@@ -179,21 +189,33 @@ class TestFastAPIApp:
 
         test_app = create_app()
         with TestClient(test_app) as client:
-            signup = client.post("/v1/platform/identity/signup", json={
-                "name": "Pub Tester", "email": "artifact-pub-test@example.com", "password": "a-secure-password",
-            })
+            signup = client.post(
+                "/v1/platform/identity/signup",
+                json={
+                    "name": "Pub Tester",
+                    "email": "artifact-pub-test@example.com",
+                    "password": "a-secure-password",
+                },
+            )
             assert signup.status_code == 201
             headers = {"Authorization": f"Bearer {signup.json()['token']}"}
 
             html = b"<!doctype html><html><body>Hello from a published artifact</body></html>"
-            created = client.post("/v1/platform/artifacts", headers=headers, json={
-                "name": "demo.html", "data": base64.b64encode(html).decode(), "mediaType": "text/html",
-            })
+            created = client.post(
+                "/v1/platform/artifacts",
+                headers=headers,
+                json={
+                    "name": "demo.html",
+                    "data": base64.b64encode(html).decode(),
+                    "mediaType": "text/html",
+                },
+            )
             assert created.status_code == 201
 
             published = client.post(
                 f"/v1/platform/artifacts/{created.json()['id']}/publish",
-                headers=headers, json={"title": "Demo Page"},
+                headers=headers,
+                json={"title": "Demo Page"},
             )
             assert published.status_code == 201
             slug = published.json()["slug"]
@@ -203,16 +225,27 @@ class TestFastAPIApp:
             assert public.status_code == 200
             assert b"Hello from a published artifact" in public.content
 
-            other_signup = client.post("/v1/platform/identity/signup", json={
-                "name": "Other", "email": "artifact-pub-other@example.com", "password": "a-secure-password",
-            })
+            other_signup = client.post(
+                "/v1/platform/identity/signup",
+                json={
+                    "name": "Other",
+                    "email": "artifact-pub-other@example.com",
+                    "password": "a-secure-password",
+                },
+            )
             other_headers = {"Authorization": f"Bearer {other_signup.json()['token']}"}
-            forbidden = client.delete(f"/v1/platform/artifacts/publish/{slug}", headers=other_headers)
+            forbidden = client.delete(
+                f"/v1/platform/artifacts/publish/{slug}", headers=other_headers
+            )
             assert forbidden.status_code == 403
 
-            unpublished = client.delete(f"/v1/platform/artifacts/publish/{slug}", headers=headers)
+            unpublished = client.delete(
+                f"/v1/platform/artifacts/publish/{slug}", headers=headers
+            )
             assert unpublished.status_code == 204
-            assert client.get(f"/v1/platform/public/artifacts/{slug}").status_code == 404
+            assert (
+                client.get(f"/v1/platform/public/artifacts/{slug}").status_code == 404
+            )
 
     def test_agent_processes_endpoint_lists_background_processes(self):
         test_app = create_app()
@@ -254,7 +287,10 @@ class TestFastAPIApp:
         with TestClient(test_app) as client:
             response = client.post(
                 "/v1/chat/completions",
-                json={"model": "dabba-small", "messages": [{"role": "user", "content": "Hi"}]},
+                json={
+                    "model": "dabba-small",
+                    "messages": [{"role": "user", "content": "Hi"}],
+                },
                 headers={"Authorization": "Bearer invalid-token"},
             )
             assert response.status_code in [200, 401, 403]

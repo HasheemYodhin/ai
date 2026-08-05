@@ -5,7 +5,6 @@ Maps the final hidden states to vocabulary logits and optionally
 ties weights with the token embedding layer.
 """
 
-import math
 from typing import Optional
 
 import torch
@@ -47,7 +46,7 @@ class OutputHead(nn.Module):
             self._tied = True
         else:
             self.weight = nn.Parameter(torch.empty(vocab_size, hidden_size))
-            nn.init.normal_(self.weight, mean=0.0, std=hidden_size ** -0.5)
+            nn.init.normal_(self.weight, mean=0.0, std=hidden_size**-0.5)
             self._tied = False
 
         if bias:

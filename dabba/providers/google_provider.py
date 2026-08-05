@@ -2,13 +2,67 @@ from __future__ import annotations
 from typing import Dict, List
 from dabba.providers.base import BaseProvider, ModelInfo
 
-
 MODELS = [
-    ModelInfo("gemini-2.5-pro",         "Gemini 2.5 Pro",        "google", "xhigh",  "Best Gemini, deep reasoning",   1000000, 1.25,  10.0, True,  True),
-    ModelInfo("gemini-2.5-flash",       "Gemini 2.5 Flash",      "google", "high",   "Fast + thinking",               1000000, 0.30,  2.5,  True,  True),
-    ModelInfo("gemini-2.5-flash-lite",  "Gemini 2.5 Flash Lite", "google", "medium", "Cheapest 2.5-gen, still fast",  1000000, 0.10,  0.40, False, True),
-    ModelInfo("gemini-2.0-flash",       "Gemini 2.0 Flash",      "google", "medium", "Fast, efficient",               1000000, 0.10,  0.40, False, True),
-    ModelInfo("gemini-2.0-flash-lite",  "Gemini 2.0 Lite",       "google", "low",    "Lightest, cheapest 2.0-gen",    1000000, 0.075, 0.30, False, True),
+    ModelInfo(
+        "gemini-2.5-pro",
+        "Gemini 2.5 Pro",
+        "google",
+        "xhigh",
+        "Best Gemini, deep reasoning",
+        1000000,
+        1.25,
+        10.0,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "gemini-2.5-flash",
+        "Gemini 2.5 Flash",
+        "google",
+        "high",
+        "Fast + thinking",
+        1000000,
+        0.30,
+        2.5,
+        True,
+        True,
+    ),
+    ModelInfo(
+        "gemini-2.5-flash-lite",
+        "Gemini 2.5 Flash Lite",
+        "google",
+        "medium",
+        "Cheapest 2.5-gen, still fast",
+        1000000,
+        0.10,
+        0.40,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "gemini-2.0-flash",
+        "Gemini 2.0 Flash",
+        "google",
+        "medium",
+        "Fast, efficient",
+        1000000,
+        0.10,
+        0.40,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "gemini-2.0-flash-lite",
+        "Gemini 2.0 Lite",
+        "google",
+        "low",
+        "Lightest, cheapest 2.0-gen",
+        1000000,
+        0.075,
+        0.30,
+        False,
+        True,
+    ),
 ]
 
 
@@ -17,6 +71,7 @@ class GoogleProvider(BaseProvider):
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
         import google.generativeai as genai
+
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError("Google API key not set. Run: /keys set google <key>")
@@ -27,7 +82,9 @@ class GoogleProvider(BaseProvider):
         history, system_text = self._convert_messages(messages)
 
         if system_text and history:
-            history[0]["parts"][0] = f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
+            history[0]["parts"][0] = (
+                f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
+            )
 
         if not history:
             return ""
@@ -41,7 +98,9 @@ class GoogleProvider(BaseProvider):
         )
         # Explicit timeout — see anthropic_provider.py for why this matters.
         resp = chat.send_message(
-            last_msg, generation_config=gen_config, request_options={"timeout": 60},
+            last_msg,
+            generation_config=gen_config,
+            request_options={"timeout": 60},
         )
         return resp.text.strip()
 

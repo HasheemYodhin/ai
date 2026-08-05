@@ -11,7 +11,6 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import torch
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -65,7 +64,9 @@ class MetricsTracker:
             for name, vals in self._metrics.items()
         }
 
-    def update(self, metrics_or_key, value: Optional[float] = None, step: Optional[int] = None) -> None:
+    def update(
+        self, metrics_or_key, value: Optional[float] = None, step: Optional[int] = None
+    ) -> None:
         """
         Update metrics.
 
@@ -246,7 +247,9 @@ class MetricsTracker:
         for key, entries in data.items():
             for entry in entries:
                 tracker._metrics.setdefault(key, []).append(entry["value"])
-                tracker._windows.setdefault(key, deque(maxlen=tracker.window_size)).append(entry["value"])
+                tracker._windows.setdefault(
+                    key, deque(maxlen=tracker.window_size)
+                ).append(entry["value"])
         return tracker
 
     def close(self) -> None:

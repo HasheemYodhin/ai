@@ -6,8 +6,8 @@ sampling strategies, batch generation, and conversation support.
 
 """
 
-from dataclasses import dataclass, field
-from typing import List, Optional, Union
+from dataclasses import dataclass
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -267,7 +267,7 @@ class Generator:
         )
 
         new_tokens = generated[0].tolist()
-        response_tokens = new_tokens[len(self._conversation_history[-2048:]):]
+        response_tokens = new_tokens[len(self._conversation_history[-2048:]) :]
         self._conversation_history.extend(response_tokens)
 
         response = self.tokenizer.decode(response_tokens)
@@ -280,5 +280,6 @@ class Generator:
     def generate_stream(self, input_ids: torch.Tensor, **kwargs):
         """Yield tokens one at a time."""
         from dabba.inference.streaming import StreamingGenerator
+
         sg = StreamingGenerator(model=self.model)
         yield from sg.generate(input_ids, **kwargs)

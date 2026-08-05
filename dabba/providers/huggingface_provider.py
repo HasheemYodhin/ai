@@ -10,11 +10,15 @@ tell "meta/llama-3.3-70b-instruct" (NIM) from "meta-llama/Llama-3.1-8B-
 Instruct" (HF) apart. The prefix is stripped before the real model id is
 sent to HF's API.
 """
+
 from __future__ import annotations
 from typing import List
 from dabba.providers.base import (
-    BaseProvider, ModelInfo,
-    tools_to_openai_schema, openai_tool_calls_to_tags, remap_tool_role_for_provider,
+    BaseProvider,
+    ModelInfo,
+    tools_to_openai_schema,
+    openai_tool_calls_to_tags,
+    remap_tool_role_for_provider,
 )
 from dabba.utils.logging import get_logger
 
@@ -27,10 +31,54 @@ HF_BASE_URL = "https://router.huggingface.co/v1"
 # of the model's addition, not a guarantee. cost_input/cost_output are left
 # at 0.0 since HF's own providers set pricing per-backend, not HF itself.
 MODELS = [
-    ModelInfo("hf/meta-llama/Llama-3.1-8B-Instruct",  "Llama 3.1 8B (HF)",   "huggingface", "medium", "Meta Llama 3.1 8B via HF Inference Providers", 128000, 0.0, 0.0, False, True),
-    ModelInfo("hf/meta-llama/Llama-3.3-70B-Instruct", "Llama 3.3 70B (HF)",  "huggingface", "high",   "Meta Llama 3.3 70B via HF Inference Providers", 128000, 0.0, 0.0, False, True),
-    ModelInfo("hf/Qwen/Qwen2.5-72B-Instruct",         "Qwen 2.5 72B (HF)",   "huggingface", "high",   "Qwen 2.5 72B via HF Inference Providers",        32768, 0.0, 0.0, False, True),
-    ModelInfo("hf/deepseek-ai/DeepSeek-V3",           "DeepSeek V3 (HF)",   "huggingface", "xhigh",  "DeepSeek V3 via HF Inference Providers — closest open model to frontier quality", 64000, 0.0, 0.0, True, True),
+    ModelInfo(
+        "hf/meta-llama/Llama-3.1-8B-Instruct",
+        "Llama 3.1 8B (HF)",
+        "huggingface",
+        "medium",
+        "Meta Llama 3.1 8B via HF Inference Providers",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "hf/meta-llama/Llama-3.3-70B-Instruct",
+        "Llama 3.3 70B (HF)",
+        "huggingface",
+        "high",
+        "Meta Llama 3.3 70B via HF Inference Providers",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "hf/Qwen/Qwen2.5-72B-Instruct",
+        "Qwen 2.5 72B (HF)",
+        "huggingface",
+        "high",
+        "Qwen 2.5 72B via HF Inference Providers",
+        32768,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "hf/deepseek-ai/DeepSeek-V3",
+        "DeepSeek V3 (HF)",
+        "huggingface",
+        "xhigh",
+        "DeepSeek V3 via HF Inference Providers — closest open model to frontier quality",
+        64000,
+        0.0,
+        0.0,
+        True,
+        True,
+    ),
 ]
 
 
@@ -39,6 +87,7 @@ class HuggingFaceProvider(BaseProvider):
 
     def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
         from openai import OpenAI
+
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError(
@@ -89,7 +138,8 @@ class HuggingFaceProvider(BaseProvider):
             if "tools" in params and ("400" in msg or "422" in msg):
                 logger.warning(
                     "HF model '%s' rejected native tools= (%s); retrying without it.",
-                    real_model, msg[:120],
+                    real_model,
+                    msg[:120],
                 )
                 params.pop("tools", None)
                 params.pop("tool_choice", None)

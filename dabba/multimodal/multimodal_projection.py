@@ -7,7 +7,6 @@ be consumed as prefix tokens during autoregressive generation.
 """
 
 import logging
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -55,12 +54,14 @@ class MultimodalProjection(nn.Module):
         if layer_norm:
             layers.append(nn.LayerNorm(input_dim))
 
-        layers.extend([
-            nn.Linear(input_dim, hidden_dim, bias=True),
-            nn.GELU(approximate="tanh"),
-            nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
-            nn.Linear(hidden_dim, output_dim, bias=True),
-        ])
+        layers.extend(
+            [
+                nn.Linear(input_dim, hidden_dim, bias=True),
+                nn.GELU(approximate="tanh"),
+                nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
+                nn.Linear(hidden_dim, output_dim, bias=True),
+            ]
+        )
 
         self.projector = nn.Sequential(*layers)
         self._init_weights()
@@ -69,9 +70,7 @@ class MultimodalProjection(nn.Module):
         """Initialise linear projections with a truncated normal."""
         for module in self.projector.modules():
             if isinstance(module, nn.Linear):
-                nn.init.trunc_normal_(
-                    module.weight, mean=0.0, std=0.02, a=-2.0, b=2.0
-                )
+                nn.init.trunc_normal_(module.weight, mean=0.0, std=0.02, a=-2.0, b=2.0)
                 if module.bias is not None:
                     nn.init.zeros_(module.bias)
 

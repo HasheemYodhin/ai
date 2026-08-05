@@ -14,7 +14,6 @@ image) are allowlisted independently via CliConfig.allowed_docker_containers
 from __future__ import annotations
 
 import asyncio
-import shlex
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
@@ -47,9 +46,12 @@ class DockerPermissionManager:
     @classmethod
     def from_cli_config(cls) -> "DockerPermissionManager":
         from dabba.cli.config import CliConfig
+
         config = CliConfig.load()
         return cls(
-            allowed_containers=set(getattr(config, "allowed_docker_containers", []) or []),
+            allowed_containers=set(
+                getattr(config, "allowed_docker_containers", []) or []
+            ),
             allowed_images=set(getattr(config, "allowed_docker_images", []) or []),
         )
 
@@ -74,7 +76,12 @@ async def _run_argv(argv: List[str], timeout: int) -> Dict[str, object]:
     except asyncio.TimeoutError:
         proc.kill()
         await proc.wait()
-        return {"returncode": -1, "stdout": "", "stderr": f"Timed out after {timeout}s", "timed_out": True}
+        return {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": f"Timed out after {timeout}s",
+            "timed_out": True,
+        }
 
 
 async def docker_exec(
@@ -155,7 +162,7 @@ async def docker_run(
         )
 
     argv = ["docker", "run", "--rm", "--network", network]
-    for vol in (volumes or []):
+    for vol in volumes or []:
         argv += ["-v", vol]
     argv += [image, "sh", "-c", command]
 
@@ -174,7 +181,10 @@ async def docker_list_containers(timeout: int = 15) -> Dict[str, object]:
     Returns:
         Dict with keys: returncode, stdout, stderr, timed_out.
     """
-    return await _run_argv(["docker", "ps", "--format", "{{.ID}}\t{{.Image}}\t{{.Names}}\t{{.Status}}"], timeout)
+    return await _run_argv(
+        ["docker", "ps", "--format", "{{.ID}}\t{{.Image}}\t{{.Names}}\t{{.Status}}"],
+        timeout,
+    )
 
 
 def register_docker_tools(registry: ToolRegistry) -> None:
@@ -189,9 +199,21 @@ def register_docker_tools(registry: ToolRegistry) -> None:
             name="docker_exec",
             description="Execute a command inside a running container. Container must be pre-approved in the allowlist.",
             parameters=[
-                ToolParameter(name="container", type="string", description="Container name or ID."),
-                ToolParameter(name="command", type="string", description="Command to run inside the container."),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=60),
+                ToolParameter(
+                    name="container", type="string", description="Container name or ID."
+                ),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="Command to run inside the container.",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=60,
+                ),
             ],
             handler=docker_exec,
             handler_sync=False,
@@ -203,14 +225,38 @@ def register_docker_tools(registry: ToolRegistry) -> None:
             name="docker_run",
             description="Run a command in a fresh, disposable container for isolation. Image must be pre-approved in the allowlist.",
             parameters=[
-                ToolParameter(name="image", type="string", description="Image reference, e.g. 'python:3.12-slim'."),
-                ToolParameter(name="command", type="string", description="Command to run inside the container."),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=120),
                 ToolParameter(
-                    name="volumes", type="array", description="Bind mounts as 'host_path:container_path'.",
-                    required=False, default=None, items=ToolParameter(name="volume", type="string"),
+                    name="image",
+                    type="string",
+                    description="Image reference, e.g. 'python:3.12-slim'.",
                 ),
-                ToolParameter(name="network", type="string", description="Docker network mode (default 'none' = isolated).", required=False, default="none"),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="Command to run inside the container.",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=120,
+                ),
+                ToolParameter(
+                    name="volumes",
+                    type="array",
+                    description="Bind mounts as 'host_path:container_path'.",
+                    required=False,
+                    default=None,
+                    items=ToolParameter(name="volume", type="string"),
+                ),
+                ToolParameter(
+                    name="network",
+                    type="string",
+                    description="Docker network mode (default 'none' = isolated).",
+                    required=False,
+                    default="none",
+                ),
             ],
             handler=docker_run,
             handler_sync=False,
@@ -222,7 +268,13 @@ def register_docker_tools(registry: ToolRegistry) -> None:
             name="docker_list_containers",
             description="List running Docker containers (read-only).",
             parameters=[
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=15),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=15,
+                ),
             ],
             handler=docker_list_containers,
             handler_sync=False,

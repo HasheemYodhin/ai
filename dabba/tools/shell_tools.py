@@ -41,29 +41,105 @@ class ShellPermissionManager:
         sandbox: If True, only explicitly allowed commands may run.
     """
 
-    allowed_commands: Set[str] = field(default_factory=lambda: {
-        "ls", "cat", "head", "tail", "echo", "grep", "find",
-        "python", "python3", "node", "npm", "npx", "git", "curl", "wget",
-        "mkdir", "cp", "mv", "rm", "touch", "chmod", "pip", "pwd",
-        "sort", "wc", "uniq", "diff", "tee", "which", "file",
-        "tar", "gzip", "gunzip", "zip", "unzip",
-        "make", "cmake", "gcc", "g++", "clang", "rustc", "cargo",
-        "deno", "bun", "yarn", "pnpm",
-        "ps", "df", "du", "free", "uptime", "env",
-        "uvicorn", "gunicorn", "flask", "django-admin", "pytest",
-        "bash", "sh", "zsh",
-    })
-    blocked_commands: Set[str] = field(default_factory=lambda: {
-        "sudo", "su", "chown", "passwd", "kill", "pkill",
-        "shutdown", "reboot", "init", "systemctl",
-        "dd", "mkfs", "fdisk", "mount", "umount",
-        "iptables", "ufw", "ss", "netstat",
-        "nc", "ncat", "socat",
-        "nmap", "masscan",
-        "wireshark", "tshark",
-        "cryptsetup", "openssl",
-        "docker", "podman", "containerd",
-    })
+    allowed_commands: Set[str] = field(
+        default_factory=lambda: {
+            "ls",
+            "cat",
+            "head",
+            "tail",
+            "echo",
+            "grep",
+            "find",
+            "python",
+            "python3",
+            "node",
+            "npm",
+            "npx",
+            "git",
+            "curl",
+            "wget",
+            "mkdir",
+            "cp",
+            "mv",
+            "rm",
+            "touch",
+            "chmod",
+            "pip",
+            "pwd",
+            "sort",
+            "wc",
+            "uniq",
+            "diff",
+            "tee",
+            "which",
+            "file",
+            "tar",
+            "gzip",
+            "gunzip",
+            "zip",
+            "unzip",
+            "make",
+            "cmake",
+            "gcc",
+            "g++",
+            "clang",
+            "rustc",
+            "cargo",
+            "deno",
+            "bun",
+            "yarn",
+            "pnpm",
+            "ps",
+            "df",
+            "du",
+            "free",
+            "uptime",
+            "env",
+            "uvicorn",
+            "gunicorn",
+            "flask",
+            "django-admin",
+            "pytest",
+            "bash",
+            "sh",
+            "zsh",
+        }
+    )
+    blocked_commands: Set[str] = field(
+        default_factory=lambda: {
+            "sudo",
+            "su",
+            "chown",
+            "passwd",
+            "kill",
+            "pkill",
+            "shutdown",
+            "reboot",
+            "init",
+            "systemctl",
+            "dd",
+            "mkfs",
+            "fdisk",
+            "mount",
+            "umount",
+            "iptables",
+            "ufw",
+            "ss",
+            "netstat",
+            "nc",
+            "ncat",
+            "socat",
+            "nmap",
+            "masscan",
+            "wireshark",
+            "tshark",
+            "cryptsetup",
+            "openssl",
+            "docker",
+            "podman",
+            "containerd",
+        }
+    )
     sandbox: bool = True
 
     def is_command_allowed(self, command: str) -> bool:
@@ -90,7 +166,11 @@ class ShellPermissionManager:
             # If command starts with relative path (e.g. ./start.sh) allow it.
             try:
                 parts = shlex.split(command)
-                if parts and (parts[0].startswith("./") or parts[0].startswith("../") or parts[0].startswith("/")):
+                if parts and (
+                    parts[0].startswith("./")
+                    or parts[0].startswith("../")
+                    or parts[0].startswith("/")
+                ):
                     return True
             except Exception:
                 pass
@@ -98,7 +178,9 @@ class ShellPermissionManager:
 
         return True
 
-    def check_paths_scoped(self, command: str, cwd: Optional[str] = None) -> Optional[str]:
+    def check_paths_scoped(
+        self, command: str, cwd: Optional[str] = None
+    ) -> Optional[str]:
         """
         For destructive commands (rm/mv/chmod/chown/cp), verify every path-like
         argument resolves inside `cwd` (defaults to the process cwd).
@@ -234,9 +316,13 @@ async def execute_command(
 
     try:
         if stream:
-            result = await _run_command_streaming(command, timeout, cwd=cwd, shell_type=shell_type)
+            result = await _run_command_streaming(
+                command, timeout, cwd=cwd, shell_type=shell_type
+            )
         else:
-            result = await _run_command_blocking(command, timeout, cwd=cwd, shell_type=shell_type)
+            result = await _run_command_blocking(
+                command, timeout, cwd=cwd, shell_type=shell_type
+            )
     except asyncio.CancelledError:
         logger.warning("Command was cancelled: %s", command[:100])
         return {
@@ -289,7 +375,11 @@ def _resolve_shell(shell_type: str) -> Optional[List[str]]:
         return [bash_path, "-c"]
 
     if shell_type == "powershell":
-        exe = shutil.which("pwsh") or shutil.which("powershell.exe") or shutil.which("powershell")
+        exe = (
+            shutil.which("pwsh")
+            or shutil.which("powershell.exe")
+            or shutil.which("powershell")
+        )
         if not exe:
             raise FileNotFoundError(
                 "PowerShell not found. Install PowerShell Core (pwsh) — "
@@ -297,7 +387,9 @@ def _resolve_shell(shell_type: str) -> Optional[List[str]]:
             )
         return [exe, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command"]
 
-    raise ValueError(f"Unknown shell_type: '{shell_type}'. Use 'auto', 'bash', or 'powershell'.")
+    raise ValueError(
+        f"Unknown shell_type: '{shell_type}'. Use 'auto', 'bash', or 'powershell'."
+    )
 
 
 def _preexec_ignore_sigpipe():
@@ -340,6 +432,7 @@ async def _run_command_blocking(
         Dict with stdout, stderr, returncode, timed_out, _duration.
     """
     import time
+
     start = time.monotonic()
 
     try:
@@ -389,6 +482,7 @@ async def _run_command_streaming(
         Dict with combined stdout, stderr, returncode, timed_out, _duration.
     """
     import time
+
     start = time.monotonic()
     stdout_chunks: List[str] = []
     stderr_chunks: List[str] = []
@@ -477,14 +571,38 @@ def register_shell_tools(registry: ToolRegistry) -> None:
                 "Uses the OS default shell unless shell_type overrides it."
             ),
             parameters=[
-                ToolParameter(name="command", type="string", description="Shell command to execute."),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=30),
-                ToolParameter(name="stream", type="boolean", description="Stream output as it arrives.", required=False, default=False),
-                ToolParameter(name="cwd", type="string", description="Working directory to run in.", required=False, default=None),
                 ToolParameter(
-                    name="shell_type", type="string",
+                    name="command",
+                    type="string",
+                    description="Shell command to execute.",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=30,
+                ),
+                ToolParameter(
+                    name="stream",
+                    type="boolean",
+                    description="Stream output as it arrives.",
+                    required=False,
+                    default=False,
+                ),
+                ToolParameter(
+                    name="cwd",
+                    type="string",
+                    description="Working directory to run in.",
+                    required=False,
+                    default=None,
+                ),
+                ToolParameter(
+                    name="shell_type",
+                    type="string",
                     description="'auto' (OS default), 'bash', or 'powershell'.",
-                    required=False, default="auto",
+                    required=False,
+                    default="auto",
                 ),
             ],
             handler=execute_command,
@@ -497,9 +615,25 @@ def register_shell_tools(registry: ToolRegistry) -> None:
             name="powershell_exec",
             description="Execute a command via PowerShell (pwsh/powershell.exe), independent of the host OS's default shell.",
             parameters=[
-                ToolParameter(name="command", type="string", description="PowerShell command or script to execute."),
-                ToolParameter(name="timeout", type="integer", description="Max execution time in seconds.", required=False, default=30),
-                ToolParameter(name="cwd", type="string", description="Working directory to run in.", required=False, default=None),
+                ToolParameter(
+                    name="command",
+                    type="string",
+                    description="PowerShell command or script to execute.",
+                ),
+                ToolParameter(
+                    name="timeout",
+                    type="integer",
+                    description="Max execution time in seconds.",
+                    required=False,
+                    default=30,
+                ),
+                ToolParameter(
+                    name="cwd",
+                    type="string",
+                    description="Working directory to run in.",
+                    required=False,
+                    default=None,
+                ),
             ],
             handler=execute_powershell,
             handler_sync=False,

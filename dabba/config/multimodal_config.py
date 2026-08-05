@@ -71,4 +71,5 @@ class MultimodalConfig:
 
     def __post_init__(self):
         import os
+
         os.makedirs(self.temp_dir, exist_ok=True)

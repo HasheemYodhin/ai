@@ -1,8 +1,6 @@
 import os
-import json
 import tempfile
-import torch
-from dabba.tokenizer import BPETokenizer, SpecialTokens, get_special_tokens
+from dabba.tokenizer import BPETokenizer, get_special_tokens
 
 
 class TestBPETokenizer:
@@ -25,7 +23,7 @@ class TestBPETokenizer:
         tokenizer.train(texts, verbose=False)
         for text in texts:
             ids = tokenizer.encode(text)
-            decoded = tokenizer.decode(ids)
+            tokenizer.decode(ids)
             assert len(ids) > 0
 
     def test_encode_returns_list_of_ints(self):
