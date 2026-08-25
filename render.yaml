@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: dabba-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python3 -m dabba.api.server --host 0.0.0.0 --port 10000
+    healthCheckPath: /ready
+    autoDeployTrigger: commit
+    envVars:
+      - key: DABBA_DATA_DIR
+        value: /data
+      - key: DABBA_MODEL_PATH
+        value: rule_based
+      - key: DABBA_CORS_ORIGINS
+        sync: false
+    disk:
+      name: dabba-data
+      mountPath: /data
+      sizeGB: 1

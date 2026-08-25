@@ -1,5 +1,7 @@
 import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Message, ModelCatalog, TokenUsage, McpServer, Conversation, UploadedFile, ExtractedDocument, CoworkItem, CoworkStatus, CoworkRun, CoworkSubtask, CoworkSchedule, AgentDefinition, Skill, DirectoryListing, ScheduledSkill, ScheduledSkillRun, PlatformTask, PlatformTaskEvent, AgentHook, HookEvent, HookRun } from '@/types'
 
+export const DEFAULT_API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
+
 async function responseError(response: Response, fallback: string): Promise<Error> {
   const text = await response.text().catch(() => '')
   if (!text) return new Error(fallback)
@@ -30,13 +32,13 @@ export class ApiClient {
   private apiKey: string
   private sessionToken = localStorage.getItem('dabba-session-token') ?? ''
 
-  constructor(baseUrl = '', apiKey = '') {
+  constructor(baseUrl = DEFAULT_API_URL, apiKey = '') {
     this.baseUrl = baseUrl
     this.apiKey = apiKey
   }
 
   setBaseUrl(url: string) {
-    this.baseUrl = url
+    this.baseUrl = url.replace(/\/+$/, '')
   }
 
   setApiKey(key: string) {
