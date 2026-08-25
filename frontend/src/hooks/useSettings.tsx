@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
-import { apiClient } from '@/api/client'
+import { apiClient, DEFAULT_API_URL } from '@/api/client'
 
 /** Generation params that can be remembered per-model. */
 export interface ModelParams {
@@ -48,9 +48,8 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  // Relative URLs work through Vite's development proxy and when the built
-  // frontend is served by Dabba, including LAN hosts and reverse proxies.
-  baseUrl: '',
+  // Relative URLs work locally; Cloudflare Pages injects the Render URL at build time.
+  baseUrl: DEFAULT_API_URL,
   apiKey: '',
   model: 'dabba-10m',
   effort: 'medium',
@@ -92,8 +91,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<AppSettings>
         // Migrate the old hardcoded default. Explicit non-default API URLs are preserved.
-        if (parsed.baseUrl === 'http://localhost:8080') parsed.baseUrl = ''
-        return { ...DEFAULT_SETTINGS, ...parsed }
+        if (parsed.baseUrl === 'http://localhost:8080') parsed.baseUrl = DEFAULT_API_URL
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          baseUrl: parsed.baseUrl || DEFAULT_API_URL,
+        }
       }
     } catch {
       // ignore

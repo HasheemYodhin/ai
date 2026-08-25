@@ -896,6 +896,18 @@ def run_server(
     else:
         config = ApiConfig(host=host, port=port)
 
+    cors_origins = os.environ.get("DABBA_CORS_ORIGINS", "").strip()
+    if cors_origins:
+        config.cors_origins = [
+            origin.strip().rstrip("/")
+            for origin in cors_origins.split(",")
+            if origin.strip()
+        ]
+
+    api_keys = os.environ.get("DABBA_API_KEYS", "").strip()
+    if api_keys:
+        config.api_keys = [key.strip() for key in api_keys.split(",") if key.strip()]
+
     model_engine = None
     if model_path:
         model_engine = ModelEngine(model_path=model_path)

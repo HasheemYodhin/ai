@@ -20,10 +20,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from dabba.utils.paths import get_dabba_config_dir
+from dabba.platform.core import get_platform_data_dir
 from dabba.platform.services import IdentityService
 
-DB_PATH = get_dabba_config_dir() / "conversations.db"
+DB_PATH = get_platform_data_dir() / "conversations.db"
 
 
 def _get_db() -> sqlite3.Connection:
