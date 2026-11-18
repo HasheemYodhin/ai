@@ -1,15 +1,15 @@
 import { lazy, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { User, AlertCircle, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
+import { AlertCircle, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
+import { useSmoothText } from '@/hooks/useSmoothText'
+import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
 import { RegenerateMenu } from './RegenerateMenu'
 import { DownloadMenu } from './DownloadMenu'
 import logo from '../icon.svg'
 
-const MarkdownRenderer = lazy(() =>
-  import('./MarkdownRenderer').then(mod => ({ default: mod.MarkdownRenderer }))
-)
+const MarkdownRenderer = lazy(loadMarkdownRenderer)
 
 interface MessageBubbleProps {
   message: Message
@@ -30,6 +30,9 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const { text: shownContent, revealing } = useSmoothText(message.content, !!isStreaming && message.role !== 'user')
+  const writing = !!isStreaming || revealing
   const [draft, setDraft] = useState(message.content)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speakError, setSpeakError] = useState<string | null>(null)
@@ -154,40 +157,29 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
 
   return (
     <div
+      title={timeStr}
       className={cn(
-        'group flex gap-3 w-full animate-fade-in',
+        'group flex gap-4 w-full animate-fade-in',
         isUser ? 'justify-end' : 'justify-start'
       )}
     >
       {!isUser && (
-        <div className="flex-shrink-0 mt-1">
-          <div className="relative w-8 h-8" aria-label="Dabba">
-            <div className={cn(
-              'relative z-10 w-8 h-8 rounded-lg flex items-center justify-center border transition-colors',
-              isError
-                ? 'bg-red-500/10 border-red-500/20 text-red-500'
-                : 'bg-accent/10 border-accent/20 text-accent'
-            )}>
-              {isError ? (
-                <AlertCircle className="w-4 h-4" />
-              ) : (
-                <img
-                  src={logo}
-                  alt="Dabba"
-                  className={cn(
-                    'w-5 h-5 object-contain',
-                    isActing && 'animate-spin'
-                  )}
-                />
-              )}
-            </div>
-          </div>
+        <div className="flex-shrink-0 pt-1" aria-label="Dabba">
+          {isError ? (
+            <AlertCircle className="w-6 h-6 text-red-500" strokeWidth={1.5} />
+          ) : (
+            <img
+              src={logo}
+              alt="Dabba"
+              className={cn('w-6 h-6 object-contain', isActing && 'animate-spin')}
+            />
+          )}
         </div>
       )}
 
       <div className={cn(
-        'flex flex-col max-w-[85%] md:max-w-[75%]',
-        isUser ? 'items-end' : 'items-start'
+        'flex flex-col min-w-0',
+        isUser ? 'items-end max-w-[85%] md:max-w-[75%]' : 'items-start flex-1'
       )}>
         {isEditing ? (
           <div className="w-full min-w-[280px] rounded-2xl px-3.5 py-3 glass-input">
@@ -217,12 +209,11 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
         ) : (
           <div
             className={cn(
-              'rounded-2xl px-4 py-3',
               isUser
-                ? 'glass-card-user text-white rounded-br-sm'
+                ? 'glass-card-user rounded-3xl px-5 py-3'
                 : isError
-                  ? 'bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-900/50 rounded-bl-sm text-text-primary dark:text-text-dark-primary'
-                  : 'glass-card-bot rounded-bl-sm'
+                  ? 'w-full rounded-xl px-4 py-3 bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-900/50 text-text-primary dark:text-text-dark-primary'
+                  : 'w-full pt-0.5'
             )}
           >
             {isUser ? (
@@ -269,7 +260,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                                   <FileText className="h-12 w-12 text-red-500" />
                                 </div>
                               </object>
-                              <span className="absolute left-2 top-2 rounded-md bg-red-600 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white shadow-sm">
+                              <span className="absolute left-2 top-2 rounded-md bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white">
                                 PDF
                               </span>
                             </div>
@@ -282,7 +273,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                           )}
                           <div className="flex items-center gap-2.5 px-3 py-2.5">
                             <div className={cn(
-                              'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[9px] font-bold text-white',
+                              'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[11px] font-medium text-white',
                               isPdf ? 'bg-red-600' : 'bg-blue-600'
                             )}>
                               {isPdf ? 'PDF' : extension.slice(0, 4)}
@@ -291,7 +282,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                               <p className="truncate text-xs font-semibold" title={attachment.name}>
                                 {attachment.name}
                               </p>
-                              <p className="mt-0.5 text-[10px] text-slate-500">
+                              <p className="mt-0.5 text-xs text-slate-500">
                                 {formatFileSize(attachment.size)}
                               </p>
                             </div>
@@ -307,44 +298,61 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   </p>
                 )}
                 {message.imageMode === 'ocr' && (
-                  <span className="mt-1 inline-block text-[10px] text-white/70">
+                  <span className="mt-1 inline-block text-xs text-text-tertiary dark:text-text-dark-tertiary">
                     text extracted via OCR
                   </span>
                 )}
               </div>
             ) : (
-              <div className="text-[15px] leading-relaxed text-text-primary dark:text-text-dark-primary">
-                {message.agentActivity && message.agentActivity.steps.length > 0 && (
-                  <div className="flex flex-col gap-1 mb-2">
-                    {message.agentActivity.steps.map((step, i) => (
-                      <div
-                        key={i}
-                        title={step.detail}
-                        className={cn(
-                          'flex items-center gap-1.5 text-xs',
-                          step.success === false ? 'text-red-500' : 'text-text-secondary dark:text-text-dark-secondary'
-                        )}
+              <div className="text-base leading-7 text-text-primary dark:text-text-dark-primary">
+                {message.agentActivity && message.agentActivity.steps.length > 0 && (() => {
+                  const activity = message.agentActivity
+                  const open = stepsOpen || !activity.done
+                  const failed = activity.steps.filter(s => s.success === false).length
+                  return (
+                    <div className="mb-4">
+                      <button
+                        type="button"
+                        onClick={() => setStepsOpen(o => !o)}
+                        disabled={!activity.done}
+                        aria-expanded={open}
+                        className="flex items-center gap-2 h-8 -ml-1 px-1 rounded-lg text-[13px] text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors disabled:cursor-default"
                       >
-                        <img
-                          src={logo}
-                          alt="Dabba"
-                          className={cn(
-                            'w-3.5 h-3.5 object-contain flex-shrink-0',
-                            step.success === undefined && !message.agentActivity?.done && 'animate-spin'
-                          )}
-                        />
-                        <span className="font-mono text-[10px] text-accent">{step.tool}</span>
-                        {step.detail && <span className="truncate max-w-[160px]">{step.detail}</span>}
-                      </div>
-                    ))}
-                    {!message.agentActivity.done && (
-                      <div className="flex items-center gap-1.5 text-xs text-accent">
-                        <img src={logo} alt="Dabba" className="w-3.5 h-3.5 object-contain flex-shrink-0 animate-spin" />
-                        <span>{message.agentActivity.label}…</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                        {activity.done
+                          ? <ChevronRight className={cn('w-4 h-4 transition-transform', open && 'rotate-90')} strokeWidth={1.5} />
+                          : <Loader2 className="w-4 h-4 animate-spin text-accent" strokeWidth={1.5} />}
+                        <span>
+                          {activity.done
+                            ? `Used ${activity.steps.length} tool${activity.steps.length === 1 ? '' : 's'}`
+                            : `${activity.label}…`}
+                        </span>
+                        {failed > 0 && <span className="text-xs text-red-600 dark:text-red-400">{failed} failed</span>}
+                      </button>
+                      {open && (
+                        <ol className="mt-1 ml-[7px] pl-4 border-l border-border dark:border-border-dark space-y-1.5">
+                          {activity.steps.map((step, i) => {
+                            const running = step.success === undefined && !activity.done
+                            return (
+                              <li key={i} title={step.detail} className="relative flex items-center gap-2 text-[13px] min-w-0">
+                                <span className="absolute -left-[21px] flex items-center justify-center w-2.5 h-2.5 rounded-full bg-surface dark:bg-surface-dark">
+                                  <span className={cn(
+                                    'w-1.5 h-1.5 rounded-full',
+                                    step.success === false ? 'bg-red-500' : running ? 'bg-accent animate-pulse' : 'bg-text-tertiary/60 dark:bg-text-dark-tertiary/60'
+                                  )} />
+                                </span>
+                                <span className="font-mono text-xs text-text-primary dark:text-text-dark-primary flex-shrink-0">{step.tool}</span>
+                                {step.detail && (
+                                  <span className="truncate text-text-tertiary dark:text-text-dark-tertiary">{step.detail}</span>
+                                )}
+                                {step.success === false && <X className="w-3.5 h-3.5 text-red-500 flex-shrink-0" strokeWidth={1.5} />}
+                              </li>
+                            )
+                          })}
+                        </ol>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {message.isGeneratingImage && (
                   <div className="flex items-center gap-2 text-text-secondary dark:text-text-dark-secondary">
@@ -371,15 +379,16 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   </div>
                 )}
 
-                {message.content ? (
-                  <Suspense fallback={<div className="text-sm text-text-tertiary dark:text-text-dark-tertiary">Loading message…</div>}>
-                    <MarkdownRenderer content={message.content} />
+                {shownContent ? (
+                  <Suspense fallback={<p className="whitespace-pre-wrap">{shownContent}</p>}>
+                    <MarkdownRenderer content={shownContent} className={writing ? 'streaming-cursor' : undefined} />
                   </Suspense>
-                ) : isStreaming ? (
-                  <div className="typing-indicator">
-                    <span />
-                    <span />
-                    <span />
+                ) : isStreaming && !message.isGeneratingImage ? (
+                  <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label="Dabba is thinking">
+                    <span className="thinking-dot" />
+                    {streamElapsed >= 20 && (
+                      <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">Still thinking…</span>
+                    )}
                   </div>
                 ) : null}
 
@@ -418,7 +427,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                             <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
                               {file.name}
                             </p>
-                            <p className="mt-0.5 text-[10px] text-text-tertiary dark:text-text-dark-tertiary">
+                            <p className="mt-0.5 text-xs text-text-tertiary dark:text-text-dark-tertiary">
                               {extension} · {formatFileSize(file.size)}
                             </p>
                           </div>
@@ -434,32 +443,19 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
         )}
 
         <div className={cn(
-          'flex items-center gap-1.5 mt-1 px-1 min-h-[22px]',
-          isUser ? 'flex-row-reverse' : 'flex-row'
+          'flex items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
+          isUser ? 'flex-row-reverse' : 'flex-row -ml-1.5'
         )}>
-          <span className="text-[10px] text-text-tertiary dark:text-text-dark-tertiary font-medium">
-            {timeStr}
-          </span>
-          {isUser && (
-            <div className="w-5 h-5 rounded-full bg-accent/15 flex items-center justify-center">
-              <User className="w-3 h-3 text-accent" />
-            </div>
-          )}
-          {isStreaming && (
-            <span className="text-[10px] text-accent animate-pulse font-medium">
-              {streamElapsed >= 20 ? 'Still working...' : 'Generating...'}
-            </span>
-          )}
 
           {/* Model + token usage on assistant replies */}
-          {!isUser && !isStreaming && !isError && message.model && (
-            <span className="text-[10px] text-text-tertiary dark:text-text-dark-tertiary">
+          {!isUser && !writing && !isError && message.model && (
+            <span className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
               {message.model}
               {message.usage && ` · ${message.usage.totalTokens} tok`}
             </span>
           )}
 
-          {!isEditing && !isStreaming && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
+          {!isEditing && !writing && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
             <div className={cn(
               'flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity',
               isUser ? 'flex-row-reverse' : 'flex-row'
@@ -467,7 +463,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
               <button
                 onClick={handleCopy}
                 title="Copy"
-                className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
               >
                 {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
               </button>
@@ -475,7 +471,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                 <button
                   onClick={startEdit}
                   title="Edit"
-                  className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+                  className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
                 >
                   <Pencil className="w-3 h-3" />
                 </button>
@@ -488,7 +484,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   className="flex items-center gap-1 px-1.5 py-1 rounded-md text-text-tertiary hover:text-accent hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
                 >
                   <RotateCcw className="w-3 h-3" />
-                  <span className="text-[10px] font-medium">Retry</span>
+                  <span className="text-xs font-medium">Retry</span>
                 </button>
               )}
               {!isUser && !isError && onRegenerate && (
@@ -499,7 +495,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   onClick={handleToggleSpeak}
                   title={isSpeaking ? 'Stop' : 'Play aloud'}
                   className={cn(
-                    'p-1 rounded-md transition-colors',
+                    'p-1.5 rounded-lg transition-colors',
                     isSpeaking
                       ? 'text-accent'
                       : 'text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -514,10 +510,10 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
             </div>
           )}
           {speakError && (
-            <span className="text-[10px] text-red-500">{speakError}</span>
+            <span className="text-xs text-red-500">{speakError}</span>
           )}
           {copyError && (
-            <span role="status" className="text-[10px] text-red-500">{copyError}</span>
+            <span role="status" className="text-xs text-red-500">{copyError}</span>
           )}
         </div>
       </div>

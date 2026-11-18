@@ -22,8 +22,8 @@ const FILE_EXPORT_CAPABILITY = [
 
 const EDIT_DOCUMENT_RE = /\b(edit|update|change|modify|improve|replace|remove|delete|add|append|insert|fix|correct|rewrite|revise|translate|reformat|rename)\b/i
 const NVIDIA_CAPACITY_RE = /(?:resourceexhausted|worker\s+local\s+total\s+request\s+limit\s+reached)/i
-const DOCUMENT_FALLBACK_MODEL = 'meta/llama-3.1-8b-instruct'
-const GENERAL_FALLBACK_MODEL = 'qwen/qwen2.5-coder-32b-instruct'
+const DOCUMENT_FALLBACK_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b'
+const GENERAL_FALLBACK_MODEL = 'poolside/laguna-xs-2.1'
 
 function withoutCapacityError(content: string): string {
   const marker = content.search(/I encountered an error calling|ResourceExhausted|Worker local total request limit reached/i)

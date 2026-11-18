@@ -1,13 +1,13 @@
 import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react'
 import type { Message, Project, ExtractedDocument, DocumentAttachment } from '@/types'
 import { MessageBubble } from './MessageBubble'
+import { preloadMarkdownRenderer } from '@/lib/markdownRenderer'
 import { InputArea } from './InputArea'
 import type { ActiveMode } from './PlusMenu'
-import { ModelSwitcher } from './ModelSwitcher'
 import { ArtifactProvider, useArtifact } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import type { PendingApproval, PendingPlanApproval } from '@/hooks/useChat'
-import { ChevronDown, Ghost, ShoppingBag, Wand2, Terminal, Lightbulb, ShieldAlert, ListChecks, type LucideIcon } from 'lucide-react'
+import { ChevronDown, Ghost, ShieldAlert, ListChecks, BookOpenText, Code2, Gauge, Bug, Scale, Play, type LucideIcon } from 'lucide-react'
 
 // Pulls in react-syntax-highlighter (same heavy dep MarkdownRenderer lazy-loads)
 // — keep it out of the main bundle and only fetch it once an artifact opens.
@@ -35,52 +35,13 @@ interface ChatWindowProps {
   onPlanApprovalDecision: (approved: boolean) => void
 }
 
-interface Suggestion {
-  title: string
-  desc: string
-  prompt: string
-  kind: 'chat' | 'image'
-  icon: LucideIcon
-}
-
-const SUGGESTIONS: Suggestion[] = [
-  {
-    title: 'E-Commerce Store',
-    desc: 'Create an ecommerce storefront with a slide-out cart panel',
-    prompt: 'Create a clean, production-style HTML page for an ecommerce storefront. Include a header with navigation and cart icon, a hero banner, a product grid with sample items, and a footer. All styling should be embedded within the page. Also implement a working add-to-cart option with slide-out cart panel.',
-    kind: 'chat',
-    icon: ShoppingBag,
-  },
-  {
-    title: 'Ben 10 vs Vilgax',
-    desc: 'Generate an action-packed illustration of Ben 10 fighting Vilgax',
-    prompt: 'Ben 10 fighting with Vilgax, highly detailed action scene, vibrant colors, anime style',
-    kind: 'image',
-    icon: Wand2,
-  },
-  {
-    title: 'Python Algorithm',
-    desc: 'Write an optimized custom thread-pool executor',
-    prompt: 'Write a complete, optimized Python script implementing a custom thread-pool executor. Include a simple demo of scheduling tasks.',
-    kind: 'chat',
-    icon: Terminal,
-  },
-  {
-    title: 'VS Code Extension Ideas',
-    desc: 'Brainstorm creative features for an AI-powered code editor',
-    prompt: 'What are some unique features for an AI-powered code editor vscode extension? Brainstorm 5 creative ideas.',
-    kind: 'chat',
-    icon: Lightbulb,
-  }
-]
-
-const FOLLOW_UPS = [
-  { label: '🔍 Explain in detail', prompt: 'Can you explain the previous answer in more detail, breaking down the key concepts?' },
-  { label: '💻 Show code example', prompt: 'Can you show me a complete, runnable code example of this?' },
-  { label: '⚡ Optimize this', prompt: 'How can we optimize this solution for better performance or resource usage?' },
-  { label: '🐛 Help me debug', prompt: 'I am encountering an issue/error with this. Can you help me debug it?' },
-  { label: '❓ Pros & cons', prompt: 'What are the pros and cons of this approach compared to alternatives?' },
-  { label: '🛠️ How to run', prompt: 'What are the step-by-step instructions to run and test this code?' },
+const FOLLOW_UPS: { label: string; icon: LucideIcon; prompt: string }[] = [
+  { label: 'Explain in detail', icon: BookOpenText, prompt: 'Can you explain the previous answer in more detail, breaking down the key concepts?' },
+  { label: 'Show code example', icon: Code2, prompt: 'Can you show me a complete, runnable code example of this?' },
+  { label: 'Optimize this', icon: Gauge, prompt: 'How can we optimize this solution for better performance or resource usage?' },
+  { label: 'Help me debug', icon: Bug, prompt: 'I am encountering an issue/error with this. Can you help me debug it?' },
+  { label: 'Pros and cons', icon: Scale, prompt: 'What are the pros and cons of this approach compared to alternatives?' },
+  { label: 'How to run', icon: Play, prompt: 'What are the step-by-step instructions to run and test this code?' },
 ]
 
 export function ChatWindow({
@@ -92,6 +53,8 @@ export function ChatWindow({
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isAutoScroll, setIsAutoScroll] = useState(true)
+
+  useEffect(() => { preloadMarkdownRenderer() }, [])
 
   const scrollToBottom = useCallback((smooth = false) => {
     const el = containerRef.current
@@ -124,6 +87,7 @@ export function ChatWindow({
   }, [])
 
   const isStreaming = isLoading && messages.length > 0 && messages[messages.length - 1].role === 'assistant'
+  const title = messages.find(m => m.role === 'user')?.content.split('\n')[0].slice(0, 80) || 'New chat'
 
   const inputArea = (
     <InputArea
@@ -141,66 +105,39 @@ export function ChatWindow({
   )
 
   const temporaryBadge = isTemporary && (
-    <span className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary">
-      <Ghost className="w-3.5 h-3.5" /> Temporary Chat
+    <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary">
+      <Ghost className="w-3.5 h-3.5" strokeWidth={1.5} /> Temporary chat
     </span>
   )
 
-  const followUpRow = messages.length > 0 && !isLoading && (
-    <div className="max-w-4xl mx-auto px-4 mb-2">
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
-        {FOLLOW_UPS.map((f, idx) => (
-          <button
-            key={idx}
-            onClick={() => onSend(f.prompt)}
-            className="flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-medium border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-secondary text-text-secondary dark:text-text-dark-secondary transition-all hover:scale-[1.02] active:scale-[0.98] shadow-sm"
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+  const lastIsAssistant = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
+  const followUpRow = lastIsAssistant && !isLoading && (
+    <div className="flex flex-wrap gap-2 pl-10">
+      {FOLLOW_UPS.map((f, idx) => (
+        <button
+          key={idx}
+          onClick={() => onSend(f.prompt)}
+          className="h-8 flex items-center gap-2 px-3 rounded-full text-[13px] border border-border dark:border-border-dark hover:bg-surface-secondary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-[background-color,transform] active:scale-[0.98]"
+        >
+          <f.icon className="w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
+          {f.label}
+        </button>
+      ))}
     </div>
   )
 
   const column = messages.length === 0 ? (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between px-6 py-4">
-        <ModelSwitcher />
+      <header className="flex items-center justify-between h-14 px-6">
+        <span className="text-[15px] font-medium text-text-primary dark:text-text-dark-primary">Dabba</span>
         {temporaryBadge}
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto scrollbar-thin px-4">
         <div className="w-full max-w-2xl -mt-16">
-          <h1 className="text-center text-[28px] font-medium tracking-tight mb-6 text-text-primary dark:text-text-dark-primary">
-            {isTemporary ? "This chat won't be saved" : "What's on your mind today?"}
+          <h1 className="text-center text-[28px] leading-tight font-medium mb-8 text-text-primary dark:text-text-dark-primary">
+            {isTemporary ? "This chat won't be saved" : 'Chat, write code or make an image'}
           </h1>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-            {SUGGESTIONS.map((s, idx) => {
-              const Icon = s.icon
-              return (
-                <button
-                  key={idx}
-                  onClick={() => {
-                    if (s.kind === 'image') {
-                      onGenerateImage(s.prompt)
-                    } else {
-                      onSend(s.prompt)
-                    }
-                  }}
-                  className="flex flex-col items-start text-left p-4 rounded-xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-secondary transition-all hover:scale-[1.01] active:scale-[0.99] group shadow-sm hover:shadow"
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <div className="p-1.5 rounded-lg bg-accent/10 text-accent group-hover:bg-accent group-hover:text-white transition-colors">
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <span className="text-xs font-semibold text-text-primary dark:text-text-dark-primary">{s.title}</span>
-                  </div>
-                  <span className="text-[11px] leading-relaxed text-text-secondary dark:text-text-dark-secondary">{s.desc}</span>
-                </button>
-              )
-            })}
-          </div>
 
           {inputArea}
         </div>
@@ -208,17 +145,17 @@ export function ChatWindow({
     </div>
   ) : (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between px-6 py-4">
-        <div className="flex items-center gap-3">
-          <ModelSwitcher />
+      <header className="flex items-center justify-between h-14 px-6">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="truncate text-[15px] font-medium text-text-primary dark:text-text-dark-primary">{title}</span>
           {temporaryBadge}
         </div>
         <button
           onClick={onClear}
           aria-label="Clear conversation"
-          className="text-xs px-3 py-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-red-500 dark:hover:text-red-400 transition-colors font-medium"
+          className="h-8 text-[13px] px-3 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-red-600 dark:hover:text-red-400 transition-colors"
         >
-          Clear Chat
+          Clear chat
         </button>
       </header>
 
@@ -237,6 +174,7 @@ export function ChatWindow({
               onRegenerate={onRegenerate}
             />
           ))}
+          {followUpRow}
           <div ref={bottomRef} />
         </div>
 
@@ -255,7 +193,6 @@ export function ChatWindow({
         )}
       </div>
 
-      {followUpRow}
       {inputArea}
     </div>
   )

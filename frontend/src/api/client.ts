@@ -291,6 +291,10 @@ export class ApiClient {
     return this.platformRequest('/skills', { method: 'POST', body: JSON.stringify(input) })
   }
 
+  importSkillPackage(input: { url?: string; content?: string }): Promise<Skill> {
+    return this.platformRequest('/skills/import', { method: 'POST', body: JSON.stringify(input) })
+  }
+
   deleteSkillPackage(id: string): Promise<void> {
     return this.platformRequest(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
   }

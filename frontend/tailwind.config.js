@@ -40,9 +40,9 @@ export default {
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
       },
       animation: {
-        'fade-in': 'fadeIn 0.15s ease-out',
-        'slide-up': 'slideUp 0.2s ease-out',
-        'slide-in-right': 'slideInRight 0.2s ease-out',
+        'fade-in': 'fadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-up': 'slideUp 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-in-right': 'slideInRight 300ms cubic-bezier(0.22, 1, 0.36, 1)',
         'pulse-dot': 'pulseDot 1.4s infinite ease-in-out',
         'shimmer': 'shimmer 2s infinite linear',
       },

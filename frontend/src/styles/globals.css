@@ -75,18 +75,25 @@
   }
 
   .glass-card-user {
-    background: theme('colors.accent.DEFAULT');
-    border: 1px solid transparent;
+    background: theme('colors.surface.tertiary');
+    color: theme('colors.text.primary');
   }
 
-  .glass-card-bot {
-    background: theme('colors.surface.secondary');
+  .dark .glass-card-user {
+    background: theme('colors.surface.dark-tertiary');
+    color: theme('colors.text.dark-primary');
+  }
+
+  .composer {
+    background: theme('colors.surface.DEFAULT');
     border: 1px solid rgb(var(--color-border));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
   }
 
-  .dark .glass-card-bot {
+  .dark .composer {
     background: theme('colors.surface.dark-tertiary');
     border: 1px solid theme('colors.border.dark');
+    box-shadow: none;
   }
 
   .glass-input {
@@ -157,24 +164,36 @@
     background-size: 200% 100%;
   }
 
-  .typing-indicator {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 4px;
+  .thinking-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: currentColor;
+    animation: thinkPulse 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
 
-  .typing-indicator span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    @apply bg-accent/60;
-    animation: pulseDot 1.4s infinite ease-in-out;
+  /* Dot that trails the last line of a reply while it is still streaming. */
+  .streaming-cursor > :last-child:not(div, pre, table, ul, ol)::after,
+  .streaming-cursor > :is(ul, ol):last-child > li:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 6px;
+    border-radius: 9999px;
+    background: currentColor;
+    vertical-align: middle;
+    animation: thinkPulse 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
 
-  .typing-indicator span:nth-child(1) { animation-delay: 0s; }
-  .typing-indicator span:nth-child(2) { animation-delay: 0.16s; }
-  .typing-indicator span:nth-child(3) { animation-delay: 0.32s; }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-dot,
+    .streaming-cursor > :last-child::after,
+    .streaming-cursor > :is(ul, ol):last-child > li:last-child::after {
+      animation: none;
+    }
+  }
 }
 
 @layer utilities {
@@ -190,6 +209,11 @@
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+}
+
+@keyframes thinkPulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes shimmer {

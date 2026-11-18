@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
-import { Send, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
+import { ArrowUp, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
 import { captureScreenshot } from '@/lib/screenshot'
@@ -7,6 +7,7 @@ import { startRecording, type VoiceRecorder } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
+import { ModelSwitcher } from './ModelSwitcher'
 import { useSkills } from '@/hooks/useSkills'
 import type { UploadedFile, Project, ExtractedDocument, DocumentAttachment } from '@/types'
 
@@ -292,8 +293,8 @@ export function InputArea({
   const effectivePlaceholder = modeChip?.placeholder ?? placeholder
 
   return (
-    <div className="bg-transparent border-t border-border dark:border-border-dark">
-      <div className="max-w-4xl mx-auto px-4 py-4">
+    <div className="bg-transparent">
+      <div className="max-w-3xl mx-auto px-4 pt-2 pb-4">
         {modeChip && (
           <div className="flex items-center gap-1.5 mb-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium">
@@ -362,11 +363,7 @@ export function InputArea({
           <p className="text-xs text-red-500 mb-2">{voiceError}</p>
         )}
 
-        <div className={cn(
-          'relative flex items-end gap-2 rounded-2xl transition-colors',
-          'glass-input',
-          'focus-within:border-accent/50',
-        )}>
+        <div className="composer relative flex flex-col rounded-3xl transition-colors focus-within:border-accent/40">
           <input
             ref={fileInputRef}
             type="file"
@@ -375,6 +372,26 @@ export function InputArea({
             className="hidden"
             onChange={handleFileInputChange}
           />
+
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder={effectivePlaceholder}
+            aria-label={effectivePlaceholder}
+            rows={1}
+            disabled={disabled}
+            maxLength={maxChars + 100}
+            className={cn(
+              'w-full resize-none bg-transparent px-5 pt-4 pb-2 text-base leading-7 outline-none',
+              'text-text-primary dark:text-text-dark-primary',
+              'placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary',
+              'disabled:opacity-50 scrollbar-thin'
+            )}
+          />
+
+          <div className="flex items-center gap-1 px-2.5 pb-2.5">
           <PlusMenu
             disabled={isLoading || isExtractingDocuments || disabled}
             mode={mode}
@@ -392,25 +409,8 @@ export function InputArea({
             </span>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={effectivePlaceholder}
-            aria-label={effectivePlaceholder}
-            rows={1}
-            disabled={disabled}
-            maxLength={maxChars + 100}
-            className={cn(
-              'flex-1 resize-none bg-transparent py-3 text-[15px] leading-relaxed outline-none',
-              'text-text-primary dark:text-text-dark-primary',
-              'placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary',
-              'disabled:opacity-50 scrollbar-thin'
-            )}
-          />
-
-          <div className="flex items-center gap-1 pr-2.5 pb-2">
+          <div className="flex-1" />
+          <ModelSwitcher placement="up" />
             <button
               type="button"
               onClick={handleMicClick}
@@ -418,7 +418,7 @@ export function InputArea({
               title={isQuickRecording ? 'Stop and transcribe' : 'Voice input'}
               aria-label={isQuickRecording ? 'Stop recording and transcribe' : 'Start voice input'}
               className={cn(
-                'flex items-center justify-center p-2 rounded-lg transition-colors disabled:opacity-40',
+                'w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40',
                 isQuickRecording
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -432,7 +432,7 @@ export function InputArea({
               disabled={isLoading || isExtractingDocuments || disabled}
               title="Voice mode"
               aria-label="Open voice mode"
-              className="flex items-center justify-center p-2 rounded-lg text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
+              className="w-9 h-9 flex items-center justify-center rounded-full text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
             >
               <AudioLines className="w-4 h-4" />
             </button>
@@ -440,11 +440,11 @@ export function InputArea({
               <button
                 type="button"
                 onClick={onStop}
-                className="flex items-center gap-1.5 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors"
+                className="ml-1 w-9 h-9 flex items-center justify-center rounded-full bg-text-primary dark:bg-text-dark-primary text-surface dark:text-surface-dark hover:opacity-90 active:scale-[0.97] transition-[opacity,transform]"
                 title="Stop generation"
                 aria-label="Stop generation"
               >
-                <Square className="w-4 h-4 fill-current" />
+                <Square className="w-3.5 h-3.5 fill-current" />
               </button>
             ) : (
               <button
@@ -452,33 +452,35 @@ export function InputArea({
                 onClick={() => void handleSend()}
                 disabled={(!value.trim() && files.length === 0) || isExtractingDocuments || disabled}
                 className={cn(
-                  'flex items-center gap-1.5 p-2 rounded-lg transition-colors',
+                  'ml-1 w-9 h-9 flex items-center justify-center rounded-full transition-[background-color,transform]',
                   (value.trim() || files.length > 0)
-                    ? 'bg-accent hover:bg-accent-hover text-white'
-                    : 'bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
+                    ? 'bg-accent hover:bg-accent-hover text-white active:scale-[0.97]'
+                    : 'bg-surface-tertiary dark:bg-surface-dark-secondary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
                 )}
                 title="Send message"
                 aria-label="Send message"
               >
                 {isExtractingDocuments
                   ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <Send className="w-4 h-4" />}
+                  : <ArrowUp className="w-5 h-5" strokeWidth={2} />}
               </button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-1.5 px-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary">
-              Enter to send · Shift+Enter for new line
-            </span>
+        <div className="flex items-center justify-between mt-2 px-1">
+          <div className="flex items-center gap-1 text-xs text-text-tertiary dark:text-text-dark-tertiary">
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
+            <span className="mr-2">send</span>
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Shift</kbd>
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
+            <span>new line</span>
           </div>
           {/* Only surface the counter once it's actually relevant — at a 50k
               cap, showing "23/50000" on every short message is just noise. */}
           {isNearLimit && (
             <span className={cn(
-              'text-[11px] tabular-nums',
+              'text-xs font-mono tabular-nums',
               isOverLimit ? 'text-red-500' : 'text-amber-500'
             )}>
               {charCount}/{maxChars}

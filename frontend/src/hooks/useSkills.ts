@@ -12,6 +12,7 @@ export interface SkillInput {
 interface UseSkillsReturn {
   skills: Skill[]
   createSkill: (input: SkillInput) => Promise<string>
+  importSkill: (source: { url?: string; content?: string }) => Promise<Skill>
   deleteSkill: (id: string) => Promise<void>
 }
 
@@ -46,10 +47,16 @@ export function useSkills(): UseSkillsReturn {
     return created.id
   }, [])
 
+  const importSkill = useCallback(async (source: { url?: string; content?: string }): Promise<Skill> => {
+    const created = await apiClient.importSkillPackage(source)
+    setSkills(prev => [created, ...prev])
+    return created
+  }, [])
+
   const deleteSkill = useCallback(async (id: string) => {
     setSkills(prev => prev.filter(s => s.id !== id))
     await apiClient.deleteSkillPackage(id).catch(() => void refresh())
   }, [refresh])
 
-  return { skills, createSkill, deleteSkill }
+  return { skills, createSkill, importSkill, deleteSkill }
 }

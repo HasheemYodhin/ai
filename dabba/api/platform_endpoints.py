@@ -33,6 +33,11 @@ from dabba.platform import (
     WorktreeService,
 )
 from dabba.platform.provider_gateway import ProviderGateway
+from dabba.platform.skill_import import (
+    SkillImportError,
+    fetch_skill_markdown,
+    parse_skill_markdown,
+)
 
 
 class SignupRequest(BaseModel):
@@ -235,6 +240,11 @@ class SkillPackageCreateRequest(BaseModel):
     instructions: str
     description: str = ""
     script: Optional[str] = None
+
+
+class SkillImportRequest(BaseModel):
+    url: Optional[str] = Field(default=None, max_length=2048)
+    content: Optional[str] = Field(default=None, max_length=512 * 1024)
 
 
 class SkillPackageUpdateRequest(BaseModel):
@@ -472,9 +482,9 @@ def create_platform_router() -> APIRouter:
             # the catalog made long implementation tasks both slow and prone
             # to emitting unusable tool syntax.
             preferred_fallbacks = (
-                "qwen/qwen2.5-coder-32b-instruct",
-                "deepseek-ai/deepseek-v4-flash",
-                "meta/llama-3.1-8b-instruct",
+                "poolside/laguna-xs-2.1",
+                "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "minimaxai/minimax-m3.1-flash",
             )
             available = []
             for info in provider_registry.list_all_models():
@@ -1150,6 +1160,27 @@ def create_platform_router() -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.post("/skills/import", status_code=201)
+    async def import_skill_package(
+        body: SkillImportRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Create a skill from a SKILL.md file, given as text or an https link."""
+        user = current_user(authorization)
+        try:
+            if body.content and body.content.strip():
+                text = body.content
+            elif body.url and body.url.strip():
+                text = await asyncio.to_thread(fetch_skill_markdown, body.url)
+            else:
+                raise SkillImportError("Paste a SKILL.md link or choose a file")
+            name, description, instructions = parse_skill_markdown(text)
+        except SkillImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return skill_packages.create(
+            user["id"], name, instructions, description=description
+        )
 
     @router.patch("/skills/{skill_id}")
     async def update_skill_package(
