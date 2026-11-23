@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -27,7 +27,18 @@ from pydantic import BaseModel
 class ImageGenerationRequest(BaseModel):
     prompt: str
     model: Optional[str] = None
-    size: Optional[str] = "1024x1024"
+    size: Optional[
+        Literal[
+            "auto",
+            "256x256",
+            "512x512",
+            "1024x1024",
+            "1024x1792",
+            "1792x1024",
+            "1024x1536",
+            "1536x1024",
+        ]
+    ] = "1024x1024"
     n: int = 1
 
 

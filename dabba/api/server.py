@@ -5,11 +5,13 @@ Creates and configures the FastAPI app with all routes, middleware,
 authentication, rate limiting, CORS, and health checks.
 """
 
+import asyncio
+import json
 import logging
 import os
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import List, Optional
 
@@ -17,6 +19,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import MutableHeaders
 
 from dabba.config.api_config import ApiConfig
 from dabba.api.auth import ApiKeyAuth
@@ -566,6 +569,15 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             app.state.logger.warning(f"Could not load model: {e}")
 
+    try:
+        from dabba.platform.core import utc_ms
+        from dabba.platform.services import TaskOrchestrator
+
+        stale_after_seconds = max(3600, config.stream_timeout_seconds * 2)
+        TaskOrchestrator().fail_stale_chat_tasks(utc_ms() - stale_after_seconds * 1000)
+    except Exception:
+        app.state.logger.exception("Could not recover stale chat tasks")
+
     yield
 
     app.state.logger.info("Server shutting down")
@@ -628,13 +640,77 @@ def create_app(
         )
     app.state.rate_limiter = rate_limiter
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=config.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    async def protect_api(request: Request):
+        from dabba.platform.services import IdentityService
+
+        path = request.scope["path"].rstrip("/")
+        if not path.startswith("/v1/"):
+            return None
+
+        public = (
+            request.method == "POST"
+            and path in {"/v1/platform/identity/signup", "/v1/platform/identity/login"}
+        ) or (
+            request.method in {"GET", "HEAD"}
+            and path.startswith("/v1/platform/public/artifacts/")
+        )
+
+        user = None
+        if not public:
+            scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+            bearer = bearer if scheme.lower() == "bearer" else ""
+            if path.startswith(("/v1/platform/", "/v1/conversations")):
+                token = bearer
+            else:
+                token = request.headers.get("x-dabba-session") or bearer
+            if token:
+                user = await asyncio.to_thread(
+                    lambda: IdentityService().authenticate(token)
+                )
+            if not user:
+                return JSONResponse(
+                    {"detail": "A valid Dabba session is required"}, status_code=401
+                )
+            request.state.dabba_user = user
+            admin_only = (
+                path.startswith(
+                    (
+                        "/v1/mcp/",
+                        "/v1/platform/filesystem/",
+                        "/v1/platform/workspaces",
+                        "/v1/platform/checkpoints/",
+                        "/v1/platform/browser/",
+                        "/v1/platform/cowork/",
+                        "/v1/platform/scheduled-skills",
+                        "/v1/platform/agent-definitions",
+                        "/v1/platform/documents/",
+                    )
+                )
+                or path in {"/v1/hooks", "/v1/code/execute"}
+                or path.startswith("/v1/hooks/")
+                or (path.startswith("/v1/agent") and path != "/v1/agent/models")
+            )
+            if admin_only and user["role"] != "admin":
+                return JSONResponse(
+                    {"detail": "Administrator access is required"}, status_code=403
+                )
+
+        if rate_limiter and (
+            request.method not in {"GET", "HEAD", "OPTIONS"}
+            or path.startswith("/v1/audio/")
+        ):
+            try:
+                if user:
+                    await rate_limiter.check(api_key=user["id"])
+                else:
+                    await rate_limiter.check_request(request)
+            except HTTPException as exc:
+                return JSONResponse(
+                    {"detail": exc.detail},
+                    status_code=exc.status_code,
+                    headers=exc.headers,
+                )
+        return None
 
     try:
         from dabba.platform.services import TelemetryService
@@ -643,38 +719,74 @@ def create_app(
     except Exception:
         telemetry = None
 
-    @app.middleware("http")
-    async def log_requests(request: Request, call_next):
-        """Trace incoming requests and correlate logs with a request id."""
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-        start = time.time()
-        if telemetry:
-            with telemetry.span(
-                "http.request",
-                **{
-                    "http.method": request.method,
-                    "http.route": request.url.path,
-                    "dabba.request_id": request_id,
-                },
-            ):
-                response = await call_next(request)
-        else:
-            response = await call_next(request)
-        duration = time.time() - start
-        if telemetry:
-            telemetry.record_http(
-                request.method,
-                request.url.path,
-                response.status_code,
-                duration * 1000,
+    class ApiMiddleware:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+
+            request = Request(scope)
+            request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+            start = time.perf_counter()
+
+            async def trace_response(message):
+                if message["type"] == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    headers["X-Request-ID"] = request_id
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if telemetry:
+                        telemetry.record_http(
+                            request.method,
+                            request.url.path,
+                            message["status"],
+                            duration_ms,
+                        )
+                    if config.log_requests:
+                        user = getattr(request.state, "dabba_user", {})
+                        logger.info(
+                            json.dumps(
+                                {
+                                    "request_id": request_id,
+                                    "method": request.method,
+                                    "path": request.url.path,
+                                    "status": message["status"],
+                                    "latency_ms": round(duration_ms, 2),
+                                    "user_id": user.get("id"),
+                                }
+                            )
+                        )
+                await send(message)
+
+            span = (
+                telemetry.span(
+                    "http.request",
+                    **{
+                        "http.method": request.method,
+                        "http.route": request.url.path,
+                        "dabba.request_id": request_id,
+                    },
+                )
+                if telemetry
+                else nullcontext()
             )
-        response.headers["X-Request-ID"] = request_id
-        if config.log_requests:
-            logger.info(
-                f"request_id={request_id} {request.method} {request.url.path} "
-                f"{response.status_code} {duration:.3f}s"
-            )
-        return response
+            with span:
+                rejected = await protect_api(request)
+                if rejected is not None:
+                    await rejected(scope, receive, trace_response)
+                else:
+                    await self.app(scope, receive, trace_response)
+
+    app.add_middleware(ApiMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin for origin in config.cors_origins if "*" not in origin],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     async def health_check():
@@ -755,29 +867,24 @@ def create_app(
     app.include_router(
         create_chat_router(
             model_engine=app.state.model_engine,
-            auth=auth,
-            rate_limiter=rate_limiter,
         )
     )
 
     app.include_router(
         create_embedding_router(
             embedding_engine=app.state.embedding_engine,
-            auth=auth,
-            rate_limiter=rate_limiter,
         )
     )
 
     app.include_router(
         create_model_router(
             available_models=models,
-            auth=auth,
         )
     )
 
     from dabba.api.execution_endpoints import create_execution_router
 
-    app.include_router(create_execution_router(auth=auth, rate_limiter=rate_limiter))
+    app.include_router(create_execution_router())
 
     # Agent streaming endpoint for the VSCode extension (tool-using agent loop)
     try:
@@ -871,7 +978,7 @@ def create_app(
 def run_server(
     config_path: Optional[str] = None,
     model_path: Optional[str] = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8080,
     reload: bool = False,
 ):
@@ -930,7 +1037,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the dabba API server")
     parser.add_argument("--config", type=str, help="Path to config file")
     parser.add_argument("--model", type=str, help="Path to model")
-    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()

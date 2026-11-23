@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useEffect, useRef, useState } from 'react'
 import { X, FileUp, Link2, Loader2 } from 'lucide-react'
 import type { Skill } from '@/types'
@@ -21,6 +22,8 @@ export function SkillImportModal({ isOpen, onClose, onImport }: SkillImportModal
   useEffect(() => {
     if (isOpen) { setUrl(''); setError(null); setBusy(false) }
   }, [isOpen])
+
+  const dialogRef = useDialogFocus(isOpen, () => { if (!busy) onClose() })
 
   if (!isOpen) return null
 
@@ -47,7 +50,7 @@ export function SkillImportModal({ isOpen, onClose, onImport }: SkillImportModal
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
       <div className="fixed inset-0" onClick={busy ? undefined : onClose} />
 
-      <div className="relative z-10 m-4 w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-xl dark:border-border-dark dark:bg-surface-dark-secondary">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Import skill" tabIndex={-1} className="relative z-10 m-4 w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-xl dark:border-border-dark dark:bg-surface-dark-secondary">
         <div className="flex items-center justify-between px-5 h-14 border-b border-border dark:border-border-dark">
           <h3 className="text-[15px] font-medium text-text-primary dark:text-text-dark-primary">Import a skill</h3>
           <button onClick={onClose} disabled={busy} aria-label="Close" className="p-1.5 rounded-lg text-text-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors">

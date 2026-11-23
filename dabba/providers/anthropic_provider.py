@@ -20,6 +20,7 @@ MODELS = [
         75.0,
         True,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "claude-sonnet-4-6",
@@ -32,6 +33,7 @@ MODELS = [
         15.0,
         True,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "claude-haiku-4-5-20251001",
@@ -44,6 +46,7 @@ MODELS = [
         4.0,
         False,
         True,
+        supports_vision=True,
     ),
 ]
 

@@ -90,7 +90,14 @@ def normalize_provider_error(
         )
     if any(
         marker in lowered
-        for marker in ("401", "403", "unauthorized", "invalid api key", "forbidden")
+        for marker in (
+            "401",
+            "403",
+            "unauthorized",
+            "invalid api key",
+            "api key not set",
+            "forbidden",
+        )
     ):
         return ProviderFailure(
             "The provider credentials are missing, expired, or lack permission.",
@@ -216,14 +223,29 @@ class ProviderGateway:
         for index, candidate in enumerate(models):
             provider = provider_for(candidate)
             if self._is_blocked(provider, candidate):
+                last_failure = ProviderFailure(
+                    "The selected model is cooling down after repeated failures.",
+                    "provider_circuit_open",
+                    True,
+                    503,
+                    provider,
+                    candidate,
+                    retry_after_ms=self.cooldown_seconds * 1000,
+                )
                 continue
             for attempt in range(self.max_attempts):
                 started = time.perf_counter()
                 emitted = False
                 try:
-                    for token in operation(candidate):
-                        emitted = emitted or bool(token)
-                        yield token
+                    tokens = operation(candidate)
+                    try:
+                        for token in tokens:
+                            emitted = emitted or bool(token)
+                            yield token
+                    finally:
+                        close = getattr(tokens, "close", None)
+                        if close:
+                            close()
                     self._success(
                         provider, candidate, (time.perf_counter() - started) * 1000
                     )
@@ -302,6 +324,8 @@ class ProviderGateway:
             )
 
     def _failure(self, provider: str, model: str, failure: ProviderFailure) -> None:
+        if not failure.retryable:
+            return
         now = utc_ms()
         with self.store.transaction() as conn:
             current = conn.execute(

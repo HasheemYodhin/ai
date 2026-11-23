@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useRef, useEffect } from 'react'
 import {
   Plus, Paperclip, Camera, FolderPlus, Sparkles, Globe,
@@ -128,6 +129,7 @@ export function PlusMenu({
   }, [])
 
   const close = () => { setOpen(false); setSubmenu(null) }
+  const menuRef = useDialogFocus(open, close)
 
   const setAgentMode = (label: string, effort?: string, hint?: string, allowedTools?: string[]) => {
     onModeChange(mode.kind === 'agent' && mode.label === label ? { kind: 'chat' } : { kind: 'agent', label, effort, hint, allowedTools })
@@ -150,13 +152,16 @@ export function PlusMenu({
         onClick={() => setOpen(o => !o)}
         disabled={disabled}
         className="flex-shrink-0 p-3 pb-3.5 text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary disabled:opacity-40 transition-colors rounded-l-2xl hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label="Add photos, files, and more"
         title="Add photos, files, and more"
       >
         <Plus className="w-5 h-5" />
       </button>
 
       {open && (
-        <div className="absolute left-0 bottom-full mb-2 w-64 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in">
+        <div ref={menuRef} role="dialog" aria-label="Add photos, files, and more" tabIndex={-1} className="absolute left-0 bottom-full mb-2 w-64 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in">
           <MenuItem icon={<Paperclip className="w-4 h-4" />} label="Add photos & files"
             onClick={() => { onAttachFiles(); close() }} />
           <MenuItem icon={<Camera className="w-4 h-4" />} label="Take screenshot"

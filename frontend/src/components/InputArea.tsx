@@ -29,8 +29,8 @@ interface InputAreaProps {
 
 const MAX_FILES = 5
 const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024
-const MAX_DOCUMENT_FILE_SIZE = 100 * 1024 * 1024
-const MAX_ZIP_FILE_SIZE = 10 * 1024 * 1024 * 1024
+const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024
+const MAX_ZIP_FILE_SIZE = 100 * 1024 * 1024
 
 function isZipFile(file: File): boolean {
   return file.type === 'application/zip'
@@ -45,9 +45,9 @@ function attachmentLimit(file: File): number {
 }
 
 function attachmentLimitLabel(file: File): string {
-  if (isZipFile(file)) return '10 GB ZIP attachment limit'
+  if (isZipFile(file)) return '100 MiB ZIP attachment limit'
   if (file.type.startsWith('image/')) return '10 MB image attachment limit'
-  return '100 MB document attachment limit'
+  return '25 MiB document attachment limit'
 }
 
 export function InputArea({
@@ -151,7 +151,7 @@ export function InputArea({
       return true
     })
 
-    // Only small images are base64 encoded. Documents and multi-GB ZIP files
+    // Only small images are base64 encoded. Documents and ZIP files
     // retain their browser File handle and are streamed as multipart uploads.
     const next: UploadedFile[] = await Promise.all(
       accepted.map(async f => {
@@ -476,14 +476,13 @@ export function InputArea({
             <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
             <span>new line</span>
           </div>
-          {/* Only surface the counter once it's actually relevant — at a 50k
-              cap, showing "23/50000" on every short message is just noise. */}
-          {isNearLimit && (
+          {charCount > 0 && (
             <span className={cn(
-              'text-xs font-mono tabular-nums',
-              isOverLimit ? 'text-red-500' : 'text-amber-500'
+              'text-xs font-mono tabular-nums text-text-tertiary dark:text-text-dark-tertiary',
+              isOverLimit && 'text-red-500',
+              isNearLimit && !isOverLimit && 'text-amber-500',
             )}>
-              {charCount}/{maxChars}
+              {isNearLimit ? `${charCount}/${maxChars} characters` : `~${Math.ceil(charCount / 4)} tokens`}
             </span>
           )}
         </div>

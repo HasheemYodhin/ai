@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
+const UPDATE_INTERVAL_MS = 40
+const MAX_ANIMATED_BACKLOG = 600
+const TAIL_CHARS = 200
+
 /**
  * Reveals streamed text a few characters per frame instead of in network-sized
  * bursts. The step grows with the backlog, so a fast model never falls behind,
@@ -30,17 +34,26 @@ export function useSmoothText(text: string, active: boolean): { text: string; re
     }
     if (frameRef.current || shownRef.current.length >= text.length) return
 
-    const tick = () => {
+    let lastUpdate = 0
+    const tick = (now: number) => {
       const target = targetRef.current
       const current = shownRef.current
       if (current.length >= target.length) {
         frameRef.current = 0
         return
       }
-      const backlog = target.length - current.length
-      const next = target.slice(0, current.length + Math.max(2, Math.ceil(backlog / 12)))
-      shownRef.current = next
-      setShown(next)
+      // Each update re-parses the whole reply as markdown, so cap the update rate
+      // and show large bursts (a long code block) almost at once.
+      if (now - lastUpdate >= UPDATE_INTERVAL_MS) {
+        lastUpdate = now
+        const backlog = target.length - current.length
+        const end = backlog > MAX_ANIMATED_BACKLOG
+          ? target.length - TAIL_CHARS
+          : current.length + Math.max(3, Math.ceil(backlog / 6))
+        const next = target.slice(0, end)
+        shownRef.current = next
+        setShown(next)
+      }
       frameRef.current = requestAnimationFrame(tick)
     }
     frameRef.current = requestAnimationFrame(tick)

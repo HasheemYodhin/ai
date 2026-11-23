@@ -110,8 +110,14 @@ export function ChatWindow({
     </span>
   )
 
-  const lastIsAssistant = messages.length > 0 && messages[messages.length - 1].role === 'assistant'
-  const followUpRow = lastIsAssistant && !isLoading && (
+  const [visibleCount, setVisibleCount] = useState(100)
+  const hiddenCount = Math.max(0, messages.length - visibleCount)
+  const [revealingId, setRevealingId] = useState<string | null>(null)
+  const handleRevealChange = useCallback((id: string, revealing: boolean) => {
+    setRevealingId(current => revealing ? id : current === id ? null : current)
+  }, [])
+  const lastMessage = messages[messages.length - 1]
+  const followUpRow = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && revealingId !== lastMessage.id && (
     <div className="flex flex-wrap gap-2 pl-10">
       {FOLLOW_UPS.map((f, idx) => (
         <button
@@ -165,16 +171,34 @@ export function ChatWindow({
         className="flex-1 overflow-y-auto scrollbar-thin px-4 py-6"
       >
         <div className="max-w-3xl mx-auto space-y-6">
-          {messages.map((msg) => (
+          {hiddenCount > 0 && (
+            <button
+              className="mx-auto block text-sm text-accent hover:underline"
+              onClick={() => setVisibleCount(count => count + 100)}
+            >
+              Show earlier messages ({hiddenCount})
+            </button>
+          )}
+          {messages.slice(hiddenCount).map((msg) => (
             <MessageBubble
               key={msg.id}
               message={msg}
               isStreaming={isStreaming && msg.id === messages[messages.length - 1].id}
+              onRevealChange={handleRevealChange}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
             />
           ))}
           {followUpRow}
+          {lastMessage?.interrupted && !isLoading && (
+            <button
+              className="ml-10 rounded-lg border border-border px-3 py-1.5 text-sm text-accent dark:border-border-dark"
+              onClick={() => onSend('Continue from where you stopped without repeating the previous text.')}
+              disabled={!navigator.onLine}
+            >
+              Continue reply
+            </button>
+          )}
           <div ref={bottomRef} />
         </div>
 
@@ -183,7 +207,7 @@ export function ChatWindow({
             onClick={() => scrollToBottom(true)}
             aria-label="Scroll to latest message"
             className={cn(
-              'fixed bottom-28 left-1/2 -translate-x-1/2 p-2.5 rounded-full bg-surface dark:bg-surface-dark-tertiary',
+              'sticky bottom-2 left-1/2 -translate-x-1/2 p-2.5 rounded-full bg-surface dark:bg-surface-dark-tertiary',
               'border border-border dark:border-border-dark text-accent shadow-md hover:bg-surface-tertiary dark:hover:bg-surface-dark',
               'transition-colors z-10 animate-fade-in'
             )}

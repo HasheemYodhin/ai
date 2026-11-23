@@ -178,3 +178,24 @@ Runs 100% offline once loaded — no Ollama, no internet required.
 | VSCode extension icon missing | `Ctrl+Shift+P → Reload Window` after installing/updating the extension |
 | Wrong identity ("I'm Claude" instead of "I'm Dabba") | Fixed as of the persona system prompt update — restart the server if you still see this |
 | Chat history gone after reload | Should now persist automatically — if not, check `workspaceState` wasn't cleared |
+
+### API sessions and local administration
+
+Sign up in the web app first. To grant an existing account access to agent tools
+and server-wide settings, run this on the server with the same `DABBA_DATA_DIR`
+used by the API.
+
+```bash
+python3 -m dabba.platform.accounts you@example.com --role admin
+```
+
+API clients can call `POST /v1/platform/identity/login` with an email and password,
+then send the returned session `token` as `Authorization: Bearer <token>`. In the
+VS Code extension, set this token in the existing Authorization Key field.
+Reset an account's password and revoke its sessions with
+`python3 -m dabba.platform.accounts you@example.com --reset-password`.
+
+The server binds to loopback by default. Set `DABBA_CORS_ORIGINS` to a
+comma-separated list of frontend origins for deployments that serve the web
+app separately. Use `DABBA_MASTER_KEY` from your secret manager when provisioning
+a vault. Keep the same key for an existing vault so its secrets remain readable.

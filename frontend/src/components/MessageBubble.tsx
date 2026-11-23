@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
+import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
 import { AlertCircle, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
@@ -14,6 +14,7 @@ const MarkdownRenderer = lazy(loadMarkdownRenderer)
 interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
+  onRevealChange?: (id: string, revealing: boolean) => void
   onEdit?: (id: string, content: string) => void
   onRegenerate?: (id: string, overrides?: { model?: string; effort?: string }) => void
 }
@@ -24,7 +25,7 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isError = message.error
   const [copied, setCopied] = useState(false)
@@ -33,6 +34,9 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   const [stepsOpen, setStepsOpen] = useState(false)
   const { text: shownContent, revealing } = useSmoothText(message.content, !!isStreaming && message.role !== 'user')
   const writing = !!isStreaming || revealing
+  useEffect(() => {
+    onRevealChange?.(message.id, writing)
+  }, [message.id, onRevealChange, writing])
   const [draft, setDraft] = useState(message.content)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speakError, setSpeakError] = useState<string | null>(null)
@@ -379,6 +383,13 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   </div>
                 )}
 
+                {message.reasoning && (
+                  <details className="mb-2 rounded-lg border border-border px-3 py-2 text-sm text-text-secondary dark:border-border-dark dark:text-text-dark-secondary">
+                    <summary className="cursor-pointer">Thinking</summary>
+                    <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{message.reasoning}</p>
+                  </details>
+                )}
+
                 {shownContent ? (
                   <Suspense fallback={<p className="whitespace-pre-wrap">{shownContent}</p>}>
                     <MarkdownRenderer content={shownContent} className={writing ? 'streaming-cursor' : undefined} />
@@ -519,4 +530,4 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
       </div>
     </div>
   )
-}
+})

@@ -35,6 +35,12 @@ class ModelInfo:
     cost_output: float = 0.0
     supports_thinking: bool = False
     requires_key: bool = True
+    max_output_tokens: int | None = None
+    supports_vision: bool = False
+
+
+class ReasoningDelta(str):
+    """A provider delta that belongs outside the assistant reply."""
 
 
 class BaseProvider(ABC):

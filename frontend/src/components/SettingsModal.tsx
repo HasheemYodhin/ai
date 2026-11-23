@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useSettings, type AppSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
@@ -53,7 +54,7 @@ const KEY_PROVIDER_LABELS: Record<string, string> = {
 }
 
 const TIER_STYLES: Record<string, string> = {
-  low: 'bg-gray-400/15 text-gray-500 dark:text-gray-400',
+  low: 'bg-gray-400/15 text-text-tertiary dark:text-text-dark-tertiary',
   medium: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
   high: 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
   xhigh: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
@@ -114,6 +115,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
     return groups
   }, [models, modelSearch])
+
+  const dialogRef = useDialogFocus(isOpen, onClose)
 
   if (!isOpen) return null
 
@@ -224,7 +227,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       />
 
       {/* Claude-style 2-Column Dialog Panel */}
-      <div className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[640px] rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4 flex">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[640px] rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4 flex">
 
         {/* Left Column: Navigation Sidebar */}
         <div className="w-[200px] border-r border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary p-4 flex flex-col justify-between">
@@ -264,7 +267,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         <div className="flex-1 flex flex-col bg-surface dark:bg-surface-dark-secondary overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-6 py-4.5 border-b border-border dark:border-border-dark">
-            <h3 className="font-bold text-sm text-text-primary dark:text-text-dark-primary capitalize">
+            <h3 className="font-semibold text-sm text-text-primary dark:text-text-dark-primary capitalize">
               {activeTab === 'model' ? 'Model & Parameters'
                 : activeTab === 'prompt' ? 'System Instructions'
                 : activeTab === 'keys' ? 'Provider API Keys'
@@ -277,6 +280,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </h3>
             <button
               onClick={onClose}
+              aria-label="Close settings"
               className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               <X className="w-4.5 h-4.5" />
@@ -360,6 +364,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       Stream responses
                     </span>
                     <Toggle
+                      label="Stream responses"
                       checked={localSettings.streaming}
                       onChange={v => setLocalSettings(prev => ({ ...prev, streaming: v }))}
                     />
@@ -368,7 +373,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <div className="space-y-2">
                       <div className="flex justify-between items-center text-xs">
                         <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Typing speed</span>
-                        <span className="font-bold text-accent">{localSettings.typingSpeed} ms/token</span>
+                        <span className="font-semibold text-accent">{localSettings.typingSpeed} ms/token</span>
                       </div>
                       <input
                         type="range" min="0" max="60" step="5"
@@ -384,6 +389,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <Bell className="w-3.5 h-3.5" /> Desktop notifications
                     </span>
                     <Toggle
+                      label="Desktop notifications"
                       checked={localSettings.desktopNotifications}
                       onChange={v => {
                         setLocalSettings(prev => ({ ...prev, desktopNotifications: v }))
@@ -423,9 +429,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   {currentModel && (
                     <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-accent/10 border border-accent/20">
                       <span className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-[9px] font-semibold uppercase tracking-wider text-accent/70 flex-shrink-0">Current</span>
+                        <span className="text-xs font-semibold text-accent/70 flex-shrink-0">Current</span>
                         <span className="text-xs font-medium text-accent truncate">{currentModel.name}</span>
-                        <span className={`text-[8px] font-semibold px-1 py-0.5 rounded uppercase flex-shrink-0 ${TIER_STYLES[currentModel.tier] ?? TIER_STYLES.medium}`}>
+                        <span className={`text-xs font-semibold px-1 py-0.5 rounded uppercase flex-shrink-0 ${TIER_STYLES[currentModel.tier] ?? TIER_STYLES.medium}`}>
                           {currentModel.tier}
                         </span>
                       </span>
@@ -443,7 +449,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     ) : (
                       Object.entries(filteredGrouped).map(([provider, items]) => (
                         <div key={provider}>
-                          <div className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-text-tertiary dark:text-text-dark-tertiary bg-surface-secondary dark:bg-surface-dark-tertiary">
+                          <div className="px-3 py-1 text-xs font-semibold text-text-tertiary dark:text-text-dark-tertiary bg-surface-secondary dark:bg-surface-dark-tertiary">
                             {providerLabel(provider)}
                           </div>
                           {items.map(m => (
@@ -459,7 +465,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                 <span className={`text-xs font-medium truncate ${localSettings.model === m.id ? 'text-accent' : 'text-text-primary dark:text-text-dark-primary'}`}>
                                   {m.name}
                                 </span>
-                                <span className={`text-[8px] font-semibold px-1 py-0.5 rounded uppercase flex-shrink-0 ${TIER_STYLES[m.tier] ?? TIER_STYLES.medium}`}>
+                                <span className={`text-xs font-semibold px-1 py-0.5 rounded uppercase flex-shrink-0 ${TIER_STYLES[m.tier] ?? TIER_STYLES.medium}`}>
                                   {m.tier}
                                 </span>
                                 {!m.has_key && <KeyRound className="w-2.5 h-2.5 text-text-tertiary flex-shrink-0" />}
@@ -471,7 +477,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       ))
                     )}
                   </div>
-                  <p className="text-[10px] text-text-tertiary">
+                  <p className="text-xs text-text-tertiary">
                     Params below are remembered per-model — switching models restores what you last set for it.
                   </p>
                 </div>
@@ -544,7 +550,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-border dark:border-border-dark">
-                  <label className="block text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                  <label className="block text-xs font-semibold text-text-tertiary">
                     Quick Preset Personas
                   </label>
                   <div className="flex flex-wrap gap-2">
@@ -590,7 +596,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {KEY_PROVIDER_LABELS[provider] ?? provider}
                           </span>
                           <span className={cn(
-                            'text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase',
+                            'text-xs font-semibold px-1.5 py-0.5 rounded uppercase',
                             hasKey ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-surface-tertiary dark:bg-surface-dark text-text-tertiary'
                           )}>
                             {hasKey ? 'Set' : 'Not set'}
@@ -625,7 +631,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <button
                               onClick={() => handleDeleteKey(provider)}
                               disabled={keyBusy === provider}
-                              title="Remove key"
+                              aria-label="Remove key" title="Remove key"
                               className="p-2 rounded-lg hover:bg-red-500/10 text-text-tertiary hover:text-red-500 disabled:opacity-40 transition-colors flex-shrink-0"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -658,7 +664,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <button
                           onClick={handleAddModelKeyClick}
                           disabled={!selectedModelForKey}
-                          className="px-4 py-2 rounded-xl text-xs font-bold bg-accent hover:bg-accent-hover text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          className="px-4 py-2 rounded-xl text-xs font-semibold bg-accent hover:bg-accent-hover text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                           Configure Key
                         </button>
@@ -683,7 +689,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <button
                     onClick={reloadMcp}
                     className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary transition-colors"
-                    title="Refresh"
+                    aria-label="Refresh" title="Refresh"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
@@ -711,13 +717,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <span className={`w-1.5 h-1.5 rounded-full ${s.connected ? 'bg-green-500' : 'bg-gray-400'}`} />
                             <span className="text-xs font-semibold text-text-primary dark:text-text-dark-primary">{s.name}</span>
                           </div>
-                          <span className="text-[10px] text-text-tertiary">{s.connected ? 'connected' : 'disconnected'}</span>
+                          <span className="text-xs text-text-tertiary">{s.connected ? 'connected' : 'disconnected'}</span>
                         </div>
-                        <p className="text-[10px] font-mono text-text-tertiary mt-1 truncate">{s.command} {s.args?.join(' ')}</p>
+                        <p className="text-xs font-mono text-text-tertiary mt-1 truncate">{s.command} {s.args?.join(' ')}</p>
                         {s.tools?.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
                             {s.tools.map(t => (
-                              <span key={t} className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-surface dark:bg-surface-dark text-text-secondary dark:text-text-dark-secondary">
+                              <span key={t} className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-surface dark:bg-surface-dark text-text-secondary dark:text-text-dark-secondary">
                                 <Wrench className="w-2.5 h-2.5" /> {t}
                               </span>
                             ))}
@@ -759,7 +765,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="p-4 rounded-2xl bg-surface-secondary dark:bg-surface-dark-tertiary border border-border dark:border-border-dark space-y-2">
-                  <h4 className="text-xs font-bold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
+                  <h4 className="text-xs font-semibold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-accent" />
                     Git safety rules (always on)
                   </h4>
@@ -781,6 +787,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span className="block text-[11px] text-text-tertiary dark:text-text-dark-tertiary mt-0.5">Propose a multi-step plan and wait for your approval before running it, on every agent turn (not just when the chat "Plan mode" chip is on).</span>
                   </div>
                   <Toggle
+                    label="Plan before acting by default"
                     checked={localSettings.planModeDefault}
                     onChange={v => setLocalSettings(prev => ({ ...prev, planModeDefault: v }))}
                   />
@@ -792,6 +799,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <span className="block text-[11px] text-text-tertiary dark:text-text-dark-tertiary mt-0.5">Only load a small set of tool schemas up front; the model searches for the rest as needed. Reduces prompt size when many tools/connectors are registered.</span>
                   </div>
                   <Toggle
+                    label="Deferred tool loading"
                     checked={localSettings.useToolSearch}
                     onChange={v => setLocalSettings(prev => ({ ...prev, useToolSearch: v }))}
                   />
@@ -800,7 +808,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="space-y-1.5 pt-3 border-t border-border dark:border-border-dark">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Max steps per turn</span>
-                    <span className="font-bold text-accent">{localSettings.maxSteps ?? 'Backend default'}</span>
+                    <span className="font-semibold text-accent">{localSettings.maxSteps ?? 'Backend default'}</span>
                   </div>
                   <input
                     type="range" min="0" max="100" step="5"
@@ -817,7 +825,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="space-y-1.5 pt-3 border-t border-border dark:border-border-dark">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Context compaction threshold</span>
-                    <span className="font-bold text-accent">{Math.round(localSettings.contextCompactionThreshold * 100)}%</span>
+                    <span className="font-semibold text-accent">{Math.round(localSettings.contextCompactionThreshold * 100)}%</span>
                   </div>
                   <input
                     type="range" min="0.3" max="0.95" step="0.05"
@@ -831,7 +839,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="space-y-1.5">
                   <div className="flex justify-between items-center text-xs">
                     <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Recent turns always kept verbatim</span>
-                    <span className="font-bold text-accent">{localSettings.contextCompactionKeepRecent}</span>
+                    <span className="font-semibold text-accent">{localSettings.contextCompactionKeepRecent}</span>
                   </div>
                   <input
                     type="range" min="2" max="20" step="1"
@@ -860,7 +868,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-border dark:border-border-dark">
-                  <label className="block text-[10px] font-semibold text-text-tertiary uppercase tracking-wider">
+                  <label className="block text-xs font-semibold text-text-tertiary">
                     Usage by Model
                   </label>
                   {usageStats.byModel.length === 0 ? (
@@ -884,7 +892,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   )}
                 </div>
-                <p className="text-[10px] text-text-tertiary">
+                <p className="text-xs text-text-tertiary">
                   Computed from conversations saved in this browser. Clearing history (Data Controls) resets these stats.
                 </p>
               </div>
@@ -894,7 +902,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {activeTab === 'data' && (
               <div className="space-y-5 animate-fade-in">
                 <div className="p-4 rounded-2xl bg-surface-secondary dark:bg-surface-dark-tertiary border border-border dark:border-border-dark space-y-2">
-                  <h4 className="text-xs font-bold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
+                  <h4 className="text-xs font-semibold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
                     <Download className="w-4 h-4 text-accent" />
                     Export Local Data
                   </h4>
@@ -911,7 +919,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="p-4 rounded-2xl bg-red-500/5 dark:bg-red-500/10 border border-red-500/10 dark:border-red-500/20 space-y-2">
-                  <h4 className="text-xs font-bold text-red-500 flex items-center gap-1.5">
+                  <h4 className="text-xs font-semibold text-red-500 flex items-center gap-1.5">
                     <Trash2 className="w-4 h-4" />
                     Danger Zone
                   </h4>
@@ -934,7 +942,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           {/* Footer Controls */}
           <div className="px-6 py-4 border-t border-border dark:border-border-dark flex items-center justify-end gap-2 bg-surface-secondary dark:bg-surface-dark-tertiary">
             {isSavedAlert ? (
-              <span className="text-xs text-green-500 font-bold flex items-center gap-1 animate-fade-in mr-auto">
+              <span className="text-xs text-green-500 font-semibold flex items-center gap-1 animate-fade-in mr-auto">
                 <Check className="w-4 h-4" />
                 Settings Saved!
               </span>
@@ -948,7 +956,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </button>
             <button
               onClick={handleSave}
-              className="px-5 py-2.5 rounded-xl text-xs font-bold bg-accent hover:bg-accent-hover text-white transition-colors"
+              className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-accent hover:bg-accent-hover text-white transition-colors"
             >
               Save Settings
             </button>
@@ -984,24 +992,24 @@ function Slider({ label, value, min, max, step, unit = '', marks, onChange }: {
     <div className="space-y-2">
       <div className="flex justify-between items-center text-xs">
         <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">{label}</span>
-        <span className="font-bold text-accent">{value}{unit}</span>
+        <span className="font-semibold text-accent">{value}{unit}</span>
       </div>
       <input
         type="range" min={min} max={max} step={step} value={value}
         onChange={e => onChange(parseFloat(e.target.value))}
         className="w-full accent-accent bg-surface-tertiary dark:bg-surface-dark-tertiary h-1.5 rounded-lg cursor-pointer"
       />
-      <div className="flex justify-between text-[10px] text-text-tertiary">
+      <div className="flex justify-between text-xs text-text-tertiary">
         {marks.map(m => <span key={m}>{m}</span>)}
       </div>
     </div>
   )
 }
 
-function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
   return (
     <button
-      onClick={() => onChange(!checked)}
+      role="switch" aria-checked={checked} aria-label={label} onClick={() => onChange(!checked)}
       className={`relative w-9 h-5 rounded-full transition-colors flex-shrink-0 ${checked ? 'bg-accent' : 'bg-surface-tertiary dark:bg-surface-dark-tertiary'}`}
     >
       <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : ''}`} />
@@ -1061,7 +1069,7 @@ function MemoryTabContent() {
         <button
           disabled={!newFact.trim() || busy}
           onClick={() => void addFact()}
-          className="px-4 py-2.5 rounded-xl text-xs font-bold bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
+          className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
         >
           Remember
         </button>
@@ -1079,7 +1087,7 @@ function MemoryTabContent() {
           {memories.map(m => (
             <div key={m.id} className="flex items-start gap-2 p-3 rounded-xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary">
               <span className="flex-1 text-xs text-text-primary dark:text-text-dark-primary leading-relaxed">{m.content}</span>
-              <button onClick={() => void removeFact(m.id)} className="p-1 rounded-md hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0">
+              <button aria-label="Remove memory" onClick={() => void removeFact(m.id)} className="p-1 rounded-md hover:bg-surface dark:hover:bg-surface-dark text-text-tertiary hover:text-red-500 transition-colors flex-shrink-0">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1093,8 +1101,8 @@ function MemoryTabContent() {
 function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="p-3 rounded-xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary">
-      <div className="text-lg font-bold text-text-primary dark:text-text-dark-primary">{value}</div>
-      <div className="text-[10px] text-text-tertiary uppercase tracking-wide">{label}</div>
+      <div className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">{value}</div>
+      <div className="text-xs text-text-tertiary">{label}</div>
     </div>
   )
 }

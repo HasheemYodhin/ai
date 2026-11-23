@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useEffect } from 'react'
 import { X, Check, Folder } from 'lucide-react'
 import { PROJECT_COLORS, type ProjectInput } from '@/hooks/useProjects'
@@ -27,6 +28,8 @@ export function ProjectModal({ isOpen, onClose, onSubmit, initial }: ProjectModa
     }
   }, [isOpen, initial])
 
+  const dialogRef = useDialogFocus(isOpen, onClose)
+
   if (!isOpen) return null
 
   const handleSubmit = () => {
@@ -39,13 +42,13 @@ export function ProjectModal({ isOpen, onClose, onSubmit, initial }: ProjectModa
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
       <div className="fixed inset-0" onClick={onClose} />
 
-      <div className="bg-surface dark:bg-surface-dark-secondary max-w-md w-full rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Project settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-md w-full rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border dark:border-border-dark">
           <h3 className="flex items-center gap-2 font-bold text-sm text-text-primary dark:text-text-dark-primary">
             <Folder className="w-4 h-4 text-accent" />
             {initial ? 'Edit project' : 'New project'}
           </h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
+          <button onClick={onClose} aria-label="Close dialog" className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>

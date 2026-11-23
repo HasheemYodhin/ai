@@ -96,6 +96,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency
 ON tasks(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_user_updated ON tasks(user_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS model_usage (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_model_usage_user ON model_usage(user_id, created_at);
+
+
 CREATE TABLE IF NOT EXISTS task_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,

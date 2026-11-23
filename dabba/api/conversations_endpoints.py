@@ -1,15 +1,4 @@
-"""
-Conversation persistence — POST/GET/DELETE /v1/conversations.
-
-Backs the web frontend's chat history: previously conversations lived only
-in the browser's localStorage (lost on clearing browser data, not shared
-across devices). This stores them server-side in SQLite instead, scoped by
-`user_id` — a client-generated id from the frontend's local-only auth
-profile (see useAuth.tsx). There is no real authentication here: any
-caller who knows a user_id can read/write that user's conversations. That
-matches the frontend's "local-only profile" design (no server-side account
-system) — do not reuse this pattern if real multi-user security is needed.
-"""
+"""Persist web chat history in SQLite, scoped to the authenticated user."""
 
 from __future__ import annotations
 
@@ -46,7 +35,73 @@ def _get_db() -> sqlite3.Connection:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)"
     )
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
+        _initialize_message_index(conn)
     return conn
+
+
+def _initialize_message_index(conn: sqlite3.Connection) -> None:
+    # One atomic migration, including existing conversations and all future writes.
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if conn.execute("PRAGMA user_version").fetchone()[0] >= 1:
+            conn.commit()
+            return
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                conversation_id TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                role TEXT,
+                model TEXT,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                timestamp INTEGER,
+                content TEXT,
+                PRIMARY KEY (conversation_id, position)
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_model_timestamp ON messages(model, timestamp)"
+        )
+        columns = """
+            conversation_id, position, role, model, prompt_tokens, completion_tokens,
+            timestamp, content
+        """
+        message_fields = """
+            message.key, json_extract(message.value, '$.role'),
+            json_extract(message.value, '$.model'),
+            json_extract(message.value, '$.usage.promptTokens'),
+            json_extract(message.value, '$.usage.completionTokens'),
+            json_extract(message.value, '$.timestamp'), json_extract(message.value, '$.content')
+        """
+        conn.execute(f"""
+            INSERT INTO messages ({columns})
+            SELECT conversation.id, {message_fields}
+            FROM conversations AS conversation, json_each(conversation.messages) AS message
+            WHERE message.type = 'object'
+        """)
+        for event in ("INSERT", "UPDATE OF messages"):
+            trigger_name = (
+                "index_message_insert" if event == "INSERT" else "index_message_update"
+            )
+            conn.execute(f"""
+                CREATE TRIGGER {trigger_name} AFTER {event} ON conversations BEGIN
+                    DELETE FROM messages WHERE conversation_id = NEW.id;
+                    INSERT INTO messages ({columns})
+                    SELECT NEW.id, {message_fields}
+                    FROM json_each(NEW.messages) AS message WHERE message.type = 'object';
+                END
+            """)
+        conn.execute("""
+            CREATE TRIGGER index_message_delete AFTER DELETE ON conversations BEGIN
+                DELETE FROM messages WHERE conversation_id = OLD.id;
+            END
+        """)
+        conn.execute("PRAGMA user_version = 1")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:

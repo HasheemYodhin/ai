@@ -4,7 +4,7 @@ import { ConversationList } from './ConversationList'
 import { ProjectModal } from './ProjectModal'
 import { cn } from '@/lib/utils'
 import {
-  Plus, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
+  SquarePen, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
   MessageSquare, Folder, Bot, Wrench, Plug, BookOpen, Telescope, FolderPlus,
   ChevronDown, X, BriefcaseBusiness, CalendarClock, ListChecks, Webhook,
 } from 'lucide-react'
@@ -60,6 +60,11 @@ export function Sidebar({
   const { currentUser, logout } = useAuth()
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const openSearch = () => {
+    setSearchOpen(true)
+    requestAnimationFrame(() => searchRef.current?.focus())
+  }
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
   const isSecondaryView = !PRIMARY_VIEWS.includes(view)
   const [moreOpen, setMoreOpen] = useState(isSecondaryView)
@@ -85,6 +90,7 @@ export function Sidebar({
         e.preventDefault()
         if (!isOpen) onToggle()
         onChangeView('chat')
+        setSearchOpen(true)
         requestAnimationFrame(() => searchRef.current?.focus())
       }
     }
@@ -138,74 +144,81 @@ export function Sidebar({
         )}
       >
         {/* Brand header */}
-        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border dark:border-border-dark">
+        <div className="flex items-center justify-between h-14 pl-4 pr-2.5">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="Dabba Logo" className="w-5 h-5 object-contain rounded-md" />
+            <img src={logo} alt="" className="w-5 h-5 object-contain rounded-md" />
             <span className="font-semibold text-base text-text-primary dark:text-text-dark-primary">Dabba</span>
           </div>
-          <button
-            onClick={onToggle}
-            className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
-            title="Close sidebar (Ctrl+B)"
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-2.5 pt-2.5 space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={onNew}
-              className="flex-1 h-8 flex items-center gap-2 px-3 rounded-lg bg-accent hover:bg-accent-hover active:scale-[0.98] text-white text-[13px] font-medium transition-[background-color,transform]"
-            >
-              <Plus className="w-4 h-4" />
-              New chat
-            </button>
+          <div className="flex items-center gap-0.5">
             <button
               onClick={onNewTemporary}
-              title="New temporary chat, not saved to history"
-              className="h-8 w-8 flex items-center justify-center rounded-lg border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              aria-label="New temporary chat, not saved to history" title="New temporary chat, not saved to history"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               <Ghost className="w-4 h-4" />
             </button>
+            <button
+              onClick={onToggle}
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              aria-label="Close sidebar (Ctrl+B)" title="Close sidebar (Ctrl+B)"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Search — deliberately given breathing room below New Chat */}
-        <div className="px-2.5 pt-2.5 pb-0.5">
+        <div className="px-2.5 space-y-0.5">
+          <button
+            onClick={onNew}
+            className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-text-primary dark:text-text-dark-primary hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
+          >
+            <SquarePen className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1 text-left">New chat</span>
+          </button>
+
+          {!searchOpen && !search ? (
+            <button
+              onClick={openSearch}
+              className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+            >
+              <Search className="w-4 h-4 flex-shrink-0" />
+              <span className="flex-1 text-left">Search chats</span>
+              <kbd className="hidden sm:inline-flex px-1 rounded border border-border dark:border-border-dark text-[11px] leading-4 text-text-tertiary font-mono">Ctrl K</kbd>
+            </button>
+          ) : (
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" />
             <input
               ref={searchRef}
+              autoFocus
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
+              onBlur={() => { if (!search) setSearchOpen(false) }}
               onKeyDown={e => {
                 if (e.key === 'Escape') {
                   setSearch('')
-                  e.currentTarget.blur()
+                  setSearchOpen(false)
                 }
               }}
               placeholder="Search chats"
               aria-label="Search conversations"
-              className="w-full h-8 pl-8 pr-14 text-[13px] rounded-lg glass-input
+              className="w-full h-8 pl-9 pr-9 text-[13px] rounded-lg glass-input
                 text-text-primary dark:text-text-dark-primary placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary
                 focus:border-accent/50 outline-none transition-colors"
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {search ? (
-                <button
-                  onClick={() => { setSearch(''); searchRef.current?.focus() }}
-                  className="p-1 rounded text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
-                  aria-label="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <kbd className="hidden sm:inline-flex px-1 rounded border border-border dark:border-border-dark text-[11px] leading-4 text-text-tertiary font-mono">Ctrl K</kbd>
-              )}
-            </div>
+            {search && (
+              <button
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { setSearch(''); searchRef.current?.focus() }}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+          )}
         </div>
 
         {/* Navigation */}
@@ -216,14 +229,6 @@ export function Sidebar({
             {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects')}
             {navItem('cowork', <BriefcaseBusiness className="w-4 h-4 flex-shrink-0" />, 'Cowork')}
             {navItem('agents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Agents')}
-            <button
-              onClick={() => setMoreOpen(o => !o)}
-              aria-expanded={moreOpen}
-              className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
-            >
-              <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform', !moreOpen && '-rotate-90')} />
-              <span className="flex-1 text-left">{moreOpen ? 'Less' : 'More'}</span>
-            </button>
           </nav>
           {moreOpen && <nav className="space-y-0.5 mt-0.5">
             {navItem('scheduled-skills', <CalendarClock className="w-4 h-4 flex-shrink-0" />, 'Scheduled skills')}
@@ -247,6 +252,14 @@ export function Sidebar({
               <span className="flex-1 text-left">Research mode</span>
             </button>
           </nav>}
+          <button
+            onClick={() => setMoreOpen(o => !o)}
+            aria-expanded={moreOpen}
+            className="mt-0.5 w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+          >
+            <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform', moreOpen && 'rotate-180')} />
+            <span className="flex-1 text-left">{moreOpen ? 'Less' : 'More'}</span>
+          </button>
         </div>
 
         {/* Projects quick list */}

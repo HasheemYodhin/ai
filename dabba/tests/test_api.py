@@ -158,15 +158,15 @@ class TestChatEndpoint:
 
 class TestFastAPIApp:
     def test_app_creation(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         assert test_app is not None
 
     def test_app_title(self):
-        test_app = create_app(title="Dabba API")
+        test_app = create_app(title="Dabba API", model_engine=Mock())
         assert test_app.title == "Dabba API"
 
     def test_health_endpoint(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             response = client.get("/health")
             assert response.status_code == 200
@@ -187,7 +187,7 @@ class TestFastAPIApp:
         monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
         monkeypatch.setattr(platform_core, "_default_store", None)
 
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             signup = client.post(
                 "/v1/platform/identity/signup",
@@ -223,6 +223,7 @@ class TestFastAPIApp:
             # No Authorization header at all — this must still work.
             public = client.get(f"/v1/platform/public/artifacts/{slug}")
             assert public.status_code == 200
+            assert public.headers["Content-Security-Policy"] == "sandbox allow-scripts"
             assert b"Hello from a published artifact" in public.content
 
             other_signup = client.post(
@@ -247,17 +248,41 @@ class TestFastAPIApp:
                 client.get(f"/v1/platform/public/artifacts/{slug}").status_code == 404
             )
 
-    def test_agent_processes_endpoint_lists_background_processes(self):
-        test_app = create_app()
-        with TestClient(test_app) as client:
-            response = client.get("/v1/agent/processes")
-            assert response.status_code == 200
-            data = response.json()
-            assert "processes" in data
-            assert isinstance(data["processes"], list)
+    def test_protected_routes_require_a_session(self):
+        app = create_app(model_engine=Mock())
+        public_paths = {
+            "/v1/platform/identity/signup",
+            "/v1/platform/identity/login",
+            "/v1/platform/public/artifacts/{slug}",
+        }
+        client = TestClient(app)
+        import re
+
+        for route in app.routes:
+            if not route.path.startswith("/v1/") or route.path in public_paths:
+                continue
+            path = re.sub(r"\{[^}]+\}", "test-id", route.path)
+            for method in route.methods:
+                assert client.request(method, path).status_code == 401, (method, path)
+
+    def test_agent_processes_requires_admin(self, monkeypatch):
+        from dabba.platform.services import IdentityService
+
+        def authenticate(self, token):
+            return {"id": token, "role": token}
+
+        monkeypatch.setattr(IdentityService, "authenticate", authenticate)
+        client = TestClient(create_app(model_engine=Mock()))
+        path = "/v1/agent/processes"
+        assert (
+            client.get(path, headers={"X-Dabba-Session": "member"}).status_code == 403
+        )
+        response = client.get(path, headers={"X-Dabba-Session": "admin"})
+        assert response.status_code == 200
+        assert isinstance(response.json()["processes"], list)
 
     def test_v1_chat_completions(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             response = client.post(
                 "/v1/chat/completions",
@@ -270,7 +295,7 @@ class TestFastAPIApp:
             assert response.status_code in [200, 401, 404]
 
     def test_v1_completions(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             response = client.post(
                 "/v1/completions",
@@ -283,7 +308,7 @@ class TestFastAPIApp:
             assert response.status_code in [200, 401, 404]
 
     def test_unauthorized(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             response = client.post(
                 "/v1/chat/completions",
@@ -295,27 +320,89 @@ class TestFastAPIApp:
             )
             assert response.status_code in [200, 401, 403]
 
-    def test_missing_model(self):
-        test_app = create_app()
-        with TestClient(test_app) as client:
-            response = client.post(
-                "/v1/chat/completions",
-                json={"messages": [{"role": "user", "content": "Hi"}]},
-            )
-            # Endpoint uses default model when none provided
-            assert response.status_code == 200
+    def test_missing_model(self, monkeypatch):
+        from dabba.platform.services import IdentityService
+
+        monkeypatch.setattr(
+            IdentityService,
+            "authenticate",
+            lambda self, token: {
+                "id": "test-user",
+                "role": "member",
+            },
+        )
+        monkeypatch.setattr(
+            "dabba.api.chat_endpoints._create_chat_task", lambda *_: None
+        )
+        client = TestClient(create_app(model_engine=Mock()))
+        response = client.post(
+            "/v1/chat/completions",
+            json={"messages": [{"role": "user", "content": "Hi"}]},
+            headers={"X-Dabba-Session": "test-token"},
+        )
+        assert response.status_code == 200
+        assert response.json()["model"] == "dabba"
 
     def test_cors_headers(self):
-        test_app = create_app()
-        with TestClient(test_app) as client:
+        client = TestClient(create_app(model_engine=Mock()))
+        for origin, status in (
+            ("https://example.test", 400),
+            ("http://localhost:5173", 200),
+        ):
             response = client.options(
                 "/v1/chat/completions",
-                headers={"Origin": "http://example.com"},
+                headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
             )
-            assert response.status_code in [200, 405]
+            assert response.status_code == status
+            assert response.headers.get("access-control-allow-origin") == (
+                origin if status == 200 else None
+            )
 
     def test_model_listing(self):
-        test_app = create_app()
+        test_app = create_app(model_engine=Mock())
         with TestClient(test_app) as client:
             response = client.get("/v1/models")
             assert response.status_code in [200, 401, 404]
+
+
+def test_authenticated_stream_reports_usage_and_done(monkeypatch, tmp_path):
+    from dabba.platform import core
+    from dabba.platform.services import IdentityService
+    from dabba.providers.base import ReasoningDelta
+
+    monkeypatch.setattr(core, "_default_store", None)
+    monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
+    identity = IdentityService()
+    email = "stream-test@example.test"
+    user = identity.signup("Stream test", email, "temporary-test-password")
+    session = identity.login(email, "temporary-test-password")
+
+    async def provider_stream(request, messages, engine, usage):
+        yield None
+        yield ReasoningDelta("Separate thought")
+        yield "Streaming reply"
+        usage.update(prompt_tokens=10, completion_tokens=3, total_tokens=13)
+
+    monkeypatch.setattr(
+        "dabba.api.chat_endpoints._stream_provider_response", provider_stream
+    )
+    client = TestClient(create_app(model_engine=Mock()))
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {session['token']}"},
+        json={
+            "model": "mock-provider",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
+        },
+    )
+    assert response.status_code == 200
+    assert ": keepalive\n\n" in response.text
+    assert "Streaming reply" in response.text
+    assert '"reasoning_content": "Separate thought"' in response.text
+    assert response.text.endswith("data: [DONE]\n\n")
+    usage = identity.store.fetchone(
+        "SELECT prompt_tokens, completion_tokens FROM model_usage WHERE user_id=?",
+        (user["id"],),
+    )
+    assert usage == {"prompt_tokens": 10, "completion_tokens": 3}

@@ -1,8 +1,12 @@
-import { useMemo, useState, useCallback } from 'react'
+import { memo, useMemo, useState, useCallback, useDeferredValue } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { SyntaxHighlighter } from '@/lib/syntaxHighlighter'
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
 import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
@@ -32,7 +36,13 @@ interface MarkdownRendererProps {
   className?: string
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+
+export const MarkdownRenderer = memo(MarkdownRendererImpl)
+
+function MarkdownRendererImpl({ content, className }: MarkdownRendererProps) {
+  // Parsing a long reply is slow; deferring it keeps typing and scrolling responsive.
+  const deferredContent = useDeferredValue(content)
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -69,7 +79,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     },
     th({ children }) {
       return (
-        <th className="border border-border dark:border-border-dark bg-gray-50 dark:bg-gray-800 px-3 py-2 text-left text-sm font-semibold">
+        <th className="border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary px-3 py-2 text-left text-sm font-semibold">
           {children}
         </th>
       )
@@ -126,7 +136,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     },
     blockquote({ children }) {
       return (
-        <blockquote className="border-l-4 border-accent pl-4 my-2 italic text-text-secondary dark:text-text-dark-secondary">
+        <blockquote className="border-l-4 border-accent pl-4 my-2 text-text-secondary dark:text-text-dark-secondary">
           {children}
         </blockquote>
       )
@@ -140,9 +150,10 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     <div className={cn('prose prose-sm max-w-none dark:prose-invert', className)}>
       <ReactMarkdown
         components={components}
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={[[rehypeKatex, { trust: false, maxExpand: 1000, maxSize: 20 }]]}
       >
-        {content}
+        {deferredContent}
       </ReactMarkdown>
     </div>
   )
@@ -273,7 +284,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
 
   return (
     <div className="my-4 rounded-lg overflow-hidden border border-border dark:border-border-dark">
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-border dark:border-border-dark">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary dark:bg-surface-dark-tertiary/50 border-b border-border dark:border-border-dark">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCollapsed(!collapsed)}

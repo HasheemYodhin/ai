@@ -20,6 +20,7 @@ MODELS = [
         20.0,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gpt-5.4",
@@ -32,6 +33,7 @@ MODELS = [
         12.0,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gpt-5.3",
@@ -44,6 +46,7 @@ MODELS = [
         4.0,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "o3",
@@ -56,6 +59,7 @@ MODELS = [
         40.0,
         True,
         True,
+        supports_vision=True,
     ),
 ]
 

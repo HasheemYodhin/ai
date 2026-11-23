@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { SyntaxHighlighter } from '@/lib/syntaxHighlighter'
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light'
 import { X, Copy, Check, Code2, Eye, Maximize2, Minimize2, GripVertical, Globe, Loader2 } from 'lucide-react'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { useTheme } from '@/hooks/useTheme'
@@ -139,7 +140,7 @@ export function ArtifactPanel() {
           {expanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </button>
         <button
-          onClick={() => { setExpanded(false); closeArtifact() }}
+          aria-label="Close artifact" onClick={() => { setExpanded(false); closeArtifact() }}
           className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
         >
           <X className="w-4 h-4" />
@@ -184,7 +185,7 @@ export function ArtifactPanel() {
               <Globe className="h-3.5 w-3.5 flex-shrink-0 text-accent" />
               <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-accent underline">{publishedUrl}</a>
               <button
-                onClick={() => { void navigator.clipboard.writeText(publishedUrl) }}
+                aria-label="Copy published link" onClick={() => { void navigator.clipboard.writeText(publishedUrl) }}
                 className="flex-shrink-0 text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
               ><Copy className="h-3 w-3" /></button>
             </div>
@@ -236,13 +237,13 @@ export function ArtifactPanel() {
               <DownloadMenu content={artifact.code} baseName={artifact.title} />
               <button
                 onClick={() => setExpanded(false)}
-                title="Exit fullscreen (Esc)"
+                aria-label="Exit fullscreen (Esc)" title="Exit fullscreen (Esc)"
                 className="p-2 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors border border-border dark:border-border-dark"
               >
                 <Minimize2 className="w-4 h-4" />
               </button>
               <button
-                onClick={() => { setExpanded(false); closeArtifact() }}
+                aria-label="Close artifact" onClick={() => { setExpanded(false); closeArtifact() }}
                 className="p-2 rounded-lg hover:bg-red-500/10 text-text-secondary hover:text-red-500 transition-colors border border-border dark:border-border-dark"
               >
                 <X className="w-4 h-4" />
@@ -256,7 +257,7 @@ export function ArtifactPanel() {
                   <Globe className="h-3.5 w-3.5 flex-shrink-0 text-accent" />
                   <a href={publishedUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate text-accent underline">{publishedUrl}</a>
                   <button
-                    onClick={() => { void navigator.clipboard.writeText(publishedUrl) }}
+                    aria-label="Copy published link" onClick={() => { void navigator.clipboard.writeText(publishedUrl) }}
                     className="flex-shrink-0 text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
                   ><Copy className="h-3 w-3" /></button>
                 </div>

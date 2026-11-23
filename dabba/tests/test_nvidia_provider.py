@@ -355,3 +355,26 @@ def test_nemotron_ultra_capacity_uses_default_fallback():
         mock_client.chat.completions.create.call_args.kwargs["model"]
         == "nvidia/nemotron-3.5-lightning-30b-a3b"
     )
+
+
+def test_inline_reasoning_is_separated_across_chunks():
+    from dabba.providers.base import ReasoningDelta
+    from dabba.providers.nvidia_provider import (
+        _ReasoningFilter,
+        _without_inline_reasoning,
+    )
+
+    filter_ = _ReasoningFilter()
+    result = []
+    for chunk in ("Before <th", "ink>secret</thi", "nk>after"):
+        result.extend(filter_.feed(chunk))
+    result.extend(filter_.feed("", final=True))
+
+    assert (
+        "".join(part for part in result if isinstance(part, ReasoningDelta)) == "secret"
+    )
+    assert (
+        "".join(part for part in result if not isinstance(part, ReasoningDelta))
+        == "Before after"
+    )
+    assert _without_inline_reasoning("answer<think>unfinished") == "answer"

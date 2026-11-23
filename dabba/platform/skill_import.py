@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import functools
+import http.client
 import ipaddress
 import re
 import socket
-import urllib.error
-import urllib.request
 from typing import Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -40,7 +40,9 @@ def parse_skill_markdown(text: str) -> Tuple[str, str, str]:
         try:
             loaded = yaml.safe_load(match.group(1))
         except yaml.YAMLError as exc:
-            raise SkillImportError(f"Could not read the SKILL.md header: {exc}") from exc
+            raise SkillImportError(
+                f"Could not read the SKILL.md header: {exc}"
+            ) from exc
         meta = loaded if isinstance(loaded, dict) else {}
         body = match.group(2).strip()
 
@@ -59,20 +61,36 @@ def parse_skill_markdown(text: str) -> Tuple[str, str, str]:
     return name[:120], description[:1000], body
 
 
-def _require_public_host(host: str) -> None:
+def _resolve_public_host(host: str) -> list[str]:
     # Blocks SSRF into localhost, the LAN and cloud metadata endpoints.
     try:
         infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
     except socket.gaierror as exc:
         raise SkillImportError(f"Could not resolve {host}") from exc
-    for info in infos:
-        if not ipaddress.ip_address(info[4][0]).is_global:
-            raise SkillImportError("Only public internet addresses can be imported from")
+    addresses = list(dict.fromkeys(info[4][0] for info in infos))
+    if not addresses or any(
+        not ipaddress.ip_address(address).is_global for address in addresses
+    ):
+        raise SkillImportError("Only public internet addresses can be imported from")
+    return addresses
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        return None
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host: str, addresses: list[str]):
+        super().__init__(host, port=443, timeout=TIMEOUT_SECONDS)
+        self._create_connection = functools.partial(self._connect_to_address, addresses)
+
+    @staticmethod
+    def _connect_to_address(addresses, target, timeout, source_address):
+        # HTTPSConnection still uses the original host for TLS verification and SNI.
+        for address in addresses:
+            try:
+                return socket.create_connection(
+                    (address, target[1]), timeout, source_address
+                )
+            except OSError as error:
+                last_error = error
+        raise last_error
 
 
 def fetch_skill_markdown(url: str) -> str:
@@ -82,34 +100,49 @@ def fetch_skill_markdown(url: str) -> str:
     if blob:
         url = f"https://raw.githubusercontent.com/{blob.group(1)}/{blob.group(2)}/{blob.group(3)}"
 
-    opener = urllib.request.build_opener(_NoRedirect)
     for _ in range(MAX_REDIRECTS + 1):
-        parsed = urlparse(url)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise SkillImportError("Use an https:// link to a SKILL.md file")
-        _require_public_host(parsed.hostname)
-
-        request = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Dabba-skill-import",
-                "Accept": "text/markdown, text/plain, */*",
-            },
-        )
         try:
-            response = opener.open(request, timeout=TIMEOUT_SECONDS)
-        except urllib.error.HTTPError as exc:
-            location = exc.headers.get("Location") if exc.headers else None
-            if exc.code in _REDIRECT_CODES and location:
-                url = urljoin(url, location)
-                continue
-            raise SkillImportError(f"The link returned HTTP {exc.code}") from exc
-        except urllib.error.URLError as exc:
-            raise SkillImportError(f"Could not download the file: {exc.reason}") from exc
+            parsed = urlparse(url)
+            port = parsed.port
+        except ValueError as exc:
+            raise SkillImportError("Invalid skill URL") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or port not in (None, 443)
+        ):
+            raise SkillImportError(
+                "Use an https:// link to a SKILL.md file on port 443"
+            )
 
-        with response:
-            content_type = response.headers.get_content_type()
-            data = response.read(MAX_BYTES + 1)
+        addresses = _resolve_public_host(parsed.hostname)
+        connection = _PinnedHTTPSConnection(parsed.hostname, addresses)
+        resource = parsed._replace(scheme="", netloc="", fragment="").geturl() or "/"
+        if not resource.startswith("/"):
+            resource = "/" + resource
+        try:
+            connection.request(
+                "GET",
+                resource,
+                headers={
+                    "User-Agent": "Dabba-skill-import",
+                    "Accept": "text/markdown, text/plain, */*",
+                },
+            )
+            with connection.getresponse() as response:
+                location = response.getheader("Location")
+                if response.status in _REDIRECT_CODES and location:
+                    url = urljoin(url, location)
+                    continue
+                if not 200 <= response.status < 300:
+                    raise SkillImportError(f"The link returned HTTP {response.status}")
+                content_type = response.headers.get_content_type()
+                data = response.read(MAX_BYTES + 1)
+        except (OSError, http.client.HTTPException) as exc:
+            raise SkillImportError(f"Could not download the file: {exc}") from exc
+        finally:
+            connection.close()
         if len(data) > MAX_BYTES:
             raise SkillImportError("The file is larger than 512 KB")
         if content_type == "text/html":

@@ -195,6 +195,7 @@ class TaskOrchestrator:
         current_step: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
+        record_model_usage: bool = False,
     ) -> Dict[str, Any]:
         if status not in TASK_STATES:
             raise ValueError(f"Unknown task state: {status}")
@@ -215,6 +216,19 @@ class TaskOrchestrator:
         )
         if status == "completed":
             resolved_progress = 1.0
+        usage = (result or {}).get("usage")
+        record_usage = (
+            record_model_usage
+            and status == "completed"
+            and current["kind"] == "chat"
+            and current["userId"]
+            and current["model"]
+            and isinstance(usage, dict)
+            and all(
+                isinstance(usage.get(key), int) and usage[key] >= 0
+                for key in ("prompt_tokens", "completion_tokens")
+            )
+        )
         with self.store.transaction() as conn:
             conn.execute(
                 """
@@ -245,6 +259,20 @@ class TaskOrchestrator:
                     task_id,
                 ),
             )
+            if record_usage:
+                conn.execute(
+                    """INSERT OR IGNORE INTO model_usage
+                       (task_id, user_id, model, prompt_tokens, completion_tokens, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        task_id,
+                        current["userId"],
+                        current["model"],
+                        usage["prompt_tokens"],
+                        usage["completion_tokens"],
+                        now,
+                    ),
+                )
             self._insert_event(
                 conn,
                 task_id,
@@ -258,6 +286,30 @@ class TaskOrchestrator:
                 now,
             )
         return self.get(task_id)
+
+    def fail_stale_chat_tasks(self, cutoff_ms: int) -> int:
+        """Recover abandoned API chat tasks after allowing for active workers."""
+        failure = {
+            "code": "chat_interrupted",
+            "message": "The chat worker stopped responding.",
+        }
+        now = utc_ms()
+        with self.store.transaction() as conn:
+            rows = conn.execute(
+                """SELECT id FROM tasks WHERE kind='chat'
+                   AND status IN ('queued', 'running') AND updated_at < ?""",
+                (cutoff_ms,),
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    """UPDATE tasks SET status='failed', error_json=?, current_step=NULL,
+                       completed_at=?, updated_at=? WHERE id=?""",
+                    (json_dumps(failure), now, now, row["id"]),
+                )
+                self._insert_event(
+                    conn, row["id"], "task.failed", {"error": failure}, now
+                )
+        return len(rows)
 
     def append_event(
         self, task_id: str, event_type: str, payload: Dict[str, Any]

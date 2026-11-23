@@ -9,6 +9,8 @@ export interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: number
+  interrupted?: boolean
+  reasoning?: string
   error?: boolean
   model?: string
   usage?: TokenUsage
@@ -241,6 +243,11 @@ export interface ModelInfo {
   tier: string
   description: string
   has_key: boolean
+  keySource?: string | null
+  contextWindow?: number
+  supportsThinking?: boolean
+  supportsVision?: boolean
+  fallbackModels?: string[]
 }
 
 export interface ModelCatalog {
@@ -275,6 +282,7 @@ export interface Conversation {
 
 export interface StreamChunk {
   content: string
+  reasoning?: string
   finishReason?: 'stop' | 'length' | null
   usage?: TokenUsage
 }

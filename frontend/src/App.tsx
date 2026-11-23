@@ -44,6 +44,8 @@ function ChatApp() {
     conversations,
     currentId,
     isLoading: isHistoryLoading,
+    hasUnsavedChanges,
+    retrySaves,
     createConversation,
     saveConversation,
     loadConversation,
@@ -53,6 +55,17 @@ function ChatApp() {
     assignToProject,
     setCurrentId,
   } = useHistory(currentUser?.id ?? null)
+
+  const [isOffline, setIsOffline] = useState(() => !navigator.onLine)
+  useEffect(() => {
+    const update = () => setIsOffline(!navigator.onLine)
+    window.addEventListener('online', update)
+    window.addEventListener('offline', update)
+    return () => {
+      window.removeEventListener('online', update)
+      window.removeEventListener('offline', update)
+    }
+  }, [])
 
   const handleConversationUpdate = useCallback((conversationId: string, nextMessages: Message[]) => {
     if (conversationId === '__temporary__') return
@@ -78,6 +91,7 @@ function ChatApp() {
   } = useChat({
     activeConversationId: isTemporaryChat ? '__temporary__' : currentId,
     onConversationUpdate: handleConversationUpdate,
+    onConversationTitle: renameConversation,
   })
 
   const { projects, createProject, updateProject, deleteProject } = useProjects()
@@ -274,6 +288,17 @@ function ChatApp() {
             >
               <PanelLeft className="w-4 h-4" />
             </button>
+          </div>
+        )}
+
+        {(isOffline || hasUnsavedChanges) && (
+          <div role="status" className="flex items-center gap-3 border-b border-border px-4 py-2 text-sm dark:border-border-dark">
+            {isOffline && <span>You’re offline.</span>}
+            {hasUnsavedChanges && (
+              <button className="text-accent underline" onClick={retrySaves}>
+                Conversation not saved. Retry
+              </button>
+            )}
           </div>
         )}
 

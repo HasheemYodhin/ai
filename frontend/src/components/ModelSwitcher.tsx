@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronDown, Check, Search, KeyRound, RefreshCw, Loader2 } from 'lucide-react'
 import { useSettings } from '@/hooks/useSettings'
@@ -17,6 +18,8 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
   const [keyPromptModel, setKeyPromptModel] = useState<ModelInfo | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
+  const modelMenuRef = useDialogFocus(openMenu === 'model', () => setOpenMenu(null))
+  const effortMenuRef = useDialogFocus(openMenu === 'effort', () => setOpenMenu(null))
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -77,6 +80,8 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
           'flex items-center gap-2 h-8 px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors',
           placement === 'down' && '-ml-2'
         )}
+        aria-expanded={openMenu === 'model'}
+        aria-haspopup="dialog"
         title="Switch model"
       >
         <span className="text-[13px] font-medium text-text-primary dark:text-text-dark-primary truncate max-w-[200px]">
@@ -90,6 +95,8 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
       <button
         onClick={() => setOpenMenu(openMenu === 'effort' ? null : 'effort')}
         className="flex items-center gap-2 h-8 px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+        aria-expanded={openMenu === 'effort'}
+        aria-haspopup="dialog"
         title="Reasoning effort"
       >
         <TierStack tier={currentEffort.id} />
@@ -101,7 +108,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Model dropdown */}
       {openMenu === 'model' && (
-        <div className={cn('absolute w-80 max-h-[420px] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
+        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} className={cn('absolute w-80 max-h-[420px] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
           <div className="p-2 border-b border-border dark:border-border-dark">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" strokeWidth={1.5} />
@@ -158,6 +165,14 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
                           <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary truncate">
                             {model.description}
                           </p>
+                          <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
+                            {[
+                              model.contextWindow && `${Math.round(model.contextWindow / 1000)}k context`,
+                              model.supportsVision && 'Vision',
+                              model.supportsThinking && 'Reasoning',
+                              model.keySource && `Key: ${model.keySource}`,
+                            ].filter(Boolean).join(' · ')}
+                          </p>
                         </div>
                         {active && <Check className="w-4 h-4 text-accent flex-shrink-0 mt-0.5" strokeWidth={1.5} />}
                       </button>
@@ -181,7 +196,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Effort dropdown */}
       {openMenu === 'effort' && (
-        <div className={cn('absolute w-60 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
+        <div ref={effortMenuRef} role="dialog" aria-label="Reasoning effort" tabIndex={-1} className={cn('absolute w-60 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
           {EFFORT_TIERS.map(tier => (
             <button
               key={tier.id}

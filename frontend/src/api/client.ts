@@ -896,6 +896,8 @@ export class ApiClient {
     let buffer = ''
     let fullContent = ''
     let usage: TokenUsage | undefined
+    let completed = false
+    let fullReasoning = ''
 
     try {
       while (true) {
@@ -911,11 +913,14 @@ export class ApiClient {
           if (!trimmed || !trimmed.startsWith('data: ')) continue
 
           const data = trimmed.slice(6)
-          if (data === '[DONE]') continue
+          if (data === '[DONE]') {
+            completed = true
+            continue
+          }
 
           let parsed: {
             error?: { message?: string }
-            choices?: Array<{ delta?: { content?: string }; finish_reason?: 'stop' | 'length' | null }>
+            choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: 'stop' | 'length' | null }>
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
           }
           try {
@@ -928,6 +933,8 @@ export class ApiClient {
             throw new Error(parsed.error.message ?? 'The model provider could not complete this request.')
           }
           const delta = parsed.choices?.[0]?.delta?.content ?? ''
+          const reasoning = parsed.choices?.[0]?.delta?.reasoning_content ?? ''
+          fullReasoning += reasoning
           const finishReason = parsed.choices?.[0]?.finish_reason ?? null
 
           // Some servers emit a trailing usage object on the final SSE event.
@@ -939,19 +946,21 @@ export class ApiClient {
             }
           }
 
-          if (delta) {
-            fullContent += delta
-            onChunk({ content: fullContent, finishReason, usage })
-          } else if (finishReason) {
-            onChunk({ content: fullContent, finishReason, usage })
+          fullContent += delta
+          if (delta || reasoning || finishReason) {
+            onChunk({ content: fullContent, reasoning: fullReasoning, finishReason, usage })
           }
         }
       }
+      if (!completed) throw new Error('The reply was interrupted. Retry when you reconnect.')
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        onChunk({ content: fullContent, finishReason: 'stop' })
+        onChunk({ content: fullContent, reasoning: fullReasoning, finishReason: 'stop' })
       }
       throw error
+    } finally {
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
     }
 
     return fullContent

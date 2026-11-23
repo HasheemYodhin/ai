@@ -14,6 +14,7 @@ MODELS = [
         10.0,
         True,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gemini-2.5-flash",
@@ -26,6 +27,7 @@ MODELS = [
         2.5,
         True,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gemini-2.5-flash-lite",
@@ -38,6 +40,7 @@ MODELS = [
         0.40,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gemini-2.0-flash",
@@ -50,6 +53,7 @@ MODELS = [
         0.40,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "gemini-2.0-flash-lite",
@@ -62,6 +66,7 @@ MODELS = [
         0.30,
         False,
         True,
+        supports_vision=True,
     ),
 ]
 
@@ -82,9 +87,9 @@ class GoogleProvider(BaseProvider):
         history, system_text = self._convert_messages(messages)
 
         if system_text and history:
-            history[0]["parts"][0] = (
-                f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
-            )
+            history[0]["parts"][
+                0
+            ] = f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
 
         if not history:
             return ""

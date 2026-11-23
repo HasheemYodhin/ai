@@ -5,10 +5,12 @@ Model IDs verified against the live catalog (July 2026).
 
 from __future__ import annotations
 import re
+from contextlib import closing
 from typing import Iterator, List, Optional
 from dabba.providers.base import (
     BaseProvider,
     ModelInfo,
+    ReasoningDelta,
     tools_to_openai_schema,
     openai_tool_calls_to_tags,
     remap_tool_role_for_provider,
@@ -69,6 +71,7 @@ MODELS = [
         0.0,
         False,
         True,
+        supports_vision=True,
     ),
     ModelInfo(
         "nvidia/nemotron-3.5-lightning-30b-a3b",
@@ -232,6 +235,47 @@ MODELS = [
 # thinkingmachines/inkling, minimaxai/minimax-m3, google/gemma-2/3.
 
 
+class _ReasoningFilter:
+    """Separate inline think blocks even when a tag spans several deltas."""
+
+    def __init__(self):
+        self.inside = False
+        self.tail = ""
+
+    def feed(self, text: str, *, final: bool = False) -> Iterator[str]:
+        remaining = self.tail + text
+        self.tail = ""
+        while remaining:
+            marker = "</think>" if self.inside else "<think>"
+            lowered = remaining.lower()
+            position = lowered.find(marker)
+            if position >= 0:
+                visible = remaining[:position]
+                remaining = remaining[position + len(marker) :]
+            else:
+                trailing = 0
+                if not final:
+                    for length in range(min(len(marker) - 1, len(remaining)), 0, -1):
+                        if lowered.endswith(marker[:length]):
+                            trailing = length
+                            break
+                self.tail = remaining[-trailing:] if trailing else ""
+                visible = remaining[:-trailing] if trailing else remaining
+                remaining = ""
+            if visible:
+                yield ReasoningDelta(visible) if self.inside else visible
+            if position >= 0:
+                self.inside = not self.inside
+
+
+def _without_inline_reasoning(text: str) -> str:
+    return "".join(
+        part
+        for part in _ReasoningFilter().feed(text, final=True)
+        if not isinstance(part, ReasoningDelta)
+    )
+
+
 class NvidiaProvider(BaseProvider):
     name = "nvidia"
 
@@ -275,7 +319,9 @@ class NvidiaProvider(BaseProvider):
         is_slow = (
             self._is_reasoning_model(model)
             or model_l == "deepseek-ai/deepseek-v4-flash"
-            or model_l.startswith(("moonshotai/kimi", "stepfun-ai/step-", "google/gemma-4"))
+            or model_l.startswith(
+                ("moonshotai/kimi", "stepfun-ai/step-", "google/gemma-4")
+            )
         )
         return SLOW_REASONING_TIMEOUT_SECONDS if is_slow else DEFAULT_TIMEOUT_SECONDS
 
@@ -498,7 +544,9 @@ class NvidiaProvider(BaseProvider):
                     ) from exc
                 raise
 
-    def _stream_with_recovery(self, client, params: dict, model: str):
+    def _stream_with_recovery(
+        self, client, params: dict, model: str, cancel_event=None
+    ):
         """
         Iterate an NVIDIA stream with capacity recovery around iteration.
 
@@ -513,11 +561,13 @@ class NvidiaProvider(BaseProvider):
 
         lazy_attempt = 0
         partial_text = ""
-        while True:
+        while cancel_event is None or not cancel_event.is_set():
             stream = self._create_with_retries(client, params, model, stream=True)
             emitted_text = False
             try:
                 for chunk in stream:
+                    if cancel_event is not None and cancel_event.is_set():
+                        return
                     if getattr(chunk, "choices", None):
                         delta = chunk.choices[0].delta
                         text = getattr(delta, "content", None)
@@ -536,7 +586,10 @@ class NvidiaProvider(BaseProvider):
                 if emitted_text and can_fallback:
                     self._mark_capacity_cooldown(model)
                     params["messages"] = list(params["messages"]) + [
-                        {"role": "assistant", "content": partial_text},
+                        {
+                            "role": "assistant",
+                            "content": _without_inline_reasoning(partial_text),
+                        },
                         {"role": "user", "content": _CONTINUE_PROMPT},
                     ]
                     params["model"] = fallback
@@ -546,9 +599,13 @@ class NvidiaProvider(BaseProvider):
 
                 if not emitted_text and lazy_attempt < RESOURCE_EXHAUSTED_RETRIES:
                     lazy_attempt += 1
-                    _time.sleep(
-                        RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (lazy_attempt - 1))
+                    delay = RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (
+                        2 ** (lazy_attempt - 1)
                     )
+                    if cancel_event is None:
+                        _time.sleep(delay)
+                    elif cancel_event.wait(delay):
+                        return
                     continue
 
                 if not emitted_text and can_fallback:
@@ -562,6 +619,10 @@ class NvidiaProvider(BaseProvider):
                     f"Model '{params.get('model', model)}' is at capacity on NVIDIA NIM "
                     "right now and stayed overloaded through automatic retries."
                 ) from exc
+            finally:
+                close = getattr(stream, "close", None)
+                if close:
+                    close()
 
     @staticmethod
     def _max_tokens_ceiling(exc: Exception) -> Optional[int]:
@@ -599,7 +660,7 @@ class NvidiaProvider(BaseProvider):
         resp = self._create_with_retries(client, params, model)
 
         message = resp.choices[0].message
-        text = (message.content or "").strip()
+        text = _without_inline_reasoning(message.content or "").strip()
         if params["model"] != model:
             text = (
                 f"_`{model}` is at capacity, so Dabba used `{params['model']}` for this response._\n\n"
@@ -626,7 +687,7 @@ class NvidiaProvider(BaseProvider):
                 "messages": continuation_messages,
             }
             cont_resp = self._create_with_retries(client, cont_params, model)
-            more = cont_resp.choices[0].message.content or ""
+            more = _without_inline_reasoning(cont_resp.choices[0].message.content or "")
             text = (text + more).strip()
             finish_reason = cont_resp.choices[0].finish_reason
             self._accumulate_usage(usage_total, cont_resp.usage)
@@ -641,6 +702,8 @@ class NvidiaProvider(BaseProvider):
         self, messages, model, max_tokens=4096, temperature=0.7, **kwargs
     ) -> Iterator[str]:
         usage_out = kwargs.pop("usage_out", None)
+        cancel_event = kwargs.pop("cancel_event", None)
+        include_reasoning = kwargs.pop("include_reasoning", False)
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError(
@@ -659,50 +722,59 @@ class NvidiaProvider(BaseProvider):
         params["stream_options"] = {"include_usage": True}
 
         accumulated = ""
-        finish_reason = None
-        usage_total: dict = {}
-        for chunk in self._stream_with_recovery(client, params, model):
-            if getattr(chunk, "usage", None):
-                self._accumulate_usage(usage_total, chunk.usage)
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            text = getattr(delta, "content", None)
-            if text:
-                accumulated += text
-                yield text
-            if chunk.choices[0].finish_reason:
-                finish_reason = chunk.choices[0].finish_reason
-
         continuation_messages = list(params["messages"])
-        continuations = 0
-        while finish_reason == "length" and continuations < MAX_LENGTH_CONTINUATIONS:
+        request_params = params
+        usage_total: dict = {}
+        for continuation in range(MAX_LENGTH_CONTINUATIONS + 1):
+            finish_reason = None
+            reasoning_filter = _ReasoningFilter()
+            with closing(
+                self._stream_with_recovery(client, request_params, model, cancel_event)
+            ) as chunks:
+                for chunk in chunks:
+                    if getattr(chunk, "usage", None):
+                        self._accumulate_usage(usage_total, chunk.usage)
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if include_reasoning and isinstance(reasoning, str) and reasoning:
+                        yield ReasoningDelta(reasoning)
+                    for part in reasoning_filter.feed(
+                        getattr(delta, "content", None) or ""
+                    ):
+                        if isinstance(part, ReasoningDelta):
+                            if include_reasoning:
+                                yield part
+                        else:
+                            accumulated += part
+                            yield part
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+            for part in reasoning_filter.feed("", final=True):
+                if isinstance(part, ReasoningDelta):
+                    if include_reasoning:
+                        yield part
+                else:
+                    accumulated += part
+                    yield part
+
+            if (
+                finish_reason != "length"
+                or continuation == MAX_LENGTH_CONTINUATIONS
+                or (cancel_event is not None and cancel_event.is_set())
+            ):
+                break
             if accumulated:
                 continuation_messages = continuation_messages + [
                     {"role": "assistant", "content": accumulated},
                     {"role": "user", "content": _CONTINUE_PROMPT},
                 ]
-            # else: thinking consumed the entire budget with nothing visible
-            # streamed — retry the same request fresh (thinking forced off
-            # below) instead of continuing from an empty turn.
-            cont_params = {
+            request_params = {
                 **self._continuation_params(model, params),
                 "messages": continuation_messages,
             }
-            finish_reason = None
-            for chunk in self._stream_with_recovery(client, cont_params, model):
-                if getattr(chunk, "usage", None):
-                    self._accumulate_usage(usage_total, chunk.usage)
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                text = getattr(delta, "content", None)
-                if text:
-                    accumulated += text
-                    yield text
-                if chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
-            continuations += 1
 
         if usage_out is not None:
             usage_out.update(usage_total)

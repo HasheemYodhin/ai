@@ -42,3 +42,9 @@ attachments/
 
 # Local llama.cpp source checkout; cloud deployments use Python packages/rule-based mode.
 /llama.cpp/
+
+# Local runtime data and credentials
+.dabba-data/
+.env
+.env.*
+!.env.example

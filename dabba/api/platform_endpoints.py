@@ -1831,7 +1831,14 @@ def create_platform_router() -> APIRouter:
                 detail="This link doesn't point to a published artifact",
             ) from exc
         artifact = published["artifact"]
-        return FileResponse(artifact["path"], media_type=artifact["mediaType"])
+        return FileResponse(
+            artifact["path"],
+            media_type=artifact["mediaType"],
+            headers={
+                "Content-Security-Policy": "sandbox allow-scripts",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.put("/memory")
     async def put_memory(

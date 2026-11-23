@@ -51,7 +51,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   // Relative URLs work locally; Cloudflare Pages injects the Render URL at build time.
   baseUrl: DEFAULT_API_URL,
   apiKey: '',
-  model: 'dabba-10m',
+  model: 'dabba',
   effort: 'medium',
   temperature: 0.7,
   maxTokens: 8192,
@@ -91,6 +91,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<AppSettings>
         // Migrate the old hardcoded default. Explicit non-default API URLs are preserved.
+        if (parsed.model === 'dabba-10m') parsed.model = 'dabba'
         if (parsed.baseUrl === 'http://localhost:8080') parsed.baseUrl = DEFAULT_API_URL
         return {
           ...DEFAULT_SETTINGS,

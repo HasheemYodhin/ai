@@ -252,6 +252,10 @@ def create_execution_router(
         request: Request,
         api_key: Optional[str] = Depends(authorize),
     ):
+        if not request.app.state.config.enable_local_code_execution:
+            raise HTTPException(
+                status_code=403, detail="API code execution is disabled"
+            )
         client_host = request.client.host if request.client else ""
         try:
             is_local = ipaddress.ip_address(client_host).is_loopback
