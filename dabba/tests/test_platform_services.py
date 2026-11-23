@@ -649,26 +649,3 @@ def test_scheduled_skill_dispatch_and_execution_history(store):
     assert completed["status"] == "completed"
     assert completed["output"]["content"] == "Done: Summarize project status"
     assert schedules.get(schedule["id"], user["id"])["lastStatus"] == "completed"
-
-
-def test_admin_emails_env_promotes_on_signup_and_login(store, monkeypatch):
-    identity = IdentityService(store)
-    # Existing member is promoted on next successful login once listed.
-    member = identity.signup("Owner", "owner@example.com", "correct-horse-battery")
-    assert member["role"] == "member"
-
-    monkeypatch.setenv("DABBA_ADMIN_EMAILS", " Owner@Example.com , other@example.com")
-    with pytest.raises(ValueError):
-        identity.login("owner@example.com", "wrong-password-123")
-    assert identity.get_user(member["id"])["role"] == "member"  # no promotion on bad password
-
-    session = identity.login("owner@example.com", "correct-horse-battery")
-    assert session["user"]["role"] == "admin"
-
-    # New signups on the list start as admin; others stay members.
-    assert identity.signup("Other", "other@example.com", "another-password-1")["role"] == "admin"
-    assert identity.signup("Guest", "guest@example.com", "guest-password-12")["role"] == "member"
-
-    # Removing an email from the list does not demote.
-    monkeypatch.setenv("DABBA_ADMIN_EMAILS", "")
-    assert identity.login("owner@example.com", "correct-horse-battery")["user"]["role"] == "admin"

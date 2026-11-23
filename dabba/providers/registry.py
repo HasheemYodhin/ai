@@ -19,6 +19,16 @@ from dabba.providers.dabba_provider import DabbaProvider
 from dabba.providers.local_provider import LocalOpenAIProvider
 from dabba.platform.provider_gateway import ProviderGateway
 
+# Environment variables checked, in order, when no key is saved in
+# cli_config.yaml for a provider. The first non-empty one wins.
+PROVIDER_KEY_ENV_VARS: Dict[str, tuple] = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "nvidia": ("NVIDIA_API_KEY",),
+    "huggingface": ("HF_TOKEN", "HUGGINGFACE_API_KEY"),
+}
+
 if TYPE_CHECKING:
     from dabba.cli.config import CliConfig
 
@@ -84,10 +94,12 @@ class ProviderRegistry:
         for source in (model, model.lower(), provider):
             if source != "local" and keys.get(source):
                 return keys[source], source
-        if provider == "nvidia":
-            key = os.environ.get("NVIDIA_API_KEY", "").strip()
+        # Fall back to the host's environment (e.g. Render's Environment tab),
+        # so keys can be configured without an admin saving them in the app.
+        for env_name in PROVIDER_KEY_ENV_VARS.get(provider, ()):
+            key = os.environ.get(env_name, "").strip()
             if key:
-                return key, "NVIDIA_API_KEY"
+                return key, env_name
         return "", None
 
     def _guess_provider(self, model: str) -> str:
