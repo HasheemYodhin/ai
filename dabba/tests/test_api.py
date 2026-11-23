@@ -254,6 +254,10 @@ class TestFastAPIApp:
             "/v1/platform/identity/signup",
             "/v1/platform/identity/login",
             "/v1/platform/public/artifacts/{slug}",
+            # Free guest prompts: public on purpose, limited inside the
+            # endpoint (dabba/tests/test_guest_endpoints.py covers the limits).
+            "/v1/guest/chat",
+            "/v1/guest/status",
         }
         client = TestClient(app)
         import re

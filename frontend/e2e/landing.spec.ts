@@ -2,16 +2,16 @@ import { expect, test } from '@playwright/test'
 
 test('landing page leads to sign up and log in', async ({ page, isMobile }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { level: 1, name: /One self hosted workspace/ })).toBeVisible()
+  await expect(page.getByRole('heading', { level: 1, name: /Introducing Dabba/ })).toBeVisible()
   await expect(page).toHaveScreenshot('landing.png', {
     fullPage: true,
     animations: 'disabled',
     maxDiffPixelRatio: 0.02,
   })
 
-  await page.getByRole('button', { name: 'Get started' }).click()
-  await expect(page).toHaveURL(/\/signup$/)
-  await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible()
+  await page.getByRole('main').getByRole('button', { name: 'Try Dabba' }).first().click()
+  await expect(page).toHaveURL(/\/try$/)
+  await expect(page.getByRole('heading', { name: 'Try Dabba' })).toBeVisible()
 
   await page.goBack()
   await expect(page).toHaveURL(/\/$/)
@@ -31,4 +31,18 @@ test('unknown addresses show the 404 page with a way home', async ({ page }) => 
   await expect(page.getByRole('heading', { name: "This page doesn't exist" })).toBeVisible()
   await page.getByRole('button', { name: 'Go to the home page' }).click()
   await expect(page).toHaveURL(/\/$/)
+})
+
+test('a sample prompt chip fills the free chat without sending it', async ({ page }) => {
+  let sent = 0
+  await page.route('**/v1/guest/status**', route => route.fulfill({ json: { available: true, remaining: 5, limit: 5 } }))
+  await page.route('**/v1/guest/chat', route => { sent += 1; return route.fulfill({ status: 500 }) })
+
+  await page.goto('/')
+  const chip = page.getByRole('button', { name: 'Write a Python function that removes duplicates from a list' })
+  await chip.scrollIntoViewIfNeeded()
+  await chip.click()
+  await expect(page).toHaveURL(/\/try$/)
+  await expect(page.getByLabel('Message Dabba')).toHaveValue('Write a Python function that removes duplicates from a list')
+  expect(sent).toBe(0)
 })

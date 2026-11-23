@@ -47,7 +47,7 @@ It brings together:
 
 ### Landing page
 
-Signed-out visitors land on a public page at `/` that introduces Dabba and links to sign up (`/signup`) and log in (`/login`).
+Signed-out visitors land on an article-style page at `/` that introduces Dabba, with sample prompts, a sample conversation and its limitations. **Try Dabba** opens a free chat at `/try` (5 prompts, no account), and the page links to sign up (`/signup`) and log in (`/login`).
 
 ![Landing page](docs/screenshots/landing.png)
 
@@ -196,6 +196,8 @@ Copy `.env.example` and set the values for your environment.
 | `DABBA_DATA_DIR` | Where accounts, chats, and indexes are stored |
 | `DABBA_MASTER_KEY` | Fernet key used to encrypt stored provider keys. Keep it in a secret manager. |
 | `DABBA_MODEL_PATH` | Local model path, or `rule_based` for a lightweight fallback |
+| `DABBA_GUEST_CHAT`, `DABBA_GUEST_PROMPT_LIMIT`, `DABBA_GUEST_IP_DAILY_LIMIT` | Free prompts for signed-out visitors on `/try` (default on, 5 per visitor, 20 per IP per day). Replies use the server's `NVIDIA_API_KEY`; set `DABBA_GUEST_CHAT=0` to turn it off. |
+| `DABBA_TRUSTED_PROXY_HOPS` | Reverse proxies in front of the server (default 1, right for Render), used to find a visitor's real IP for the guest limit. |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
 
 > [!IMPORTANT]

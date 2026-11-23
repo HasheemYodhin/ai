@@ -151,6 +151,43 @@ export class ApiClient {
     return data
   }
 
+  /** Free prompts left for a signed-out visitor (server-enforced). */
+  async guestStatus(guestId: string, signal?: AbortSignal): Promise<{ available: boolean; remaining: number; limit: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/guest/status?guestId=${encodeURIComponent(guestId)}`, { signal })
+    if (!response.ok) throw await responseError(response, 'Could not check free prompts')
+    return response.json()
+  }
+
+  /**
+   * Send a guest prompt. The server replies with keepalive comments and then
+   * one `data:` event holding the whole reply (or an error); a 429 means the
+   * free prompts are used up.
+   */
+  async guestChat(
+    guestId: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    signal?: AbortSignal,
+  ): Promise<{ content?: string; error?: string; remaining: number; limitReached?: boolean }> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/v1/guest/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestId, messages }),
+        signal,
+      })
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err
+      throw new Error('Cannot reach Dabba right now. Check your connection and try again.')
+    }
+    if (response.status === 429) return { remaining: 0, limitReached: true }
+    if (!response.ok) throw await responseError(response, 'Dabba couldn\'t answer just now. Try again in a moment.')
+    const text = await response.text()
+    const line = text.split('\n').find(row => row.startsWith('data: '))
+    if (!line) throw new Error('Dabba couldn\'t answer just now. Try again in a moment.')
+    return JSON.parse(line.slice('data: '.length))
+  }
+
   async currentUser(signal?: AbortSignal): Promise<PlatformUser | null> {
     if (!this.sessionToken) return null
     const response = await fetch(`${this.baseUrl}/v1/platform/identity/me`, {

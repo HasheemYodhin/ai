@@ -158,20 +158,20 @@ export function ChatWindow({
 
   const column = messages.length === 0 ? (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between h-14 px-6">
+      <header className="flex items-center justify-between h-14 shrink-0 px-4 sm:px-6">
         <span className="text-[15px] font-medium text-text-primary dark:text-text-dark-primary">Dabba</span>
         {temporaryBadge}
       </header>
 
-      <div className="flex-1 flex flex-col items-center justify-center overflow-y-auto scrollbar-thin px-4">
-        <div className="w-full max-w-2xl -mt-16">
-          <h1 className="text-center text-[28px] leading-tight font-medium mb-8 text-text-primary dark:text-text-dark-primary">
+      <div className="flex-1 flex flex-col items-center overflow-y-auto scrollbar-thin px-3 py-4 sm:justify-center sm:px-4 sm:py-0">
+        <div className="my-auto w-full max-w-2xl shrink-0 sm:my-0 sm:-mt-16">
+          <h1 className="text-center text-2xl leading-tight font-medium mb-4 sm:mb-8 sm:text-[28px] text-text-primary dark:text-text-dark-primary">
             {isTemporary ? "This chat won't be saved" : 'Chat, write code or make an image'}
           </h1>
 
           {inputArea}
 
-          <div className="mt-2 grid grid-cols-1 gap-2 px-4 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-2 px-1 sm:grid-cols-2 sm:px-4">
             {STARTERS.map(starter => (
               <button
                 key={starter.label}
@@ -192,7 +192,7 @@ export function ChatWindow({
     </div>
   ) : (
     <div className="flex flex-col h-full">
-      <header className="flex items-center justify-between h-14 px-6">
+      <header className="flex items-center justify-between h-14 shrink-0 px-4 sm:px-6">
         <div className="flex items-center gap-3 min-w-0">
           <span className="truncate text-[15px] font-medium text-text-primary dark:text-text-dark-primary" title={title}>{title}</span>
           {temporaryBadge}

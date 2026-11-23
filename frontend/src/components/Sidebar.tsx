@@ -112,7 +112,7 @@ export function Sidebar({
 
   const navItem = (v: SidebarView, icon: React.ReactNode, label: string, trailing?: React.ReactNode) => (
     <button
-      onClick={() => onChangeView(v)}
+      onClick={() => navigateFromSidebar(v)}
       aria-current={view === v ? 'page' : undefined}
       aria-label={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? `${label} (owner only)` : label}
       title={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? 'Owner only' : undefined}
@@ -131,6 +131,11 @@ export function Sidebar({
     </button>
   )
 
+  const navigateFromSidebar = (nextView: SidebarView) => {
+    onChangeView(nextView)
+    if (isOpen && !window.matchMedia('(min-width: 768px)').matches) onToggle()
+  }
+
   const initials = currentUser?.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?'
 
   return (
@@ -146,7 +151,7 @@ export function Sidebar({
         className={cn(
           'fixed md:relative z-30 h-full flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] [&_svg]:stroke-[1.5]',
           'bg-surface-secondary dark:bg-surface-dark-secondary border-r border-border dark:border-border-dark',
-          isOpen ? 'w-[248px] translate-x-0' : 'w-[248px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
+          isOpen ? 'w-[248px] max-w-[calc(100%-3rem)] shrink-0 translate-x-0' : 'invisible w-[248px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
         )}
       >
         {/* Brand header */}
@@ -267,7 +272,7 @@ export function Sidebar({
                 {projects.map(p => (
                   <button
                     key={p.id}
-                    onClick={() => onChangeView('projects')}
+                    onClick={() => navigateFromSidebar('projects')}
                     className="w-full h-7 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
                   >
                     <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} aria-hidden="true" />

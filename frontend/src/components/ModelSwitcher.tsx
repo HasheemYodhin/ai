@@ -10,7 +10,7 @@ import type { ModelInfo } from '@/types'
 import { cn } from '@/lib/utils'
 
 export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up' } = {}) {
-  const menuPosition = placement === 'up' ? 'right-0 bottom-full mb-2' : 'left-0 top-full mt-2'
+  const menuPosition = placement === 'up' ? 'max-md:fixed max-md:bottom-4 max-md:right-4 max-md:max-w-[calc(100%-2rem)] md:bottom-full md:right-0 md:mb-2' : 'left-0 top-full mt-2'
   const { settings, updateSettings } = useSettings()
   const { models, isLoading, error, reload } = useModels()
   const [openMenu, setOpenMenu] = useState<'model' | 'effort' | null>(null)
@@ -103,12 +103,12 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
   const currentEffort = EFFORT_TIERS.find(t => t.id === settings.effort) ?? EFFORT_TIERS[1]
 
   return (
-    <div className="relative flex items-center gap-1.5" ref={ref}>
+    <div className="relative flex min-w-0 items-center gap-0.5 lg:gap-1.5" ref={ref}>
       {/* Model chip */}
       <button
         onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
         className={cn(
-          'flex items-center gap-2 h-8 px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors',
+          'flex min-w-0 items-center gap-1 h-9 px-1 lg:h-8 lg:gap-2 lg:px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors',
           placement === 'down' && '-ml-2'
         )}
         aria-expanded={openMenu === 'model'}
@@ -116,32 +116,32 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
         aria-label={`Model: ${current?.name ?? modelDisplayName(settings.model)}. Change model`}
         title="Switch model"
       >
-        <span className="text-[13px] font-medium text-text-primary dark:text-text-dark-primary truncate max-w-[200px]">
+        <span className="text-[13px] font-medium text-text-primary dark:text-text-dark-primary min-w-0 truncate max-w-[200px]">
           {current?.name ?? modelDisplayName(settings.model)}
         </span>
-        {current && <TierStack tier={current.tier} />}
-        <ChevronDown className="w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
+        {current && <TierStack tier={current.tier} className="hidden lg:inline-flex" />}
+        <ChevronDown className="w-4 h-4 shrink-0 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
       </button>
 
       {/* Effort chip */}
       <button
         onClick={() => setOpenMenu(openMenu === 'effort' ? null : 'effort')}
-        className="flex items-center gap-2 h-8 px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+        className="flex shrink-0 items-center gap-1 h-9 px-2 lg:h-8 lg:gap-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
         aria-expanded={openMenu === 'effort'}
         aria-haspopup="dialog"
         aria-label={`Reasoning effort: ${currentEffort.label}. Change effort`}
         title="Reasoning effort"
       >
         <TierStack tier={currentEffort.id} />
-        <span className="text-[13px]">
+        <span className="hidden whitespace-nowrap text-[13px] lg:inline">
           {currentEffort.label} effort
         </span>
-        <ChevronDown className="w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
+        <ChevronDown className="w-4 h-4 shrink-0 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
       </button>
 
       {/* Model dropdown */}
       {openMenu === 'model' && (
-        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} onKeyDown={handleListKeyDown} className={cn('absolute w-80 max-h-[420px] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
+        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} onKeyDown={handleListKeyDown} className={cn('absolute w-80 max-h-[min(420px,calc(100dvh-2rem))] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
           <div className="p-2 border-b border-border dark:border-border-dark">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" strokeWidth={1.5} />
@@ -232,7 +232,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Effort dropdown */}
       {openMenu === 'effort' && (
-        <div ref={effortMenuRef} role="dialog" aria-label="Reasoning effort" tabIndex={-1} className={cn('absolute w-60 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
+        <div ref={effortMenuRef} role="dialog" aria-label="Reasoning effort" tabIndex={-1} className={cn('absolute w-60 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
           {EFFORT_TIERS.map(tier => (
             <button
               key={tier.id}

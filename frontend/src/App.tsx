@@ -12,6 +12,7 @@ import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
 import { LandingPage } from '@/components/LandingPage'
 import { LegalPage, NotFoundPage } from '@/components/PublicPages'
+import { GuestChatPage } from '@/components/GuestChatPage'
 import { ProjectsPage } from '@/components/ProjectsPage'
 import { AgentsPage } from '@/components/AgentsPage'
 import { ToolsPage } from '@/components/ToolsPage'
@@ -35,9 +36,13 @@ import { parsePath, pathFor } from '@/lib/routes'
 
 export type SidebarView = 'chat' | 'projects' | 'cowork' | 'scheduled-skills' | 'tasks' | 'agents' | 'tools' | 'connectors' | 'skills' | 'hooks' | 'subagents'
 
+function isMobileLayout() {
+  return !window.matchMedia('(min-width: 768px)').matches
+}
+
 function ChatApp() {
   const { currentUser, isAdmin } = useAuth()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarOpen, setSidebarOpen] = useState(() => !isMobileLayout())
   const [isSettingsOpen, setSettingsOpen] = useState(false)
   // The URL decides the first view and which chat to reopen (see lib/routes.ts).
   const [initialRoute] = useState(() => parsePath(window.location.pathname))
@@ -228,6 +233,10 @@ function ChatApp() {
     setSidebarOpen(prev => !prev)
   }, [])
 
+  const closeMobileSidebar = () => {
+    if (isMobileLayout()) setSidebarOpen(false)
+  }
+
   // "Research mode" in the sidebar nav: start a fresh chat pre-armed with the
   // Research agent-mode preset (same one available from the "+" menu).
   const handleStartResearch = useCallback(() => {
@@ -311,16 +320,33 @@ function ChatApp() {
         view={view}
         onChangeView={setView}
         onToggle={toggleSidebar}
-        onSelect={(id) => { handleSelectConversation(id); setView('chat') }}
+        onSelect={(id) => {
+          handleSelectConversation(id)
+          setView('chat')
+          closeMobileSidebar()
+        }}
         onDelete={handleDeleteConversation}
         onRename={renameConversation}
         onTogglePin={togglePin}
         onAssignToProject={assignToProject}
         onCreateProject={createProject}
-        onNew={() => { handleNewChat(); setView('chat') }}
-        onNewTemporary={handleNewTemporaryChat}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onStartResearch={handleStartResearch}
+        onNew={() => {
+          handleNewChat()
+          setView('chat')
+          closeMobileSidebar()
+        }}
+        onNewTemporary={() => {
+          handleNewTemporaryChat()
+          closeMobileSidebar()
+        }}
+        onOpenSettings={() => {
+          setSettingsOpen(true)
+          closeMobileSidebar()
+        }}
+        onStartResearch={() => {
+          handleStartResearch()
+          closeMobileSidebar()
+        }}
       />
 
       <main className={cn(
@@ -417,10 +443,10 @@ function ChatApp() {
   )
 }
 
-type PublicScreen = 'landing' | 'login' | 'signup' | 'privacy' | 'terms' | 'not-found'
+type PublicScreen = 'landing' | 'try' | 'login' | 'signup' | 'privacy' | 'terms' | 'not-found'
 
 const PUBLIC_PATHS: Partial<Record<PublicScreen, string>> = {
-  landing: '/', login: '/login', signup: '/signup', privacy: '/privacy', terms: '/terms',
+  landing: '/', try: '/try', login: '/login', signup: '/signup', privacy: '/privacy', terms: '/terms',
 }
 
 function publicScreenFor(pathname: string): PublicScreen {
@@ -436,7 +462,8 @@ function publicScreenFor(pathname: string): PublicScreen {
 }
 
 /**
- * Signed out: `/` is the landing page, `/login` and `/signup` the auth form,
+ * Signed out: `/` is the landing page, `/try` the free guest chat,
+ * `/login` and `/signup` the auth form,
  * `/privacy` and `/terms` the legal pages, and unknown paths a 404.
  * Signed in: the app (legal pages stay reachable).
  */
@@ -473,8 +500,9 @@ function AuthGate() {
   if (screen === 'privacy' || screen === 'terms') return <LegalPage kind={screen} onHome={() => go('landing')} />
   if (currentUser) return <ChatApp />
   if (screen === 'landing') {
-    return <LandingPage onLogin={() => go('login')} onSignup={() => go('signup')} onNavigate={path => go(path === '/privacy' ? 'privacy' : 'terms')} />
+    return <LandingPage onTry={() => go('try')} onLogin={() => go('login')} onSignup={() => go('signup')} onNavigate={path => go(path === '/privacy' ? 'privacy' : 'terms')} />
   }
+  if (screen === 'try') return <GuestChatPage onLogin={() => go('login')} onSignup={() => go('signup')} onHome={() => go('landing')} />
   if (screen === 'not-found') return <NotFoundPage onHome={() => go('landing')} />
   return <AuthPage initialMode={screen} onModeChange={mode => go(mode, true)} onHome={() => go('landing')} />
 }

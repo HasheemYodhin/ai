@@ -761,6 +761,11 @@ def create_app(
         ) or (
             request.method in {"GET", "HEAD"}
             and path.startswith("/v1/platform/public/artifacts/")
+        ) or (
+            # Free guest prompts for signed-out visitors; limits are enforced
+            # inside the endpoint (see dabba/api/guest_endpoints.py).
+            (request.method == "POST" and path == "/v1/guest/chat")
+            or (request.method in {"GET", "HEAD"} and path == "/v1/guest/status")
         )
 
         user = None
@@ -1027,6 +1032,14 @@ def create_app(
         app.include_router(create_conversations_router())
     except Exception as _conv_exc:
         logger.warning(f"Conversation endpoints unavailable: {_conv_exc}")
+
+    # Free prompts for signed-out visitors on the public /try page.
+    try:
+        from dabba.api.guest_endpoints import create_guest_router
+
+        app.include_router(create_guest_router())
+    except Exception as _guest_exc:
+        logger.warning(f"Guest chat endpoints unavailable: {_guest_exc}")
 
     # Text-to-speech for spoken replies (offline Piper TTS)
     try:

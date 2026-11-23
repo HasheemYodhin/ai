@@ -294,7 +294,7 @@ export function InputArea({
 
   return (
     <div className="bg-transparent">
-      <div className="max-w-3xl mx-auto px-4 pt-2 pb-4">
+      <div className="max-w-3xl mx-auto px-1 pt-2 pb-4 sm:px-4">
         {modeChip && (
           <div className="flex items-center gap-1.5 mb-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium">
@@ -392,7 +392,7 @@ export function InputArea({
             )}
           />
 
-          <div className="flex items-center gap-1 px-2.5 pb-2.5">
+          <div className="flex items-center gap-0.5 px-2 pb-2.5 sm:gap-1 sm:px-2.5">
           <PlusMenu
             disabled={isLoading || isExtractingDocuments || disabled}
             mode={mode}
@@ -419,7 +419,7 @@ export function InputArea({
               title={isQuickRecording ? 'Stop and transcribe' : 'Voice input'}
               aria-label={isQuickRecording ? 'Stop recording and transcribe' : 'Start voice input'}
               className={cn(
-                'w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40',
+                'w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40',
                 isQuickRecording
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -433,7 +433,7 @@ export function InputArea({
               disabled={isLoading || isExtractingDocuments || disabled}
               title="Voice mode"
               aria-label="Open voice mode"
-              className="w-9 h-9 flex items-center justify-center rounded-full text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
             >
               <AudioLines className="w-4 h-4" />
             </button>
@@ -441,7 +441,7 @@ export function InputArea({
               <button
                 type="button"
                 onClick={onStop}
-                className="ml-1 w-9 h-9 flex items-center justify-center rounded-full bg-text-primary dark:bg-text-dark-primary text-surface dark:text-surface-dark hover:opacity-90 active:scale-[0.97] transition-[opacity,transform]"
+                className="ml-1 w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-text-primary dark:bg-text-dark-primary text-surface dark:text-surface-dark hover:opacity-90 active:scale-[0.97] transition-[opacity,transform]"
                 title="Stop generation"
                 aria-label="Stop generation"
               >
@@ -453,7 +453,7 @@ export function InputArea({
                 onClick={() => void handleSend()}
                 disabled={(!value.trim() && files.length === 0) || isExtractingDocuments || disabled}
                 className={cn(
-                  'ml-1 w-9 h-9 flex items-center justify-center rounded-full transition-[background-color,transform]',
+                  'ml-1 w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-[background-color,transform]',
                   (value.trim() || files.length > 0)
                     ? 'bg-accent hover:bg-accent-hover text-white active:scale-[0.97]'
                     : 'bg-surface-tertiary dark:bg-surface-dark-secondary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
