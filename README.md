@@ -161,7 +161,7 @@ The Vite dev server proxies `/v1` to the backend. Set `VITE_API_URL` to point at
 
 ### 3. Create an account
 
-Open the web app and sign up. To give an account admin rights (needed for connectors, hooks, and Cowork):
+Open the web app and sign up. To give an account admin rights (needed for API keys, connectors, hooks, and Cowork), set `DABBA_ADMIN_EMAILS` to its email and log in again, or run:
 
 ```bash
 python3 -m dabba.platform.accounts [USER_EMAIL] --role admin
@@ -188,6 +188,7 @@ Copy `.env.example` and set the values for your environment.
 |---|---|
 | `DABBA_CORS_ORIGINS` | Comma-separated list of allowed browser origins |
 | `DABBA_DATA_DIR` | Where accounts, chats, and indexes are stored |
+| `DABBA_ADMIN_EMAILS` | Comma-separated emails that become admin on signup or next login. Useful on hosts without shell access. |
 | `DABBA_MASTER_KEY` | Fernet key used to encrypt stored provider keys. Keep it in a secret manager. |
 | `DABBA_MODEL_PATH` | Local model path, or `rule_based` for a lightweight fallback |
 | `NVIDIA_API_KEY` and other provider keys | Optional. Keys can also be added from the UI. |

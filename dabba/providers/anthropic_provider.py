@@ -10,45 +10,79 @@ from dabba.providers.base import (
 
 MODELS = [
     ModelInfo(
-        "claude-opus-4-8",
-        "Claude Opus 4.8",
+        "claude-fable-5-2",
+        "Claude Fable 5.2",
         "anthropic",
         "max",
-        "Most capable, best reasoning",
-        200000,
-        15.0,
-        75.0,
+        "Most capable, long-horizon reasoning",
+        1000000,
+        8.0,
+        40.0,
         True,
         True,
+        max_output_tokens=128000,
         supports_vision=True,
     ),
     ModelInfo(
-        "claude-sonnet-4-6",
-        "Claude Sonnet 4.6",
+        "claude-opus-5-5",
+        "Claude Opus 5.5",
+        "anthropic",
+        "max",
+        "Best for complex coding and agents",
+        1000000,
+        4.0,
+        20.0,
+        True,
+        True,
+        max_output_tokens=128000,
+        supports_vision=True,
+    ),
+    ModelInfo(
+        "claude-sonnet-5-5",
+        "Claude Sonnet 5.5",
         "anthropic",
         "high",
         "Balanced power and speed",
-        200000,
-        3.0,
-        15.0,
+        1000000,
+        2.0,
+        10.0,
         True,
         True,
+        max_output_tokens=128000,
         supports_vision=True,
     ),
     ModelInfo(
-        "claude-haiku-4-5-20251001",
-        "Claude Haiku 4.5",
+        "claude-haiku-5-5",
+        "Claude Haiku 5.5",
         "anthropic",
         "medium",
         "Fast, lightweight",
-        200000,
-        0.8,
-        4.0,
-        False,
+        1000000,
+        0.1,
+        0.5,
         True,
+        True,
+        max_output_tokens=128000,
         supports_vision=True,
     ),
 ]
+
+# Claude 5.x models think adaptively by default and return HTTP 400 for
+# temperature/top_p/top_k and for a thinking budget_tokens setting. Their
+# reasoning depth is controlled only through output_config.effort.
+ADAPTIVE_THINKING_MODELS = {
+    "claude-fable-5-2",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+    "claude-haiku-5-5",
+}
+
+# Models that support server-side refusal fallbacks. With fallbacks="default",
+# a safety-classifier decline is re-run on a suitable model inside the same
+# call instead of returning an empty reply. Haiku 5.5 has no server-side fallback.
+REFUSAL_FALLBACK_MODELS = {"claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5"}
+REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+VALID_EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
 class AnthropicProvider(BaseProvider):
@@ -99,20 +133,31 @@ class AnthropicProvider(BaseProvider):
         )
         if system:
             params["system"] = system
-        if temperature is not None:
-            params["temperature"] = temperature
-        # Anthropic has no presence/frequency penalty — only top_p and
-        # stop_sequences (its name for OpenAI's "stop").
-        if kwargs.get("top_p") is not None:
-            params["top_p"] = kwargs["top_p"]
+        if model in ADAPTIVE_THINKING_MODELS:
+            # Sampling params and thinking budgets are rejected (400) on these
+            # models, so map Dabba's effort tier straight to the API's effort.
+            # Opus 5.5 and Haiku 5.5 default to "medium", so always send it.
+            effort = kwargs.get("effort")
+            params["output_config"] = {
+                "effort": effort if effort in VALID_EFFORTS else "medium"
+            }
+        else:
+            # Older models (e.g. a saved claude-sonnet-4-6 selection) keep the
+            # previous request shape.
+            if temperature is not None:
+                params["temperature"] = temperature
+            # Anthropic has no presence/frequency penalty — only top_p.
+            if kwargs.get("top_p") is not None:
+                params["top_p"] = kwargs["top_p"]
+            if thinking and max_tokens >= 1024:
+                params["thinking"] = {
+                    "type": "enabled",
+                    "budget_tokens": min(max_tokens // 2, 8000),
+                }
+                params.pop("temperature", None)  # thinking doesn't support temperature
+        # stop_sequences is Anthropic's name for OpenAI's "stop".
         if kwargs.get("stop"):
             params["stop_sequences"] = kwargs["stop"]
-        if thinking and max_tokens >= 1024:
-            params["thinking"] = {
-                "type": "enabled",
-                "budget_tokens": min(max_tokens // 2, 8000),
-            }
-            params.pop("temperature", None)  # thinking doesn't support temperature
 
         # Native function-calling — see openai_provider.py for why this
         # matters more than the prompted <tool_call> tag convention alone.
@@ -120,7 +165,22 @@ class AnthropicProvider(BaseProvider):
         if tools:
             params["tools"] = tools_to_anthropic_schema(tools)
 
-        resp = client.messages.create(**params)
+        if model in REFUSAL_FALLBACK_MODELS:
+            resp = client.beta.messages.create(
+                **params,
+                betas=[REFUSAL_FALLBACK_BETA],
+                fallbacks="default",
+            )
+        else:
+            resp = client.messages.create(**params)
+
+        # A refusal is HTTP 200 with no usable text; surface it instead of
+        # returning an empty reply. With fallbacks enabled this means every
+        # model in the chain declined.
+        if getattr(resp, "stop_reason", None) == "refusal":
+            details = getattr(resp, "stop_details", None)
+            reason = getattr(details, "explanation", None) or "safety policy"
+            raise RuntimeError(f"Claude declined this request ({reason}).")
         # Extract text (skip thinking blocks), then append any native tool_use
         # blocks as dabba's own <tool_call> tag text.
         parts = [b.text for b in resp.content if hasattr(b, "text")]

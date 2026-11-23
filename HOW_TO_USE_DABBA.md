@@ -39,9 +39,9 @@ press **F2** in the TUI) to switch.
 
 | Provider | Example model | Needs API key? | Good for |
 |---|---|---|---|
-| Anthropic | `claude-sonnet-4-6` | Yes | **Real agentic work** — editing files, running commands, multi-step tasks |
+| Anthropic | `claude-sonnet-5-5` | Yes | **Real agentic work** — editing files, running commands, multi-step tasks |
 | NVIDIA NIM | `meta/llama-3.3-70b-instruct` | Yes (free tier) | Free alternative to Claude, reliable tool use |
-| OpenAI | `gpt-4o` | Yes | General coding, reasoning |
+| OpenAI | `gpt-6.2-sol` | Yes | General coding, reasoning |
 | Google | `gemini-2.5-pro` | Yes | Long-context tasks (1M tokens) |
 | Ollama | `llama3.3` (local) | No | Free, offline, moderate reliability |
 | **dabba** (own model) | `dabba` | No | Casual chat only — **see limitation below** |
@@ -56,7 +56,7 @@ generating a real answer. This is expected behavior for a model this size,
 not a bug.
 
 **For anything beyond casual chat — editing files, running shell commands,
-multi-step tasks — switch the model chip to `claude-sonnet-4-6` or
+multi-step tasks — switch the model chip to `claude-sonnet-5-5` or
 `meta/llama-3.3-70b-instruct`.** The `dabba` model will remain available for
 casual conversation and as the target of future fine-tuning (see
 `train_dabba_colab.ipynb`).

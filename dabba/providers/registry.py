@@ -173,6 +173,10 @@ class ProviderRegistry:
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
+        if provider is _ANTHROPIC or provider is _OPENAI:
+            # Claude 5.x and GPT-6.x take effort directly
+            # (output_config.effort / reasoning.effort).
+            params["effort"] = effort
         return provider.chat(
             messages, model, api_key=api_key, usage_out=usage_out, **params
         )
@@ -231,6 +235,10 @@ class ProviderRegistry:
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
+        if provider is _ANTHROPIC or provider is _OPENAI:
+            # Claude 5.x and GPT-6.x take effort directly
+            # (output_config.effort / reasoning.effort).
+            params["effort"] = effort
         if cancel_event is not None and cancel_event.is_set():
             return
         if provider is _NVIDIA:

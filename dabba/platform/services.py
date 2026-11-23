@@ -612,6 +612,18 @@ class IdentityService:
     def __init__(self, store: Optional[PlatformStore] = None):
         self.store = store or get_platform_store()
 
+    @staticmethod
+    def configured_admin_emails() -> set:
+        """Emails in DABBA_ADMIN_EMAILS (comma-separated) that get the admin role.
+
+        Lets a host without shell access (e.g. a Render free instance) grant
+        admin by environment variable. Only promotes: removing an email from
+        the list does not demote, so roles set with dabba.platform.accounts
+        are never overridden.
+        """
+        raw = os.environ.get("DABBA_ADMIN_EMAILS", "")
+        return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
     @classmethod
     def hash_password(cls, password: str) -> str:
         if len(password) < 10:
@@ -653,13 +665,14 @@ class IdentityService:
                     """
                     INSERT INTO users
                         (id, email, name, password_hash, role, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'member', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user_id,
                         normalized,
                         name.strip(),
                         self.hash_password(password),
+                        "admin" if normalized in self.configured_admin_emails() else "member",
                         now,
                         now,
                     ),
@@ -694,7 +707,14 @@ class IdentityService:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = utc_ms()
         session_id = new_id("session")
+        # Promote only after the password check above has passed.
+        promote = row["role"] != "admin" and row["email"] in self.configured_admin_emails()
         with self.store.transaction() as conn:
+            if promote:
+                conn.execute(
+                    "UPDATE users SET role='admin', updated_at=? WHERE id=?",
+                    (now, row["id"]),
+                )
             conn.execute(
                 """
                 INSERT INTO sessions
@@ -703,6 +723,8 @@ class IdentityService:
                 """,
                 (session_id, row["id"], token_hash, now + ttl_seconds * 1000, now, now),
             )
+        if promote:
+            self.store.audit("identity.role", "promoted_by_env", user_id=row["id"])
         self.store.audit("identity.login", "success", user_id=row["id"])
         return {
             "token": token,

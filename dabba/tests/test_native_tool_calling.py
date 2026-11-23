@@ -14,6 +14,8 @@ dabba/agent/agent_loop.py's _workspace_info()/_tool_dicts() for the fix.
 """
 
 import json
+
+import pytest
 from unittest.mock import MagicMock, patch
 
 from dabba.agent.agent_loop import AgentLoop
@@ -143,28 +145,31 @@ class TestMalformedTextToolCalls:
 
 
 class TestOpenAINativeToolCalling:
+    """OpenAIProvider uses the Responses API (GPT-6.x tool calling needs it)."""
+
+    @staticmethod
+    def _fake_client(output_text="", output=None):
+        fake_resp = MagicMock(output_text=output_text, output=output or [], usage=None)
+        client = MagicMock()
+        client.responses.create.return_value = fake_resp
+        return client
+
     def _fake_client_with_tool_call(self):
-        fake_tool_call = MagicMock()
-        fake_tool_call.id = "call_1"
-        fake_tool_call.function.name = "file_write"
-        fake_tool_call.function.arguments = json.dumps(
+        fake_call = MagicMock()
+        fake_call.type = "function_call"
+        fake_call.name = "file_write"
+        fake_call.call_id = "call_1"
+        fake_call.arguments = json.dumps(
             {"path": "/repo/train/x.yml", "content": "a: b"}
         )
-
-        fake_message = MagicMock(
-            content="Creating it now.", tool_calls=[fake_tool_call]
-        )
-        fake_resp = MagicMock(choices=[MagicMock(message=fake_message)])
-        client = MagicMock()
-        client.chat.completions.create.return_value = fake_resp
-        return client
+        return self._fake_client("Creating it now.", [fake_call])
 
     def test_native_tool_call_converted_to_tag_and_parseable(self):
         client = self._fake_client_with_tool_call()
         with patch("openai.OpenAI", return_value=client):
             result = OpenAIProvider().chat(
                 messages=[{"role": "user", "content": "make a file"}],
-                model="gpt-4o",
+                model="gpt-6.2-sol",
                 api_key="fake",
                 tools=[
                     {
@@ -187,27 +192,26 @@ class TestOpenAINativeToolCalling:
         with patch("openai.OpenAI", return_value=client):
             OpenAIProvider().chat(
                 messages=[{"role": "user", "content": "hi"}],
-                model="gpt-4o",
+                model="gpt-6.2-sol",
                 api_key="fake",
                 tools=[{"name": "file_write", "description": "d", "parameters": {}}],
             )
-        _, kwargs = client.chat.completions.create.call_args
+        _, kwargs = client.responses.create.call_args
         assert kwargs["tool_choice"] == "auto"
-        assert kwargs["tools"][0]["function"]["name"] == "file_write"
+        # Responses API tools are flat: name sits beside type, not under "function".
+        assert kwargs["tools"][0]["type"] == "function"
+        assert kwargs["tools"][0]["name"] == "file_write"
 
     def test_no_tools_kwarg_preserves_old_behavior(self):
-        fake_message = MagicMock(content="plain text reply", tool_calls=None)
-        fake_resp = MagicMock(choices=[MagicMock(message=fake_message)])
-        client = MagicMock()
-        client.chat.completions.create.return_value = fake_resp
+        client = self._fake_client("plain text reply")
         with patch("openai.OpenAI", return_value=client):
             result = OpenAIProvider().chat(
                 messages=[{"role": "user", "content": "hi"}],
-                model="gpt-4o",
+                model="gpt-6.2-sol",
                 api_key="fake",
             )
         assert result == "plain text reply"
-        _, kwargs = client.chat.completions.create.call_args
+        _, kwargs = client.responses.create.call_args
         assert "tools" not in kwargs
 
     def test_tool_role_messages_remapped_before_reaching_api(self):
@@ -218,11 +222,88 @@ class TestOpenAINativeToolCalling:
                     {"role": "user", "content": "do it"},
                     {"role": "tool", "content": "result", "tool_call_id": "x"},
                 ],
-                model="gpt-4o",
+                model="gpt-6.2-sol",
                 api_key="fake",
             )
-        _, kwargs = client.chat.completions.create.call_args
-        assert "tool" not in [m["role"] for m in kwargs["messages"]]
+        _, kwargs = client.responses.create.call_args
+        assert "tool" not in [m["role"] for m in kwargs["input"]]
+
+    def test_system_prompt_sent_as_instructions(self):
+        client = self._fake_client("ok")
+        with patch("openai.OpenAI", return_value=client):
+            OpenAIProvider().chat(
+                messages=[
+                    {"role": "system", "content": "Be terse."},
+                    {"role": "user", "content": "hi"},
+                ],
+                model="gpt-6.2-sol",
+                api_key="fake",
+            )
+        _, kwargs = client.responses.create.call_args
+        assert kwargs["instructions"] == "Be terse."
+        assert [m["role"] for m in kwargs["input"]] == ["user"]
+        assert kwargs["store"] is False
+
+    def test_gpt6_sends_reasoning_effort_and_no_temperature(self):
+        client = self._fake_client("ok")
+        with patch("openai.OpenAI", return_value=client):
+            OpenAIProvider().chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-6.2-astra",
+                api_key="fake",
+                temperature=0.3,
+                effort="xhigh",
+            )
+        _, kwargs = client.responses.create.call_args
+        assert kwargs["reasoning"] == {"effort": "xhigh"}
+        assert "temperature" not in kwargs
+
+    def test_older_reasoning_model_clamps_effort(self):
+        client = self._fake_client("ok")
+        with patch("openai.OpenAI", return_value=client):
+            OpenAIProvider().chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="o3",
+                api_key="fake",
+                effort="max",
+            )
+        _, kwargs = client.responses.create.call_args
+        assert kwargs["reasoning"] == {"effort": "high"}
+
+    def test_non_reasoning_model_keeps_temperature(self):
+        client = self._fake_client("ok")
+        with patch("openai.OpenAI", return_value=client):
+            OpenAIProvider().chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="gpt-4o",
+                api_key="fake",
+                temperature=0.3,
+            )
+        _, kwargs = client.responses.create.call_args
+        assert kwargs["temperature"] == 0.3
+        assert "reasoning" not in kwargs
+
+    def test_image_parts_converted_to_responses_format(self):
+        client = self._fake_client("ok")
+        with patch("openai.OpenAI", return_value=client):
+            OpenAIProvider().chat(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "what is this"},
+                            {"type": "image_url", "image_url": {"url": "data:x"}},
+                        ],
+                    }
+                ],
+                model="gpt-6.2-sol",
+                api_key="fake",
+            )
+        _, kwargs = client.responses.create.call_args
+        assert kwargs["input"][0]["content"] == [
+            {"type": "input_text", "text": "what is this"},
+            {"type": "input_image", "image_url": "data:x"},
+        ]
 
 
 class TestAnthropicNativeToolCalling:
@@ -284,3 +365,60 @@ class TestAnthropicNativeToolCalling:
             "type": "object",
             "properties": {},
         }
+
+
+class TestClaude5RequestShape:
+    """Claude 5.x models 400 on temperature/top_p and thinking budget_tokens."""
+
+    @staticmethod
+    def _text_resp(text="ok"):
+        block = MagicMock(type="text", text=text)
+        return MagicMock(content=[block], stop_reason="end_turn", usage=None)
+
+    def test_opus_5_5_uses_effort_and_refusal_fallbacks(self):
+        client = MagicMock()
+        client.beta.messages.create.return_value = self._text_resp()
+        with patch("anthropic.Anthropic", return_value=client):
+            AnthropicProvider().chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="claude-opus-5-5",
+                api_key="fake",
+                temperature=0.3,
+                top_p=0.9,
+                thinking=True,
+                effort="high",
+            )
+        client.messages.create.assert_not_called()
+        _, kwargs = client.beta.messages.create.call_args
+        assert kwargs["output_config"] == {"effort": "high"}
+        assert kwargs["fallbacks"] == "default"
+        for rejected in ("temperature", "top_p", "thinking"):
+            assert rejected not in kwargs
+
+    def test_haiku_5_5_has_no_server_side_fallback(self):
+        client = MagicMock()
+        client.messages.create.return_value = self._text_resp()
+        with patch("anthropic.Anthropic", return_value=client):
+            AnthropicProvider().chat(
+                messages=[{"role": "user", "content": "hi"}],
+                model="claude-haiku-5-5",
+                api_key="fake",
+            )
+        client.beta.messages.create.assert_not_called()
+        _, kwargs = client.messages.create.call_args
+        # Haiku 5.5 defaults to medium effort, so it is always sent explicitly.
+        assert kwargs["output_config"] == {"effort": "medium"}
+        assert "temperature" not in kwargs
+
+    def test_refusal_raises_instead_of_empty_reply(self):
+        resp = MagicMock(content=[], stop_reason="refusal")
+        resp.stop_details.explanation = "declined"
+        client = MagicMock()
+        client.beta.messages.create.return_value = resp
+        with patch("anthropic.Anthropic", return_value=client):
+            with pytest.raises(RuntimeError, match="declined"):
+                AnthropicProvider().chat(
+                    messages=[{"role": "user", "content": "hi"}],
+                    model="claude-sonnet-5-5",
+                    api_key="fake",
+                )

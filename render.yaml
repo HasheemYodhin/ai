@@ -15,6 +15,8 @@ services:
         value: rule_based
       - key: DABBA_CORS_ORIGINS
         sync: false
+      - key: DABBA_ADMIN_EMAILS
+        sync: false
     disk:
       name: dabba-data
       mountPath: /data
