@@ -2,6 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Named text styles from the landing page design system. Each maps to one
+ * Tailwind type step and weight, so pages never mix ad hoc sizes.
+ */
+@layer components {
+  .heading-1 { @apply text-6xl font-semibold; }
+  .heading-2 { @apply text-5xl font-semibold; }
+  .heading-3 { @apply text-4xl font-semibold; }
+  .heading-4 { @apply text-3xl font-semibold; }
+  .heading-5 { @apply text-2xl font-semibold; }
+  .heading-6 { @apply text-xl font-semibold; }
+  .title-1 { @apply text-xl font-medium; }
+  .title-2 { @apply text-lg font-medium; }
+  .title-3 { @apply text-base font-medium; }
+  .title-4 { @apply text-sm font-medium; }
+  .title-5 { @apply text-xs font-medium; }
+  .body-1 { @apply text-base font-semibold; }
+  .body-2 { @apply text-base font-medium; }
+  .body-3 { @apply text-base font-normal; }
+  .body-4 { @apply text-sm font-semibold; }
+  .body-5 { @apply text-sm font-medium; }
+  .body-6 { @apply text-sm font-normal; }
+  .button-lg { @apply text-lg font-semibold; }
+  .button-md { @apply text-base font-semibold; }
+  .button-sm { @apply text-sm font-semibold; }
+  .button-xsm { @apply text-xs font-semibold; }
+  .caption-1 { @apply text-sm font-medium; }
+  .caption-2 { @apply text-sm font-normal; }
+  .caption-3 { @apply text-xs font-semibold; }
+  .caption-4 { @apply text-xs font-medium; }
+  .caption-5 { @apply text-xs font-normal; }
+
+  /* Hero heading: the one place a gradient is allowed, and only on text. */
+  .hero-heading-gradient {
+    background-image: linear-gradient(to right, #000000, #666666);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .dark .hero-heading-gradient {
+    background-image: linear-gradient(to right, #ffffff, #9b9b9b);
+  }
+}
+
 @layer base {
   :root {
     --color-bg: 250 249 247;

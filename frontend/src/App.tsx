@@ -11,6 +11,7 @@ import { ChatWindow } from '@/components/ChatWindow'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
 import { LandingPage } from '@/components/LandingPage'
+import { LegalPage, NotFoundPage } from '@/components/PublicPages'
 import { ProjectsPage } from '@/components/ProjectsPage'
 import { AgentsPage } from '@/components/AgentsPage'
 import { ToolsPage } from '@/components/ToolsPage'
@@ -416,18 +417,28 @@ function ChatApp() {
   )
 }
 
-type PublicScreen = 'landing' | 'login' | 'signup'
+type PublicScreen = 'landing' | 'login' | 'signup' | 'privacy' | 'terms' | 'not-found'
+
+const PUBLIC_PATHS: Partial<Record<PublicScreen, string>> = {
+  landing: '/', login: '/login', signup: '/signup', privacy: '/privacy', terms: '/terms',
+}
 
 function publicScreenFor(pathname: string): PublicScreen {
-  if (pathname.startsWith('/login')) return 'login'
-  if (pathname.startsWith('/signup')) return 'signup'
-  return 'landing'
+  const path = pathname.replace(/\/+$/, '') || '/'
+  for (const [screen, screenPath] of Object.entries(PUBLIC_PATHS)) {
+    if (screenPath === path) return screen as PublicScreen
+  }
+  // App addresses (/c/:id, /agents, ...) need a login: show the landing page;
+  // after login the app opens that address. Anything else is a 404.
+  const route = parsePath(path)
+  if (route.conversationId || route.view !== 'chat') return 'landing'
+  return 'not-found'
 }
 
 /**
- * Signed out: `/` shows the landing page, `/login` and `/signup` the auth
- * form. Signed in: the app (any other path, e.g. a /c/:id link, opens the
- * landing page first and returns there after login).
+ * Signed out: `/` is the landing page, `/login` and `/signup` the auth form,
+ * `/privacy` and `/terms` the legal pages, and unknown paths a 404.
+ * Signed in: the app (legal pages stay reachable).
  */
 function AuthGate() {
   const { currentUser, isReady } = useAuth()
@@ -440,7 +451,7 @@ function AuthGate() {
   }, [])
 
   const go = useCallback((next: PublicScreen, replace = false) => {
-    const path = next === 'landing' ? '/' : `/${next}`
+    const path = PUBLIC_PATHS[next] ?? '/'
     if (window.location.pathname !== path) {
       if (replace) window.history.replaceState(null, '', path)
       else window.history.pushState(null, '', path)
@@ -459,8 +470,12 @@ function AuthGate() {
   if (!isReady) {
     return <div className="flex h-full items-center justify-center bg-surface text-sm text-text-secondary dark:bg-surface-dark dark:text-text-dark-secondary">Restoring your Dabba session...</div>
   }
+  if (screen === 'privacy' || screen === 'terms') return <LegalPage kind={screen} onHome={() => go('landing')} />
   if (currentUser) return <ChatApp />
-  if (screen === 'landing') return <LandingPage onLogin={() => go('login')} onSignup={() => go('signup')} />
+  if (screen === 'landing') {
+    return <LandingPage onLogin={() => go('login')} onSignup={() => go('signup')} onNavigate={path => go(path === '/privacy' ? 'privacy' : 'terms')} />
+  }
+  if (screen === 'not-found') return <NotFoundPage onHome={() => go('landing')} />
   return <AuthPage initialMode={screen} onModeChange={mode => go(mode, true)} onHome={() => go('landing')} />
 }
 
