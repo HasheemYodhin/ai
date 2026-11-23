@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { PanelLeft } from 'lucide-react'
 import { ThemeProvider } from '@/hooks/useTheme'
 import { SettingsProvider } from '@/hooks/useSettings'
@@ -22,24 +22,29 @@ import { SubagentsPage } from '@/components/SubagentsPage'
 import { useProcessNotifications } from '@/hooks/useRunNotifications'
 import { CheckCircle2, XCircle, X } from 'lucide-react'
 import { TaskCenterPage } from '@/components/TaskCenterPage'
+import { AdminOnlyNotice } from '@/components/AdminOnlyNotice'
+import { ADMIN_ONLY_VIEWS, ADMIN_VIEW_LABELS } from '@/lib/adminViews'
 import type { ActiveMode } from '@/components/PlusMenu'
 import type { ExtractedDocument, DocumentAttachment, Message } from '@/types'
 import { RESEARCH_MODE } from '@/lib/agentModes'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/api/client'
+import { parsePath, pathFor } from '@/lib/routes'
 
 export type SidebarView = 'chat' | 'projects' | 'cowork' | 'scheduled-skills' | 'tasks' | 'agents' | 'tools' | 'connectors' | 'skills' | 'hooks' | 'subagents'
 
 function ChatApp() {
-  const { currentUser } = useAuth()
+  const { currentUser, isAdmin } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [isSettingsOpen, setSettingsOpen] = useState(false)
-  const [view, setView] = useState<SidebarView>('chat')
+  // The URL decides the first view and which chat to reopen (see lib/routes.ts).
+  const [initialRoute] = useState(() => parsePath(window.location.pathname))
+  const [view, setView] = useState<SidebarView>(initialRoute.view)
   const [pendingMode, setPendingMode] = useState<ActiveMode | null>(null)
   // Temporary chats never touch the backend — see the auto-save effect below
   // and ensureConversation(), both of which are no-ops while this is true.
   const [isTemporaryChat, setIsTemporaryChat] = useState(false)
-  const { notices: processNotices, dismiss: dismissProcessNotice } = useProcessNotifications()
+  const { notices: processNotices, dismiss: dismissProcessNotice } = useProcessNotifications(isAdmin)
   const {
     conversations,
     currentId,
@@ -48,7 +53,8 @@ function ChatApp() {
     retrySaves,
     createConversation,
     saveConversation,
-    loadConversation,
+    loadConversationAsync,
+    getConversation,
     deleteConversation,
     renameConversation,
     togglePin,
@@ -116,20 +122,22 @@ function ChatApp() {
     if (!currentUserId || restoredUserId === currentUserId || isHistoryLoading) return
 
     const storageKey = `dabba_current_conversation_id_${currentUserId}`
-    const storedId = localStorage.getItem(storageKey)
+    // A /c/:id link wins; otherwise reopen the last chat on a chat-view load.
+    // An unknown or foreign id simply opens a new chat (the URL is corrected).
+    const storedId = initialRoute.conversationId ?? localStorage.getItem(storageKey)
     const targetId = (storedId && conversations.some(c => c.id === storedId))
       ? storedId
       : null
 
     if (targetId) {
-      setCurrentId(targetId)
-      const conv = conversations.find(c => c.id === targetId)
-      if (conv) {
-        setMessages([...conv.messages], targetId)
-      }
+      // The sidebar list is lightweight (no messages); fetch the chat's
+      // messages if they aren't loaded yet, e.g. when opening a /c/:id link.
+      void loadConversationAsync(targetId).then(conv => {
+        if (conv) setMessages([...conv.messages], targetId)
+      })
     }
     setRestoredUserId(currentUserId)
-  }, [conversations, currentUserId, restoredUserId, isHistoryLoading, setCurrentId, setMessages])
+  }, [conversations, currentUserId, restoredUserId, isHistoryLoading, loadConversationAsync, setMessages, initialRoute])
 
   // Web search and image generation start their own fresh conversation the
   // same way a normal message does — ensure one exists before sending.
@@ -146,7 +154,8 @@ function ChatApp() {
 
   // A skill (explicit, per-message) always wins over a project's automatic
   // instructions; if neither is set, useChat falls back to the global system prompt.
-  const currentProjectId = conversations.find(c => c.id === currentId)?.projectId ?? null
+  // getConversation also sees the unsaved draft chat, which isn't in `conversations`.
+  const currentProjectId = getConversation(currentId)?.projectId ?? null
   const currentProject = projects.find(p => p.id === currentProjectId) ?? null
 
   const handleSend = useCallback((content: string, images?: string[], opts?: { systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => {
@@ -194,14 +203,15 @@ function ChatApp() {
       saveConversation(messages, currentId)
     }
 
-    const conv = loadConversation(id)
-    if (conv) {
+    // Messages load on demand (the sidebar list carries only metadata).
+    void loadConversationAsync(id).then(conv => {
+      if (!conv) return
       // Copy the array so React always commits the selected conversation,
       // even if its message array was previously used by the chat view.
       setMessages([...conv.messages], id)
       setIsTemporaryChat(false)
-    }
-  }, [currentId, isTemporaryChat, loadConversation, messages, saveConversation, setMessages])
+    })
+  }, [currentId, isTemporaryChat, loadConversationAsync, messages, saveConversation, setMessages])
 
   const handleDeleteConversation = useCallback((id: string) => {
     if (currentId === id) {
@@ -231,6 +241,47 @@ function ChatApp() {
     assignToProject(id, projectId)
     setView('chat')
   }, [handleNewChat, createConversation, setCurrentId, assignToProject])
+
+  // ── URL sync (B4) ──────────────────────────────────────────────────────
+  // State → URL. A chat only gets /c/:id once it has messages, so "New chat"
+  // stays at `/` and an unsaved draft never becomes a dead link.
+  const routedConversationId = view === 'chat' && !isTemporaryChat && messages.length > 0 ? currentId : null
+  const lastPathRef = useRef<string | null>(null)
+  const applyingPopStateRef = useRef(false)
+  useEffect(() => {
+    // Wait until the restore effect above has decided which chat is open.
+    if (!currentUserId || restoredUserId !== currentUserId) return
+    const path = pathFor(view, routedConversationId)
+    const previous = lastPathRef.current
+    lastPathRef.current = path
+    if (window.location.pathname === path) { applyingPopStateRef.current = false; return }
+    // Replace instead of push for: the first sync (fixes unknown or stale
+    // URLs), Back/Forward navigation, and a new chat at `/` getting its id
+    // after the first message — none of these should add a history entry.
+    const replace = previous === null || applyingPopStateRef.current
+      || (previous === '/' && routedConversationId !== null)
+    applyingPopStateRef.current = false
+    if (replace) window.history.replaceState(null, '', path)
+    else window.history.pushState(null, '', path)
+  }, [view, routedConversationId, currentUserId, restoredUserId])
+
+  // URL → state on Back/Forward. Handlers are read through a ref so this
+  // listener is registered once and always calls the latest callbacks.
+  const popStateHandlersRef = useRef({ currentId, handleSelectConversation, handleNewChat })
+  popStateHandlersRef.current = { currentId, handleSelectConversation, handleNewChat }
+  useEffect(() => {
+    const onPopState = () => {
+      const route = parsePath(window.location.pathname)
+      const { currentId: openId, handleSelectConversation: select, handleNewChat: startNew } = popStateHandlersRef.current
+      applyingPopStateRef.current = true
+      setView(route.view)
+      if (route.view !== 'chat') return
+      if (route.conversationId && route.conversationId !== openId) select(route.conversationId)
+      else if (!route.conversationId && messages.length > 0) startNew()
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [messages.length])
 
   return (
     <div className="flex h-full overflow-hidden bg-surface-secondary dark:bg-surface-dark relative">
@@ -325,6 +376,7 @@ function ChatApp() {
             onApprovalDecision={respondToApproval}
             pendingPlanApproval={pendingPlanApproval}
             onPlanApprovalDecision={respondToPlanApproval}
+            conversationTitle={isTemporaryChat ? undefined : getConversation(currentId)?.title}
           />
         </div>
 
@@ -340,15 +392,20 @@ function ChatApp() {
             />
           </div>
         )}
-        {view === 'cowork' && <div className="flex-1 min-h-0"><CoworkWorkspace /></div>}
-        {view === 'scheduled-skills' && <div className="flex-1 min-h-0"><ScheduledSkillsPage /></div>}
+        {/* Admin-only pages: regular users get an explanation instead of a
+            form whose requests all fail with 403. */}
+        {!isAdmin && ADMIN_ONLY_VIEWS.has(view) && (
+          <div className="flex-1 min-h-0"><AdminOnlyNotice feature={ADMIN_VIEW_LABELS[view] ?? 'This page'} /></div>
+        )}
+        {isAdmin && view === 'cowork' && <div className="flex-1 min-h-0"><CoworkWorkspace /></div>}
+        {isAdmin && view === 'scheduled-skills' && <div className="flex-1 min-h-0"><ScheduledSkillsPage /></div>}
         {view === 'tasks' && <div className="flex-1 min-h-0"><TaskCenterPage /></div>}
         {view === 'agents' && <div className="flex-1 min-h-0"><AgentsPage /></div>}
-        {view === 'tools' && <div className="flex-1 min-h-0"><ToolsPage /></div>}
-        {view === 'connectors' && <div className="flex-1 min-h-0"><ConnectorsPage onOpenSkills={() => setView('skills')} /></div>}
+        {isAdmin && view === 'tools' && <div className="flex-1 min-h-0"><ToolsPage /></div>}
+        {isAdmin && view === 'connectors' && <div className="flex-1 min-h-0"><ConnectorsPage onOpenSkills={() => setView('skills')} /></div>}
         {view === 'skills' && <div className="flex-1 min-h-0"><SkillsPage /></div>}
-        {view === 'hooks' && <div className="flex-1 min-h-0"><HooksPage /></div>}
-        {view === 'subagents' && <div className="flex-1 min-h-0"><SubagentsPage /></div>}
+        {isAdmin && view === 'hooks' && <div className="flex-1 min-h-0"><HooksPage /></div>}
+        {isAdmin && view === 'subagents' && <div className="flex-1 min-h-0"><SubagentsPage /></div>}
       </main>
       <SettingsModal
         isOpen={isSettingsOpen}

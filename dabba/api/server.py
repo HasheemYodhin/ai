@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import MutableHeaders
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dabba.config.api_config import ApiConfig
 from dabba.api.auth import ApiKeyAuth
@@ -583,6 +584,113 @@ async def lifespan(app: FastAPI):
     app.state.logger.info("Server shutting down")
 
 
+# Enforced on HTML (the served SPA). Deliberately limited to directives that
+# cannot break the app: artifact previews are model-written HTML rendered in
+# srcdoc iframes, which inherit this page's CSP, so a strict script-src would
+# block their inline/CDN scripts. OCR also loads tesseract's worker from
+# cdn.jsdelivr.net, and the API base URL is user-configurable.
+HTML_CSP = "; ".join(
+    [
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+    ]
+)
+# The stricter target policy, sent report-only so violations show in the
+# browser console without blocking anything. Promote to enforced once artifact
+# previews are served from a separate origin.
+HTML_CSP_REPORT_ONLY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https://cdn.jsdelivr.net blob: data:",
+        "worker-src 'self' blob:",
+        "frame-src 'self' blob: data:",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+    ]
+)
+
+
+class SPAStaticFiles(StaticFiles):
+    """Static files that fall back to index.html for client-side routes.
+
+    The web app has real URLs (/c/<id>, /agents, ...) handled in the browser.
+    Without this, opening or refreshing one of them returns 404. Paths that
+    look like files (contain a dot) and unknown /v1/ API paths still 404.
+    """
+
+    @staticmethod
+    def _is_app_route(path: str) -> bool:
+        path = path.lstrip("/")
+        last_segment = path.rsplit("/", 1)[-1]
+        return not path.startswith("v1/") and path != "v1" and "." not in last_segment
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # Newer Starlette raises for missing files instead of returning 404.
+            if exc.status_code != 404 or not self._is_app_route(path):
+                raise
+            return await super().get_response("index.html", scope)
+        if response.status_code == 404 and self._is_app_route(path):
+            return await super().get_response("index.html", scope)
+        return response
+
+
+class SecurityHeadersMiddleware:
+    """Add baseline security headers without overriding ones a route sets.
+
+    Pure ASGI (not BaseHTTPMiddleware) so streaming responses are untouched.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Render and other proxies terminate TLS and forward the scheme.
+        forwarded = dict(scope.get("headers") or []).get(b"x-forwarded-proto", b"")
+        is_https = scope.get("scheme") == "https" or forwarded.split(b",")[0].strip() == b"https"
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {name.lower() for name, _ in headers}
+
+                def setdefault(name: bytes, value: str) -> None:
+                    if name not in present:
+                        headers.append((name, value.encode("latin-1")))
+                        present.add(name)
+
+                setdefault(b"x-content-type-options", "nosniff")
+                setdefault(b"referrer-policy", "strict-origin-when-cross-origin")
+                setdefault(b"x-frame-options", "DENY")
+                if is_https:
+                    setdefault(
+                        b"strict-transport-security", "max-age=31536000; includeSubDomains"
+                    )
+                content_type = dict(headers).get(b"content-type", b"")
+                # Routes with their own CSP (e.g. published artifacts, which are
+                # sandboxed) keep it as-is and get no report-only policy either.
+                if content_type.startswith(b"text/html") and b"content-security-policy" not in present:
+                    setdefault(b"content-security-policy", HTML_CSP)
+                    setdefault(b"content-security-policy-report-only", HTML_CSP_REPORT_ONLY)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 def create_app(
     config: Optional[ApiConfig] = None,
     model_engine: Optional[ModelEngine] = None,
@@ -787,6 +895,8 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Added last so it is the outermost layer and also covers CORS preflights.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     @app.get("/health")
     async def health_check():
@@ -952,7 +1062,7 @@ def create_app(
 
     frontend_dir = os.environ.get("DABBA_FRONTEND_DIR")
     if frontend_dir and Path(frontend_dir).is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount("/", SPAStaticFiles(directory=frontend_dir, html=True), name="frontend")
     else:
 
         @app.get("/")

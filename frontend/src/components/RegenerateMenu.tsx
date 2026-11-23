@@ -32,6 +32,7 @@ export function RegenerateMenu({ onRegenerate }: RegenerateMenuProps) {
         onClick={() => onRegenerate()}
         onContextMenu={(e) => { e.preventDefault(); setOpen(o => !o) }}
         title="Regenerate (right-click for model options)"
+        aria-label="Regenerate reply"
         className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
       >
         <RefreshCw className="w-3 h-3" />
@@ -39,6 +40,9 @@ export function RegenerateMenu({ onRegenerate }: RegenerateMenuProps) {
       <button
         onClick={() => setOpen(o => !o)}
         title="Regenerate with a different model"
+        aria-label="Regenerate with a different model"
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="px-0.5 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors text-[9px]"
       >
         ▾

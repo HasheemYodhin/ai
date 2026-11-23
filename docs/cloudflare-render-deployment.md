@@ -26,14 +26,58 @@ repository and branch.
 5. Copy the service URL, for example `https://dabba-api.onrender.com`.
 
 The Blueprint uses Render's paid Starter service because Render persistent
-disks are not available for free web services. For a temporary demo, remove
-the `disk` block and change `plan` to `free`, but all SQLite data will be
-ephemeral.
+disks are not available for free web services. To run on the free plan and
+still keep data, remove the `disk` block, change `plan` to `free`, and follow
+"Free persistence with Litestream and Cloudflare R2" below.
 
 The included Docker image uses the rule-based Dabba engine. Hosting a local
 GGUF model requires enough RAM/CPU (or GPU), storing the model separately, and
 setting `DABBA_MODEL_PATH` to its mounted path. Provider-backed models can be
 configured from the app after signup.
+
+## Free persistence with Litestream and Cloudflare R2
+
+Render's free web service wipes the disk on every restart, redeploy, and
+spin-down. The Docker image includes [Litestream](https://litestream.io),
+which copies `platform.db` and `conversations.db` to Cloudflare R2 about once
+a second and restores them when the container starts. Accounts, sessions,
+chats, and projects then survive restarts at no cost.
+
+1. In the Cloudflare dashboard, open **R2** and create a bucket, for example
+   `dabba-backup`. Note your **Account ID** shown on the R2 overview page.
+2. In **R2 > Manage API tokens**, create a token with **Object Read & Write**
+   permission, limited to that bucket. Copy the access key ID and secret.
+3. Generate a master key locally (keep it secret, never commit it):
+
+   ```bash
+   python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+4. In Render, open the service's **Environment** tab and add:
+
+   | Key | Value |
+   | --- | --- |
+   | `LITESTREAM_BUCKET` | The bucket name |
+   | `R2_ACCOUNT_ID` | Your Cloudflare account ID |
+   | `LITESTREAM_ACCESS_KEY_ID` | The R2 token's access key ID |
+   | `LITESTREAM_SECRET_ACCESS_KEY` | The R2 token's secret |
+   | `DABBA_MASTER_KEY` | The key from step 3 |
+
+5. Save. Render redeploys; sign up once, and your account remains after
+   restarts.
+
+Notes:
+
+- When `LITESTREAM_BUCKET` is unset, the container runs without Litestream.
+- The container refuses to start if `LITESTREAM_BUCKET` is set without the
+  other four values. `DABBA_MASTER_KEY` must stay the same; changing it makes
+  previously encrypted secrets unreadable.
+- Writes made in the last second before a crash can be lost.
+- Only the two databases are backed up. Settings saved to `cli_config.yaml`
+  (for example keys saved in the app) are not; set provider keys as Render
+  environment variables instead (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `NVIDIA_API_KEY`, ...).
+- Check R2's current free-tier limits in Cloudflare's pricing page.
 
 ## 3. Deploy the frontend on Cloudflare Pages
 

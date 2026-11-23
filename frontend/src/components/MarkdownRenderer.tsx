@@ -8,11 +8,12 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
-import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X } from 'lucide-react'
+import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X, Lock } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/api/client'
+import { useAuth } from '@/hooks/useAuth'
 
 // Blocks at or above this size open as a compact artifact card (see
 // ArtifactPanel) instead of rendering the full code inline — keeps long
@@ -168,7 +169,11 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated?: boolean; durationMs: number; phase?: string } | null>(null)
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
-  const canRun = RUNNABLE_LANGUAGES.has(language.toLowerCase())
+  const { isAdmin } = useAuth()
+  const isRunnableLanguage = RUNNABLE_LANGUAGES.has(language.toLowerCase())
+  // /v1/code/execute is admin-only; regular users see a disabled Run button
+  // with an explanation instead of a raw "Administrator access" error.
+  const canRun = isRunnableLanguage && isAdmin
 
   const handleCopy = useCallback(async () => {
     try {
@@ -199,7 +204,17 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
     }
   }, [language, code, stdin])
 
-  const runner = canRun ? (
+  const runner = isRunnableLanguage && !isAdmin ? (
+    <button
+      disabled
+      title="Running code is admin only"
+      aria-label="Run (admin only)"
+      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 text-white opacity-40 cursor-not-allowed"
+    >
+      <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+      Run
+    </button>
+  ) : canRun ? (
     <>
       <button
         onClick={handleRun}

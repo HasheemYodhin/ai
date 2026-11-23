@@ -3,7 +3,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { ChevronDown, Check, Search, KeyRound, RefreshCw, Loader2 } from 'lucide-react'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
-import { EFFORT_TIERS, providerLabel } from '@/lib/models'
+import { EFFORT_TIERS, providerLabel, rememberModelNames, modelDisplayName, formatContextWindow } from '@/lib/models'
 import { ApiKeyPromptModal } from './ApiKeyPromptModal'
 import { TierStack } from './TierStack'
 import type { ModelInfo } from '@/types'
@@ -27,8 +27,15 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
         setOpenMenu(null)
       }
     }
+    // U7: a menu left open over the chat must not linger while the page
+    // scrolls beneath it; scrolling inside the menu itself is ignored.
+    function handleScroll(e: Event) {
+      if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return
+      setOpenMenu(null)
+    }
+    document.addEventListener('scroll', handleScroll, true)
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    return () => { document.removeEventListener('scroll', handleScroll, true); document.removeEventListener('mousedown', handleClickOutside) }
   }, [])
 
   useEffect(() => {
@@ -38,6 +45,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
     }
   }, [openMenu])
 
+  useEffect(() => { rememberModelNames(models) }, [models])
   const current = models.find(m => m.id === settings.model)
 
   // Group filtered models by provider, preserving catalog order.
@@ -50,14 +58,37 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
           m.provider.toLowerCase().includes(q)
         )
       : models
-    const groups: { provider: string; items: ModelInfo[] }[] = []
+    // U3: the active model is pinned in a "Current" section at the top, and
+    // models that still need an API key are grouped last, so the list starts
+    // with what you're using and what's ready to use.
+    const groups: { provider: string; label: string; items: ModelInfo[] }[] = []
+    const active = filtered.find(m => m.id === settings.model)
+    if (active) groups.push({ provider: '__current', label: 'Current', items: [active] })
+    const needsKey: ModelInfo[] = []
     for (const m of filtered) {
+      if (m === active) continue
+      if (!m.has_key) { needsKey.push(m); continue }
       let g = groups.find(x => x.provider === m.provider)
-      if (!g) { g = { provider: m.provider, items: [] }; groups.push(g) }
+      if (!g) { g = { provider: m.provider, label: providerLabel(m.provider), items: [] }; groups.push(g) }
       g.items.push(m)
     }
+    if (needsKey.length) groups.push({ provider: '__needs_key', label: 'Needs API key', items: needsKey })
     return groups
-  }, [models, search])
+  }, [models, search, settings.model])
+
+  // Arrow keys move between model options (and from the search box into the
+  // list); Enter/Space activate the focused option as a normal button.
+  const handleListKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+    const options = Array.from(modelMenuRef.current?.querySelectorAll<HTMLElement>('[data-model-option]') ?? [])
+    if (!options.length) return
+    e.preventDefault()
+    const at = options.indexOf(document.activeElement as HTMLElement)
+    const next = e.key === 'ArrowDown'
+      ? options[at === -1 ? 0 : Math.min(at + 1, options.length - 1)]
+      : at <= 0 ? searchRef.current ?? options[0] : options[at - 1]
+    next.focus()
+  }
 
   const selectModel = (m: ModelInfo) => {
     if (!m.has_key) {
@@ -82,10 +113,11 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
         )}
         aria-expanded={openMenu === 'model'}
         aria-haspopup="dialog"
+        aria-label={`Model: ${current?.name ?? modelDisplayName(settings.model)}. Change model`}
         title="Switch model"
       >
         <span className="text-[13px] font-medium text-text-primary dark:text-text-dark-primary truncate max-w-[200px]">
-          {current?.name ?? settings.model}
+          {current?.name ?? modelDisplayName(settings.model)}
         </span>
         {current && <TierStack tier={current.tier} />}
         <ChevronDown className="w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" strokeWidth={1.5} />
@@ -97,6 +129,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
         className="flex items-center gap-2 h-8 px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
         aria-expanded={openMenu === 'effort'}
         aria-haspopup="dialog"
+        aria-label={`Reasoning effort: ${currentEffort.label}. Change effort`}
         title="Reasoning effort"
       >
         <TierStack tier={currentEffort.id} />
@@ -108,7 +141,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Model dropdown */}
       {openMenu === 'model' && (
-        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} className={cn('absolute w-80 max-h-[420px] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
+        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} onKeyDown={handleListKeyDown} className={cn('absolute w-80 max-h-[420px] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
           <div className="p-2 border-b border-border dark:border-border-dark">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" strokeWidth={1.5} />
@@ -133,13 +166,16 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
               grouped.map(group => (
                 <div key={group.provider} className="mb-2">
                   <div className="px-3 pt-2 pb-1 text-xs text-text-tertiary dark:text-text-dark-tertiary">
-                    {providerLabel(group.provider)}
+                    {group.label}
                   </div>
                   {group.items.map(model => {
                     const active = model.id === settings.model
                     return (
                       <button
                         key={model.id}
+                        data-model-option
+                        aria-current={active ? 'true' : undefined}
+                        aria-label={`${model.name}${active ? ' (current)' : ''}${model.has_key ? '' : ' (needs API key)'}`}
                         onClick={() => selectModel(model)}
                         className={cn(
                           'w-full flex items-start gap-2 px-3 py-2 text-left transition-colors',
@@ -167,7 +203,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
                           </p>
                           <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
                             {[
-                              model.contextWindow && `${Math.round(model.contextWindow / 1000)}k context`,
+                              formatContextWindow(model.contextWindow),
                               model.supportsVision && 'Vision',
                               model.supportsThinking && 'Reasoning',
                               model.keySource && `Key: ${model.keySource}`,

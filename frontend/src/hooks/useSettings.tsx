@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   frequencyPenalty: 0,
   stop: [],
   streaming: true,
-  typingSpeed: 10,
+  typingSpeed: 0,
   systemPrompt: 'You are Dabba, a production-grade custom transformer assistant.',
   modelDefaults: {},
   defaultPermissionMode: 'ask',

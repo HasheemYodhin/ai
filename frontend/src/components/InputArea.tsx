@@ -302,7 +302,7 @@ export function InputArea({
                 ? <ConnectorMenuIcon name={connectorName} compact />
                 : <modeChip.icon className="w-3.5 h-3.5" />}
               {modeChip.label}
-              <button onClick={() => setMode({ kind: 'chat' })} className="ml-0.5 hover:text-accent-hover">
+              <button onClick={() => setMode({ kind: 'chat' })} aria-label={`Turn off ${modeChip.label}`} title={`Turn off ${modeChip.label}`} className="ml-0.5 hover:text-accent-hover">
                 <X className="w-3 h-3" />
               </button>
             </span>
@@ -310,6 +310,7 @@ export function InputArea({
               <button
                 type="button"
                 onClick={() => setPlanModeEnabled(v => !v)}
+                aria-pressed={planModeEnabled}
                 title="Propose a plan and wait for your approval before it runs"
                 className={cn(
                   'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
@@ -476,13 +477,17 @@ export function InputArea({
             <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
             <span>new line</span>
           </div>
-          {charCount > 0 && (
+          {/* Hidden for whitespace-only input, which isn't sendable anyway. */}
+          {value.trim().length > 0 && (
             <span className={cn(
               'text-xs font-mono tabular-nums text-text-tertiary dark:text-text-dark-tertiary',
               isOverLimit && 'text-red-500',
               isNearLimit && !isOverLimit && 'text-amber-500',
             )}>
-              {isNearLimit ? `${charCount}/${maxChars} characters` : `~${Math.ceil(charCount / 4)} tokens`}
+              {isNearLimit ? `${charCount}/${maxChars} characters` : (() => {
+                const tokens = Math.ceil(charCount / 4)
+                return `~${tokens} ${tokens === 1 ? 'token' : 'tokens'}`
+              })()}
             </span>
           )}
         </div>

@@ -7,7 +7,7 @@ import type { ActiveMode } from './PlusMenu'
 import { ArtifactProvider, useArtifact } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import type { PendingApproval, PendingPlanApproval } from '@/hooks/useChat'
-import { ChevronDown, Ghost, ShieldAlert, ListChecks, BookOpenText, Code2, Gauge, Bug, Scale, Play, type LucideIcon } from 'lucide-react'
+import { ChevronDown, Ghost, ShieldAlert, ListChecks, BookOpenText, Code2, Gauge, Bug, Scale, Play, MoreHorizontal, Trash2, Lightbulb, FileText, CalendarCheck, type LucideIcon } from 'lucide-react'
 
 // Pulls in react-syntax-highlighter (same heavy dep MarkdownRenderer lazy-loads)
 // — keep it out of the main bundle and only fetch it once an artifact opens.
@@ -33,6 +33,8 @@ interface ChatWindowProps {
   onApprovalDecision: (approved: boolean) => void
   pendingPlanApproval?: PendingPlanApproval | null
   onPlanApprovalDecision: (approved: boolean) => void
+  /** The conversation's saved title, the same one the sidebar shows. */
+  conversationTitle?: string
 }
 
 const FOLLOW_UPS: { label: string; icon: LucideIcon; prompt: string }[] = [
@@ -44,10 +46,19 @@ const FOLLOW_UPS: { label: string; icon: LucideIcon; prompt: string }[] = [
   { label: 'How to run', icon: Play, prompt: 'What are the step-by-step instructions to run and test this code?' },
 ]
 
+// Starter prompts for the empty state. Clicking one sends it as the first message.
+const STARTERS: { label: string; icon: LucideIcon; prompt: string }[] = [
+  { label: 'Explain a concept', icon: Lightbulb, prompt: 'Explain how HTTPS keeps data private, in simple terms with an analogy.' },
+  { label: 'Write some code', icon: Code2, prompt: 'Write a Python function that removes duplicate items from a list while keeping their order, with a short example.' },
+  { label: 'Summarize text', icon: FileText, prompt: 'I will paste some text next. Summarize it in five bullet points and list any action items.' },
+  { label: 'Plan something', icon: CalendarCheck, prompt: 'Help me plan a productive week: ask me about my goals, then suggest a simple day-by-day schedule.' },
+]
+
 export function ChatWindow({
   messages, isLoading, onSend, onRunAgentMode, onGenerateImage, onStop, onClear, onEdit, onRegenerate,
   projects, currentProjectId, onAddToProject, initialMode, onInitialModeConsumed, isTemporary,
   pendingApproval, onApprovalDecision, pendingPlanApproval, onPlanApprovalDecision,
+  conversationTitle,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -87,7 +98,11 @@ export function ChatWindow({
   }, [])
 
   const isStreaming = isLoading && messages.length > 0 && messages[messages.length - 1].role === 'assistant'
-  const title = messages.find(m => m.role === 'user')?.content.split('\n')[0].slice(0, 80) || 'New chat'
+  // Prefer the saved title (auto-generated or renamed) so the header matches
+  // the sidebar; fall back to the first prompt line until one exists. The
+  // header truncates with an ellipsis via CSS rather than slicing mid-word.
+  const savedTitle = conversationTitle && conversationTitle !== 'New conversation' ? conversationTitle : ''
+  const title = savedTitle || messages.find(m => m.role === 'user')?.content.split('\n')[0] || 'New chat'
 
   const inputArea = (
     <InputArea
@@ -117,6 +132,15 @@ export function ChatWindow({
     setRevealingId(current => revealing ? id : current === id ? null : current)
   }, [])
   const lastMessage = messages[messages.length - 1]
+  const showFollowUps = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && revealingId !== lastMessage.id
+  // The chips render only once the reply has finished revealing, i.e. after
+  // the streaming auto-scroll ran, so they used to sit below the fold, half
+  // hidden behind the composer. Scroll again when they appear.
+  useEffect(() => {
+    if (!showFollowUps || !isAutoScroll) return
+    const id = requestAnimationFrame(() => scrollToBottom(false))
+    return () => cancelAnimationFrame(id)
+  }, [showFollowUps, isAutoScroll, scrollToBottom])
   const followUpRow = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && revealingId !== lastMessage.id && (
     <div className="flex flex-wrap gap-2 pl-10">
       {FOLLOW_UPS.map((f, idx) => (
@@ -146,6 +170,23 @@ export function ChatWindow({
           </h1>
 
           {inputArea}
+
+          <div className="mt-2 grid grid-cols-1 gap-2 px-4 sm:grid-cols-2">
+            {STARTERS.map(starter => (
+              <button
+                key={starter.label}
+                onClick={() => onSend(starter.prompt)}
+                disabled={isLoading}
+                className="flex items-start gap-3 rounded-2xl border border-border p-3 text-left transition-colors hover:bg-surface-secondary disabled:opacity-50 dark:border-border-dark dark:hover:bg-surface-dark-tertiary"
+              >
+                <starter.icon className="mt-0.5 h-4 w-4 flex-shrink-0 text-accent" strokeWidth={1.5} aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-text-primary dark:text-text-dark-primary">{starter.label}</span>
+                  <span className="mt-0.5 block text-xs text-text-secondary line-clamp-2 dark:text-text-dark-secondary">{starter.prompt}</span>
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -153,22 +194,16 @@ export function ChatWindow({
     <div className="flex flex-col h-full">
       <header className="flex items-center justify-between h-14 px-6">
         <div className="flex items-center gap-3 min-w-0">
-          <span className="truncate text-[15px] font-medium text-text-primary dark:text-text-dark-primary">{title}</span>
+          <span className="truncate text-[15px] font-medium text-text-primary dark:text-text-dark-primary" title={title}>{title}</span>
           {temporaryBadge}
         </div>
-        <button
-          onClick={onClear}
-          aria-label="Clear conversation"
-          className="h-8 text-[13px] px-3 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-red-600 dark:hover:text-red-400 transition-colors"
-        >
-          Clear chat
-        </button>
+        <ConversationActionsMenu onClear={onClear} />
       </header>
 
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto scrollbar-thin px-4 py-6"
+        className="flex-1 overflow-y-auto scrollbar-thin px-4 pt-6 pb-10"
       >
         <div className="max-w-3xl mx-auto space-y-6">
           {hiddenCount > 0 && (
@@ -284,6 +319,65 @@ export function ChatWindow({
         </div>
       )}
     </ArtifactProvider>
+  )
+}
+
+// "⋯" menu in the chat header. Holds destructive actions (Clear chat) so they
+// don't sit next to the title as plain text.
+function ConversationActionsMenu({ onClear }: { onClear: () => void }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div ref={rootRef} className="relative flex-shrink-0">
+      <button
+        ref={buttonRef}
+        onClick={() => setOpen(o => !o)}
+        aria-label="Conversation actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Conversation actions"
+        className="p-1.5 rounded-lg text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary dark:text-text-dark-secondary dark:hover:bg-surface-dark-tertiary dark:hover:text-text-dark-primary"
+      >
+        <MoreHorizontal className="h-4 w-4" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-30 mt-1 w-44 rounded-xl border border-border bg-surface py-1 shadow-lg dark:border-border-dark dark:bg-surface-dark-secondary">
+          <button
+            role="menuitem"
+            autoFocus
+            onClick={() => {
+              setOpen(false)
+              if (window.confirm('Clear all messages in this chat? This cannot be undone.')) onClear()
+            }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-red-600 transition-colors hover:bg-surface-tertiary dark:text-red-400 dark:hover:bg-surface-dark-tertiary"
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Clear chat
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

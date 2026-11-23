@@ -1,10 +1,11 @@
 import { useDialogFocus } from '@/hooks/useDialogFocus'
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useSettings, type AppSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
 import { useModels } from '@/hooks/useModels'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
 import { useProviderKeys } from '@/hooks/useProviderKeys'
+import { useAuth } from '@/hooks/useAuth'
 import { apiClient } from '@/api/client'
 import { EFFORT_TIERS, providerLabel } from '@/lib/models'
 import { loadConversationsForUsage, computeUsageStats } from '@/lib/usageStats'
@@ -86,11 +87,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }
 
+  // /v1/agent/keys and /v1/mcp/* are admin-only; regular users get an
+  // explanation instead of "Failed to load ... (status 403)".
+  const { isAdmin } = useAuth()
   const { keys: providerKeys, isLoading: keysLoading, error: keysError, reload: reloadKeys } =
-    useProviderKeys(isOpen && activeTab === 'keys')
+    useProviderKeys(isAdmin && isOpen && activeTab === 'keys')
 
   const { servers: mcpServers, isLoading: mcpLoading, error: mcpError, reload: reloadMcp } =
-    useMcpStatus(isOpen && activeTab === 'tools')
+    useMcpStatus(isAdmin && isOpen && activeTab === 'tools')
 
   const usageStats = useMemo(
     () => (activeTab === 'usage' ? computeUsageStats(loadConversationsForUsage()) : null),
@@ -116,7 +120,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     return groups
   }, [models, modelSearch])
 
-  const dialogRef = useDialogFocus(isOpen, onClose)
+  // Theme buttons apply instantly as a preview. Remember the theme the modal
+  // opened with so Cancel / ✕ / Escape / outside click can restore it; only
+  // Save keeps the new one.
+  const themeOnOpenRef = useRef(theme)
+  useEffect(() => {
+    if (isOpen) themeOnOpenRef.current = theme
+    // Only when the modal opens; later theme changes are previews.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen])
+  const handleDismiss = useCallback(() => {
+    setTheme(themeOnOpenRef.current)
+    onClose()
+  }, [onClose, setTheme])
+
+  const dialogRef = useDialogFocus(isOpen, handleDismiss)
 
   if (!isOpen) return null
 
@@ -151,6 +169,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }
 
   const handleSave = () => {
+    themeOnOpenRef.current = theme
     const stop = stopInput.split(',').map(s => s.trim()).filter(Boolean)
     updateSettings({ ...localSettings, stop })
     setIsSavedAlert(true)
@@ -223,7 +242,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
       <div
         className="fixed inset-0"
-        onClick={onClose}
+        onClick={handleDismiss}
       />
 
       {/* Claude-style 2-Column Dialog Panel */}
@@ -279,7 +298,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 : activeTab + ' settings'}
             </h3>
             <button
-              onClick={onClose}
+              onClick={handleDismiss}
               aria-label="Close settings"
               className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
@@ -324,6 +343,43 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="space-y-4 pt-3 border-t border-border dark:border-border-dark">
+                  <label className="flex items-center justify-between gap-3 pt-2">
+                    <span className="text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                      Stream responses
+                    </span>
+                    <Toggle
+                      label="Stream responses"
+                      checked={localSettings.streaming}
+                      onChange={v => setLocalSettings(prev => ({ ...prev, streaming: v }))}
+                    />
+                  </label>
+                  <label className="flex items-center justify-between gap-3 pt-3 border-t border-border dark:border-border-dark">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                      <Bell className="w-3.5 h-3.5" /> Desktop notifications
+                    </span>
+                    <Toggle
+                      label="Desktop notifications"
+                      checked={localSettings.desktopNotifications}
+                      onChange={v => {
+                        setLocalSettings(prev => ({ ...prev, desktopNotifications: v }))
+                        if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
+                          void Notification.requestPermission()
+                        }
+                      }}
+                    />
+                  </label>
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary leading-relaxed">
+                    Get an OS notification when a Cowork run or background process finishes, fails, or gets interrupted. In-app banners always show regardless of this setting.
+                  </p>
+                </div>
+
+                {/* Developer settings: rarely changed, and the wrong value
+                    disconnects the app, so they sit behind a disclosure. */}
+                <details className="pt-3 border-t border-border dark:border-border-dark group">
+                  <summary className="cursor-pointer text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                    Advanced (developer)
+                  </summary>
+                  <div className="space-y-4 pt-3">
                   <div className="space-y-1.5">
                     <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
                       API Server Base URL
@@ -359,50 +415,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     </div>
                   </div>
 
-                  <label className="flex items-center justify-between gap-3 pt-2">
-                    <span className="text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
-                      Stream responses
-                    </span>
-                    <Toggle
-                      label="Stream responses"
-                      checked={localSettings.streaming}
-                      onChange={v => setLocalSettings(prev => ({ ...prev, streaming: v }))}
-                    />
-                  </label>
-                  {localSettings.streaming && (
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-semibold text-text-secondary dark:text-text-dark-secondary">Typing speed</span>
-                        <span className="font-semibold text-accent">{localSettings.typingSpeed} ms/token</span>
-                      </div>
-                      <input
-                        type="range" min="0" max="60" step="5"
-                        value={localSettings.typingSpeed}
-                        onChange={e => setLocalSettings(prev => ({ ...prev, typingSpeed: parseInt(e.target.value) }))}
-                        className="w-full accent-accent bg-surface-tertiary dark:bg-surface-dark-tertiary h-1.5 rounded-lg cursor-pointer"
-                      />
-                    </div>
-                  )}
-
-                  <label className="flex items-center justify-between gap-3 pt-3 border-t border-border dark:border-border-dark">
-                    <span className="flex items-center gap-1.5 text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
-                      <Bell className="w-3.5 h-3.5" /> Desktop notifications
-                    </span>
-                    <Toggle
-                      label="Desktop notifications"
-                      checked={localSettings.desktopNotifications}
-                      onChange={v => {
-                        setLocalSettings(prev => ({ ...prev, desktopNotifications: v }))
-                        if (v && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-                          void Notification.requestPermission()
-                        }
-                      }}
-                    />
-                  </label>
-                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary leading-relaxed">
-                    Get an OS notification when a Cowork run or background process finishes, fails, or gets interrupted. In-app banners always show regardless of this setting.
-                  </p>
-                </div>
+                  </div>
+                </details>
               </div>
             )}
 
@@ -573,7 +587,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             )}
 
             {/* API Keys Tab */}
-            {activeTab === 'keys' && (
+            {activeTab === 'keys' && isAdmin && (
               <div className="space-y-4 animate-fade-in">
                 <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
                   Keys are stored server-side (in <code className="font-mono text-[11px]">cli_config.yaml</code>) and used for any model
@@ -680,7 +694,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             )}
 
             {/* Tools (MCP) Tab */}
-            {activeTab === 'tools' && (
+            {(activeTab === 'keys' || activeTab === 'tools') && !isAdmin && (
+              <div className="p-3.5 rounded-2xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed animate-fade-in">
+                {activeTab === 'keys'
+                  ? 'Provider API keys are managed by your Dabba administrator, for example as server environment variables. Models with a key configured are ready to use from the model picker.'
+                  : 'MCP tools are managed by your Dabba administrator.'}
+              </div>
+            )}
+            {activeTab === 'tools' && isAdmin && (
               <div className="space-y-4 animate-fade-in">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
@@ -949,7 +970,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             ) : null}
 
             <button
-              onClick={onClose}
+              onClick={handleDismiss}
               className="px-4 py-2 rounded-xl text-xs font-semibold hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               Cancel

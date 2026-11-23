@@ -30,8 +30,10 @@ export function useModels(): UseModelsReturn {
     setIsLoading(true)
     setError(null)
 
+    // The catalog is shared and cached briefly across components (see
+    // ApiClient.cachedRead); an explicit reload() always refetches.
     apiClient
-      .fetchModels(controller.signal)
+      .fetchModels(controller.signal, { force: reloadKey > 0 })
       .then(catalog => {
         if (catalog.models?.length) {
           setModels(catalog.models)

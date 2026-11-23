@@ -278,6 +278,13 @@ export interface Conversation {
   pinned?: boolean
   customTitle?: boolean
   projectId?: string | null
+  /** Number of messages on the server; set by the lightweight list. */
+  messageCount?: number
+  /**
+   * False for sidebar entries whose messages haven't been fetched yet
+   * (`messages` is then []). Undefined/true means `messages` is complete.
+   */
+  messagesLoaded?: boolean
 }
 
 export interface StreamChunk {

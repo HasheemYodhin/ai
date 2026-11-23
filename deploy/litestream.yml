@@ -1,0 +1,23 @@
+# Litestream continuously copies Dabba's SQLite databases to Cloudflare R2 and
+# restores them on startup, so data survives restarts on hosts whose disk is
+# wiped (e.g. Render's free web service). Values come from environment
+# variables; see docs/cloudflare-render-deployment.md.
+dbs:
+  - path: ${DABBA_DATA_DIR}/platform.db
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: platform.db
+      endpoint: ${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+      region: auto
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+  - path: ${DABBA_DATA_DIR}/conversations.db
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: conversations.db
+      endpoint: ${R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+      region: auto
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}

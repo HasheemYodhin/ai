@@ -56,6 +56,9 @@ export function DownloadMenu({ content, baseName }: DownloadMenuProps) {
       <button
         onClick={() => setOpen(o => !o)}
         title="Download"
+        aria-label="Download reply"
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
       >
         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}

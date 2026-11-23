@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, KeyRound, Eye, EyeOff, Loader2 } from 'lucide-react'
 import { apiClient } from '@/api/client'
 import { providerLabel } from '@/lib/models'
+import { useAuth } from '@/hooks/useAuth'
 
 interface ApiKeyPromptModalProps {
   /** The key key (provider name or model ID) to save this key under. */
@@ -21,6 +22,9 @@ interface ApiKeyPromptModalProps {
  * same /v1/agent/keys endpoint the Settings > API Keys tab uses.
  */
 export function ApiKeyPromptModal({ target, provider, modelName, onClose, onSaved }: ApiKeyPromptModalProps) {
+  // Saving keys (POST /v1/agent/keys) is admin-only because keys are shared by
+  // every account; regular users get instructions instead of a failing form.
+  const { isAdmin } = useAuth()
   const [key, setKey] = useState('')
   const [showKey, setShowKey] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -62,6 +66,21 @@ export function ApiKeyPromptModal({ target, provider, modelName, onClose, onSave
           </button>
         </div>
 
+        {!isAdmin ? (
+          <>
+            <div className="p-5">
+              <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
+                <span className="font-medium text-text-primary dark:text-text-dark-primary">{modelName}</span> needs a {providerLabel(provider)} API key,
+                which only your Dabba administrator can add (for example as a server environment variable). Pick another model for now.
+              </p>
+            </div>
+            <div className="px-5 py-4 border-t border-border dark:border-border-dark flex items-center justify-end bg-surface-secondary dark:bg-surface-dark-tertiary">
+              <button onClick={onClose} className="px-4 py-2 rounded-xl text-xs font-semibold bg-accent hover:bg-accent-hover text-white transition-colors">
+                OK
+              </button>
+            </div>
+          </>
+        ) : (<>
         <div className="p-5 space-y-3">
           <p className="text-xs text-text-secondary dark:text-text-dark-secondary">
             <span className="font-medium text-text-primary dark:text-text-dark-primary">{modelName}</span> needs a {providerLabel(provider)} API key.
@@ -103,6 +122,7 @@ export function ApiKeyPromptModal({ target, provider, modelName, onClose, onSave
             Save & use model
           </button>
         </div>
+        </>)}
       </div>
     </div>
   )

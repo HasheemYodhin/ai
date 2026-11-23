@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useReducer } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
 import type { Conversation, Message } from '@/types'
@@ -30,7 +30,12 @@ interface UseHistoryReturn {
   retrySaves: () => void
   createConversation: (messages?: Message[]) => string
   saveConversation: (messages: Message[], id?: string) => string
+  /** Sync lookup; `messages` is [] for a chat whose messages aren't loaded yet. */
   loadConversation: (id: string) => Conversation | null
+  /** Selects a chat and resolves with its full messages (fetched if needed). */
+  loadConversationAsync: (id: string) => Promise<Conversation | null>
+  /** Any chat by id, including the current unsent draft (not in `conversations`). */
+  getConversation: (id: string | null) => Conversation | null
   deleteConversation: (id: string) => void
   renameConversation: (id: string, title: string, automatic?: boolean) => void
   togglePin: (id: string) => void
@@ -59,7 +64,14 @@ function storeSaveQueue(userId: string, pending: Map<string, Conversation>) {
   }
 }
 
-const SAVE_DEBOUNCE_MS = 600
+// Trailing debounce per conversation: one PUT per burst of updates (the user
+// message, streamed reply and auto-title of one turn usually land together).
+const SAVE_DEBOUNCE_MS = 800
+
+/** True when `messages` is a real (possibly empty) list, not an unloaded placeholder. */
+function hasLoadedMessages(conv: Conversation): boolean {
+  return conv.messagesLoaded !== false
+}
 
 /**
  * Conversations now live server-side (SQLite, scoped by userId) instead of
@@ -85,6 +97,14 @@ export function useHistory(userId: string | null): UseHistoryReturn {
   const [isLoading, setIsLoading] = useState(false)
   const writes = useRef(new Map<string, Promise<void>>())
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  // Send functions for debounced saves that haven't fired yet, so they can be
+  // flushed early (tab hidden/closing, switching chats).
+  const pendingSends = useRef(new Map<string, (opts?: { keepalive?: boolean }) => void>())
+  // New chats stay here until their first message, so the sidebar never shows
+  // (or persists) empty "New conversation" entries that vanish on reload.
+  const drafts = useRef(new Map<string, Conversation>())
+  const [, bumpDrafts] = useReducer((n: number) => n + 1, 0)
+  const loads = useRef(new Map<string, Promise<Conversation | null>>())
 
   // (Re)load from the backend whenever the logged-in user changes.
   useEffect(() => {
@@ -93,6 +113,14 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       setCurrentId(null)
       return
     }
+    // Each ref holds one Map for the hook's lifetime (never reassigned), so
+    // capturing them here is equivalent and satisfies react-hooks lint.
+    const timers = saveTimers.current
+    const sends = pendingSends.current
+    const draftMap = drafts.current
+    const loadMap = loads.current
+    const saves = pendingSaves.current
+    const failed = failedSaves.current
     const controller = new AbortController()
     const restored = readSaveQueue(userId)
     for (const conversation of restored) {
@@ -116,16 +144,39 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       storeSaveQueue(userId, pendingSaves.current)
       setHasUnsavedChanges(failedSaves.current.size > 0)
       updateConversations(previous => {
-        for (const draft of previous) {
-          if (!indexed.has(draft.id) && !draft.messages.length) indexed.set(draft.id, draft)
+        // Keep messages already loaded in this session; the light list only
+        // carries metadata.
+        for (const local of previous) {
+          const remote = indexed.get(local.id)
+          if (remote && remote.messagesLoaded === false && hasLoadedMessages(local) && local.updatedAt >= remote.updatedAt) {
+            indexed.set(local.id, { ...remote, messages: local.messages, messagesLoaded: true })
+          }
         }
         return [...indexed.values()].sort((a, b) => b.updatedAt - a.updatedAt)
       })
     }
 
+    // The light list has no message bodies. App restores the last open chat
+    // (key below, written by App.tsx) as soon as loading ends, so fetch that
+    // one chat's messages before finishing the load.
+    const withRestoredChat = async (remote: Conversation[]): Promise<Conversation[]> => {
+      const restoredId = localStorage.getItem(`dabba_current_conversation_id_${userId}`)
+      const index = remote.findIndex(c => c.id === restoredId)
+      if (index < 0 || remote[index].messagesLoaded !== false) return remote
+      try {
+        const full = await apiClient.fetchConversation(remote[index].id, controller.signal)
+        const next = [...remote]
+        next[index] = { ...remote[index], messages: full.messages, messagesLoaded: true }
+        return next
+      } catch {
+        return remote
+      }
+    }
+
     setIsLoading(true)
     apiClient
       .fetchConversations(userId, controller.signal)
+      .then(withRestoredChat)
       .then(mergeHistory)
       .catch(err => {
         if (err.name !== 'AbortError') {
@@ -136,10 +187,13 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       .finally(() => { if (!controller.signal.aborted) setIsLoading(false) })
     return () => {
       controller.abort()
-      for (const timer of saveTimers.current.values()) clearTimeout(timer)
-      saveTimers.current.clear()
-      pendingSaves.current.clear()
-      failedSaves.current.clear()
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+      sends.clear()
+      draftMap.clear()
+      loadMap.clear()
+      saves.clear()
+      failed.clear()
       setHasUnsavedChanges(false)
     }
   }, [userId, updateConversations])
@@ -151,13 +205,22 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     const pending = saveTimers.current.get(conv.id)
     if (pending) clearTimeout(pending)
 
-    const send = () => {
+    const send = (opts: { keepalive?: boolean } = {}) => {
       saveTimers.current.delete(conv.id)
+      pendingSends.current.delete(conv.id)
       const previous = writes.current.get(conv.id) ?? Promise.resolve()
       const write = previous.then(async () => {
         if (activeUser.current !== userId || pendingSaves.current.get(conv.id) !== conv) return
         try {
-          await apiClient.saveConversationRemote(userId, conv)
+          let toSave = conv
+          if (!hasLoadedMessages(conv)) {
+            // Metadata change (rename/pin/project) on a chat never opened:
+            // its `messages` is a placeholder [], and a PUT would erase the
+            // real history. Fetch the stored messages and save those.
+            const stored = await apiClient.fetchConversation(conv.id)
+            toSave = { ...conv, messages: stored.messages, messagesLoaded: true }
+          }
+          await apiClient.saveConversationRemote(userId, toSave, opts)
           if (activeUser.current !== userId) return
           if (pendingSaves.current.get(conv.id) === conv) {
             pendingSaves.current.delete(conv.id)
@@ -177,8 +240,34 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     }
 
     if (immediate) send()
-    else saveTimers.current.set(conv.id, setTimeout(send, SAVE_DEBOUNCE_MS))
+    else {
+      pendingSends.current.set(conv.id, send)
+      saveTimers.current.set(conv.id, setTimeout(() => send(), SAVE_DEBOUNCE_MS))
+    }
   }, [userId])
+
+  /** Send debounced saves now (one chat, or all). */
+  const flushSaves = useCallback((id?: string, opts?: { keepalive?: boolean }) => {
+    for (const [conversationId, send] of [...pendingSends.current]) {
+      if (id && conversationId !== id) continue
+      const timer = saveTimers.current.get(conversationId)
+      if (timer) clearTimeout(timer)
+      send(opts)
+    }
+  }, [])
+
+  // Don't lose the last debounced save when the tab is hidden or closed.
+  // (Unsent saves are also kept in localStorage and retried on next load.)
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushSaves(undefined, { keepalive: true }) }
+    const onPageHide = () => flushSaves(undefined, { keepalive: true })
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', onPageHide)
+    return () => {
+      document.removeEventListener('visibilitychange', onHide)
+      window.removeEventListener('pagehide', onPageHide)
+    }
+  }, [flushSaves])
 
   const retrySaves = useCallback(() => {
     for (const conversation of conversationsRef.current) {
@@ -207,9 +296,16 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       updatedAt: now,
       tokenCount: countTokens(messages),
     }
-    updateConversations(prev => [conv, ...prev])
     setCurrentId(id)
-    if (messages.length) persist(conv, true)
+    if (messages.length) {
+      updateConversations(prev => [conv, ...prev])
+      persist(conv, true)
+    } else {
+      // Only the latest empty chat is kept; older untouched drafts are dropped.
+      drafts.current.clear()
+      drafts.current.set(id, conv)
+      bumpDrafts()
+    }
     return id
   }, [persist, updateConversations])
 
@@ -218,7 +314,31 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     const existingId = id ?? currentId
 
     if (existingId) {
-      const hadMessages = conversationsRef.current.some(conv => conv.id === existingId && conv.messages.length > 0)
+      const draft = drafts.current.get(existingId)
+      if (draft) {
+        if (!messages.length) return existingId
+        // First message: the draft becomes a real, saved conversation.
+        drafts.current.delete(existingId)
+        bumpDrafts()
+        const promoted: Conversation = {
+          ...draft,
+          messages,
+          title: draft.customTitle ? draft.title : generateTitle(messages),
+          updatedAt: now,
+          tokenCount: countTokens(messages),
+        }
+        updateConversations(prev => [promoted, ...prev])
+        persist(promoted)
+        return existingId
+      }
+      const target = conversationsRef.current.find(conv => conv.id === existingId)
+      if (target && !hasLoadedMessages(target)) {
+        // The chat view was never given this chat's real messages, so saving
+        // would overwrite stored history. Callers must use loadConversationAsync.
+        console.warn('Skipped saving a conversation whose messages were not loaded:', existingId)
+        return existingId
+      }
+      const hadMessages = (target?.messages.length ?? 0) > 0
       let updated: Conversation | undefined
       updateConversations(prev =>
         prev.map(c => {
@@ -226,6 +346,8 @@ export function useHistory(userId: string | null): UseHistoryReturn {
           updated = {
             ...c,
             messages,
+            messagesLoaded: true,
+            messageCount: messages.length,
             title: c.customTitle ? c.title : generateTitle(messages),
             updatedAt: now,
             tokenCount: countTokens(messages),
@@ -237,6 +359,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       return existingId
     }
 
+    if (!messages.length) return createConversation()
     const newId = uuidv4()
     const conv: Conversation = {
       id: newId,
@@ -248,20 +371,56 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     }
     updateConversations(prev => [conv, ...prev])
     setCurrentId(newId)
-    if (messages.length) persist(conv, true)
+    persist(conv, true)
     return newId
-  }, [currentId, persist, updateConversations])
+  }, [createConversation, currentId, persist, updateConversations])
+
+  const getConversation = useCallback((id: string | null): Conversation | null => {
+    if (!id) return null
+    return drafts.current.get(id) ?? conversationsRef.current.find(c => c.id === id) ?? null
+  }, [])
 
   const loadConversation = useCallback((id: string): Conversation | null => {
-    const conv = conversations.find(c => c.id === id) ?? null
+    const conv = getConversation(id)
     if (conv) setCurrentId(id)
     return conv
-  }, [conversations])
+  }, [getConversation])
+
+  const loadConversationAsync = useCallback(async (id: string): Promise<Conversation | null> => {
+    const conv = getConversation(id)
+    if (!conv) return null
+    // Send the chat we're leaving now rather than after the debounce.
+    if (currentId && currentId !== id) flushSaves(currentId)
+    setCurrentId(id)
+    if (hasLoadedMessages(conv)) return conv
+
+    // Share one request if the chat is opened twice quickly.
+    let load = loads.current.get(id)
+    if (!load) {
+      load = apiClient.fetchConversation(id).then(full => {
+        let merged: Conversation | null = null
+        updateConversations(prev => prev.map(c => {
+          if (c.id !== id) return c
+          // Local metadata (e.g. a rename made before opening) wins.
+          merged = { ...c, messages: full.messages, messagesLoaded: true, messageCount: full.messages.length }
+          return merged
+        }))
+        return merged
+      }).catch(err => {
+        console.error('Failed to load conversation:', err)
+        return null
+      }).finally(() => { loads.current.delete(id) })
+      loads.current.set(id, load)
+    }
+    return load
+  }, [currentId, flushSaves, getConversation, updateConversations])
 
   const deleteConversation = useCallback((id: string) => {
     const pending = saveTimers.current.get(id)
     if (pending) { clearTimeout(pending); saveTimers.current.delete(id) }
 
+    pendingSends.current.delete(id)
+    if (drafts.current.delete(id)) bumpDrafts()
     updateConversations(prev => prev.filter(c => c.id !== id))
     if (currentId === id) {
       setCurrentId(null)
@@ -279,9 +438,19 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     }
   }, [currentId, userId, updateConversations])
 
+  /** Apply a metadata change to an unsent draft. Returns true if `id` was a draft. */
+  const updateDraft = useCallback((id: string, change: (draft: Conversation) => Conversation): boolean => {
+    const draft = drafts.current.get(id)
+    if (!draft) return false
+    drafts.current.set(id, change(draft))
+    bumpDrafts()
+    return true
+  }, [])
+
   const renameConversation = useCallback((id: string, title: string, automatic = false) => {
     const trimmed = title.trim()
     if (!trimmed) return
+    if (updateDraft(id, d => (automatic && d.customTitle) ? d : { ...d, title: trimmed, customTitle: true })) return
     let updated: Conversation | undefined
     updateConversations(prev =>
       prev.map(c => {
@@ -290,10 +459,13 @@ export function useHistory(userId: string | null): UseHistoryReturn {
         return updated
       })
     )
-    if (updated) persist(updated, true)
-  }, [persist, updateConversations])
+    // Auto-titles arrive right after a reply, so fold them into that debounced
+    // save instead of sending a separate PUT; manual renames save at once.
+    if (updated) persist(updated, !automatic)
+  }, [persist, updateConversations, updateDraft])
 
   const assignToProject = useCallback((id: string, projectId: string | null) => {
+    if (updateDraft(id, d => ({ ...d, projectId }))) return
     let updated: Conversation | undefined
     updateConversations(prev =>
       prev.map(c => {
@@ -303,9 +475,10 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       })
     )
     if (updated) persist(updated, true)
-  }, [persist, updateConversations])
+  }, [persist, updateConversations, updateDraft])
 
   const togglePin = useCallback((id: string) => {
+    if (updateDraft(id, d => ({ ...d, pinned: !d.pinned }))) return
     let updated: Conversation | undefined
     updateConversations(prev =>
       prev.map(c => {
@@ -315,7 +488,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       })
     )
     if (updated) persist(updated, true)
-  }, [persist, updateConversations])
+  }, [persist, updateConversations, updateDraft])
 
   const exportAsJSON = useCallback((id: string): string | null => {
     const conv = conversations.find(c => c.id === id)
@@ -358,6 +531,8 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     createConversation,
     saveConversation,
     loadConversation,
+    loadConversationAsync,
+    getConversation,
     deleteConversation,
     renameConversation,
     togglePin,

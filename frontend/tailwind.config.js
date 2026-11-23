@@ -26,13 +26,15 @@ export default {
           light: '#d7f0e0',
           'dark-hover': '#4cbf7c',
         },
+        // Secondary/tertiary meet WCAG AA (4.5:1) on every surface color of
+        // their theme, including surface-tertiary hover/chip backgrounds.
         text: {
           primary: '#1f1e1d',
-          secondary: '#6b6a66',
-          tertiary: '#9a988f',
+          secondary: '#5f5e5a', // 6.49 white, 6.01 secondary, 5.50 tertiary
+          tertiary: '#6a6862', // 5.57 white, 5.16 secondary, 4.72 tertiary
           'dark-primary': '#f5f5f5',
           'dark-secondary': '#a3a3a3',
-          'dark-tertiary': '#737373',
+          'dark-tertiary': '#858585', // 5.69 black, 5.37 dark-secondary, 4.86 dark-tertiary
         },
       },
       fontFamily: {

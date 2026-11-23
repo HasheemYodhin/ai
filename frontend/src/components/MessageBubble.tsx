@@ -1,4 +1,5 @@
 import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
+import { modelDisplayName } from '@/lib/models'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
 import { AlertCircle, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
@@ -375,6 +376,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                           download={`dabba-image-${i + 1}.png`}
                           className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
                           title="Download image"
+                          aria-label={`Download image ${i + 1}`}
                         >
                           <ImageDown className="w-4 h-4" />
                         </a>
@@ -384,9 +386,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 )}
 
                 {message.reasoning && (
-                  <details className="mb-2 rounded-lg border border-border px-3 py-2 text-sm text-text-secondary dark:border-border-dark dark:text-text-dark-secondary">
+                  // The expanded text floats over the reply (absolute, scrollable)
+                  // instead of pushing the table/code below down ~280px, which
+                  // made clicks land on the wrong element.
+                  <details className="relative mb-2 rounded-lg border border-border px-3 py-2 text-sm text-text-secondary dark:border-border-dark dark:text-text-dark-secondary">
                     <summary className="cursor-pointer">Thinking</summary>
-                    <p className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words">{message.reasoning}</p>
+                    <p className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 shadow-lg dark:border-border-dark dark:bg-surface-dark-secondary">{message.reasoning}</p>
                   </details>
                 )}
 
@@ -461,7 +466,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           {/* Model + token usage on assistant replies */}
           {!isUser && !writing && !isError && message.model && (
             <span className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
-              {message.model}
+              {modelDisplayName(message.model)}
               {message.usage && ` · ${message.usage.totalTokens} tok`}
             </span>
           )}
@@ -473,7 +478,8 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
             )}>
               <button
                 onClick={handleCopy}
-                title="Copy"
+                title={copied ? 'Copied' : 'Copy'}
+                aria-label={copied ? 'Copied' : 'Copy message'}
                 className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
               >
                 {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
@@ -482,6 +488,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 <button
                   onClick={startEdit}
                   title="Edit"
+                  aria-label="Edit message"
                   className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
                 >
                   <Pencil className="w-3 h-3" />
@@ -505,6 +512,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 <button
                   onClick={handleToggleSpeak}
                   title={isSpeaking ? 'Stop' : 'Play aloud'}
+                  aria-label={isSpeaking ? 'Stop reading aloud' : 'Read reply aloud'}
                   className={cn(
                     'p-1.5 rounded-lg transition-colors',
                     isSpeaking

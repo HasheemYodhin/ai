@@ -19,6 +19,10 @@ function toProfile(user: PlatformUser): UserProfile {
 
 interface AuthContextType {
   currentUser: UserProfile | null
+  /** True when the server granted this account the admin role. Admin-only
+   *  endpoints (code execution, Cowork, MCP, hooks, schedules, background
+   *  processes) return 403 for everyone else, so the UI hides or disables them. */
+  isAdmin: boolean
   isReady: boolean
   signup: (name: string, email: string, password: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
@@ -27,6 +31,7 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
+  isAdmin: false,
   isReady: false,
   signup: async () => {},
   login: async () => {},
@@ -65,7 +70,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <AuthContext.Provider value={{ currentUser, isReady, signup, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, isAdmin: currentUser?.role === 'admin', isReady, signup, login, logout }}>
       {children}
     </AuthContext.Provider>
   )

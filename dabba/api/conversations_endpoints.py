@@ -117,6 +117,20 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
+def _row_to_summary(row: sqlite3.Row) -> Dict[str, Any]:
+    """Sidebar entry without message bodies (messages load when a chat opens)."""
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+        "pinned": bool(row["pinned"]),
+        "customTitle": bool(row["custom_title"]),
+        "projectId": row["project_id"],
+        "messageCount": row["message_count"],
+    }
+
+
 class ConversationUpsert(BaseModel):
     id: str
     userId: str
@@ -144,8 +158,15 @@ def create_conversations_router() -> APIRouter:
     @router.get("/conversations")
     async def list_conversations(
         user_id: str,
+        include_messages: bool = True,
         authorization: Optional[str] = Header(default=None),
     ):
+        """List the user's conversations.
+
+        include_messages=true (default, original shape) returns every message of
+        every chat; the web app passes false to get a lightweight sidebar list
+        and fetches each chat's messages via GET /conversations/{id}.
+        """
         user = authenticated_user(authorization)
         if user_id != user["id"]:
             raise HTTPException(
@@ -153,11 +174,43 @@ def create_conversations_router() -> APIRouter:
             )
         conn = _get_db()
         try:
+            if include_messages:
+                rows = conn.execute(
+                    "SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC",
+                    (user_id,),
+                ).fetchall()
+                return {"conversations": [_row_to_dict(r) for r in rows]}
+            # json_array_length avoids sending (or parsing in Python) the bodies.
             rows = conn.execute(
-                "SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC",
+                """
+                SELECT id, title, created_at, updated_at, pinned, custom_title,
+                       project_id, json_array_length(messages) AS message_count
+                FROM conversations WHERE user_id = ? ORDER BY updated_at DESC
+                """,
                 (user_id,),
             ).fetchall()
-            return {"conversations": [_row_to_dict(r) for r in rows]}
+            return {"conversations": [_row_to_summary(r) for r in rows]}
+        finally:
+            conn.close()
+
+    @router.get("/conversations/{conversation_id}")
+    async def get_conversation(
+        conversation_id: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """One full conversation, only if the session user owns it."""
+        user = authenticated_user(authorization)
+        conn = _get_db()
+        try:
+            # Ownership is part of the query, so another user's id gets the
+            # same 404 as a missing one (no existence leak).
+            row = conn.execute(
+                "SELECT * FROM conversations WHERE id = ? AND user_id = ?",
+                (conversation_id, user["id"]),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail="Conversation not found")
+            return _row_to_dict(row)
         finally:
             conn.close()
 

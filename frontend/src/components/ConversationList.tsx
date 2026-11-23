@@ -150,6 +150,7 @@ export function ConversationList({
                           onKeyDown={handleRenameKeyDown}
                           onBlur={commitRename}
                           onClick={e => e.stopPropagation()}
+                          aria-label="Rename conversation"
                           className="w-full text-[13px] font-medium bg-transparent border-b border-accent outline-none text-text-primary dark:text-text-dark-primary"
                         />
                       ) : (
@@ -168,6 +169,9 @@ export function ConversationList({
                         onClick={(e) => { e.stopPropagation(); setMoveMenuFor(moveMenuFor === conv.id ? null : conv.id) }}
                         className="p-1 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
                         title="Conversation actions"
+                        aria-label={`Actions for ${conv.title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={moveMenuFor === conv.id}
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>

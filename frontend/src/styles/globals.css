@@ -8,7 +8,7 @@
     --color-surface: 255 255 255;
     --color-border: 229 226 220;
     --color-text: 31 30 29;
-    --color-text-secondary: 107 106 102;
+    --color-text-secondary: 95 94 90;
   }
 
   .dark {
@@ -219,4 +219,18 @@
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* Keyboard focus ring. Declared after the utilities so it beats `outline-none`
+   (same specificity, later wins). :focus-visible only matches keyboard focus
+   for these controls, so mouse clicks don't show a ring. Text fields are
+   excluded: browsers treat every click into them as focus-visible, and they
+   already show a focus border of their own. */
+:where(button, a[href], summary, select, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]:not(input):not(textarea)):focus-visible {
+  outline: 2px solid #2f9e5c;
+  outline-offset: 2px;
+}
+
+.dark :where(button, a[href], summary, select, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]:not(input):not(textarea)):focus-visible {
+  outline-color: #4cbf7c;
 }

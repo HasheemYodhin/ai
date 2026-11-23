@@ -6,12 +6,13 @@ import { cn } from '@/lib/utils'
 import {
   SquarePen, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
   MessageSquare, Folder, Bot, Wrench, Plug, BookOpen, Telescope, FolderPlus,
-  ChevronDown, X, BriefcaseBusiness, CalendarClock, ListChecks, Webhook,
+  ChevronDown, X, BriefcaseBusiness, CalendarClock, ListChecks, Webhook, Lock,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
 import type { ProjectInput } from '@/hooks/useProjects'
 import type { SidebarView } from '@/App'
+import { ADMIN_ONLY_VIEWS } from '@/lib/adminViews'
 
 const PRIMARY_VIEWS: SidebarView[] = ['chat', 'projects', 'cowork', 'agents']
 import logo from '../icon.svg'
@@ -57,7 +58,7 @@ export function Sidebar({
   onOpenSettings,
   onStartResearch,
 }: SidebarProps) {
-  const { currentUser, logout } = useAuth()
+  const { currentUser, isAdmin, logout } = useAuth()
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -72,11 +73,12 @@ export function Sidebar({
   useEffect(() => {
     if (isSecondaryView) setMoreOpen(true)
   }, [isSecondaryView, view])
-  const [projectsOpen, setProjectsOpen] = useState(true)
+  const [projectsOpen, setProjectsOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   // Cheap always-on check just for the little "connected" dot next to Connectors.
-  const { servers } = useMcpStatus(true)
+  // /v1/mcp/* is admin-only, so regular users skip this request entirely.
+  const { servers } = useMcpStatus(isAdmin)
   const anyConnected = servers.some(s => s.connected)
   const connectedCount = servers.filter(s => s.connected).length
 
@@ -112,6 +114,8 @@ export function Sidebar({
     <button
       onClick={() => onChangeView(v)}
       aria-current={view === v ? 'page' : undefined}
+      aria-label={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? `${label} (admin only)` : label}
+      title={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? 'Admin only' : undefined}
       className={cn(
         'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors',
         view === v
@@ -121,7 +125,9 @@ export function Sidebar({
     >
       {icon}
       <span className="flex-1 text-left truncate">{label}</span>
-      {trailing}
+      {!isAdmin && ADMIN_ONLY_VIEWS.has(v)
+        ? <Lock className="w-3 h-3 flex-shrink-0 text-text-tertiary dark:text-text-dark-tertiary" aria-hidden="true" />
+        : trailing}
     </button>
   )
 
@@ -226,7 +232,50 @@ export function Sidebar({
           <nav className="space-y-0.5">
             {navItem('chat', <MessageSquare className="w-4 h-4 flex-shrink-0" />, 'Chats',
               <span className="text-xs font-mono tabular-nums text-text-tertiary dark:text-text-dark-tertiary flex-shrink-0">{conversations.length}</span>)}
-            {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects')}
+            {/* One Projects entry: the nav row (opens the Projects page), a +
+                for a new project, and project shortcuts folded underneath. This
+                replaces the separate "Projects N / New project" section. */}
+            <div className="group relative flex items-center">
+              <div className="flex-1 min-w-0">
+                {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects',
+                  <span className="w-12 flex-shrink-0" aria-hidden="true" />)}
+              </div>
+              <div className="absolute right-1 flex items-center gap-0.5">
+                {projects.length > 0 && (
+                  <button
+                    onClick={() => setProjectsOpen(o => !o)}
+                    aria-expanded={projectsOpen}
+                    aria-label={projectsOpen ? 'Hide project shortcuts' : `Show ${projects.length} project shortcut${projects.length === 1 ? '' : 's'}`}
+                    title={projectsOpen ? 'Hide projects' : 'Show projects'}
+                    className="w-6 h-6 flex items-center justify-center rounded-md text-text-tertiary dark:text-text-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                  >
+                    <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !projectsOpen && '-rotate-90')} />
+                  </button>
+                )}
+                <button
+                  onClick={() => setProjectModalOpen(true)}
+                  aria-label="New project"
+                  title="New project"
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-text-tertiary dark:text-text-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary hover:text-accent transition-colors"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            {projectsOpen && projects.length > 0 && (
+              <div className="max-h-28 overflow-y-auto scrollbar-thin space-y-0.5 pl-4">
+                {projects.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => onChangeView('projects')}
+                    className="w-full h-7 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} aria-hidden="true" />
+                    <span className="flex-1 text-left truncate">{p.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {navItem('cowork', <BriefcaseBusiness className="w-4 h-4 flex-shrink-0" />, 'Cowork')}
             {navItem('agents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Agents')}
           </nav>
@@ -244,53 +293,31 @@ export function Sidebar({
             {navItem('skills', <BookOpen className="w-4 h-4 flex-shrink-0" />, 'Prompt library')}
             {navItem('hooks', <Webhook className="w-4 h-4 flex-shrink-0" />, 'Hooks')}
             {navItem('subagents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Subagent types')}
+            {/* Research runs through the admin-only agent loop (POST /v1/agent). */}
             <button
-              onClick={onStartResearch}
-              className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+              onClick={isAdmin ? onStartResearch : undefined}
+              disabled={!isAdmin}
+              title={isAdmin ? undefined : 'Admin only'}
+              aria-label={isAdmin ? 'Research mode' : 'Research mode (admin only)'}
+              className={cn(
+                'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary',
+                isAdmin ? 'hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary' : 'opacity-50 cursor-not-allowed'
+              )}
             >
               <Telescope className="w-4 h-4 flex-shrink-0" />
               <span className="flex-1 text-left">Research mode</span>
+              {!isAdmin && <Lock className="w-3 h-3 flex-shrink-0 text-text-tertiary dark:text-text-dark-tertiary" aria-hidden="true" />}
             </button>
           </nav>}
           <button
             onClick={() => setMoreOpen(o => !o)}
             aria-expanded={moreOpen}
+            aria-label={moreOpen ? 'Show fewer pages' : 'Show more pages'}
             className="mt-0.5 w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
           >
             <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform', moreOpen && 'rotate-180')} />
             <span className="flex-1 text-left">{moreOpen ? 'Less' : 'More'}</span>
           </button>
-        </div>
-
-        {/* Projects quick list */}
-        <div className="px-2.5 pt-6">
-          <button
-            onClick={() => setProjectsOpen(o => !o)}
-            className="w-full flex items-center justify-between px-2.5 pb-2 text-xs text-text-tertiary dark:text-text-dark-tertiary hover:text-text-secondary dark:hover:text-text-dark-secondary transition-colors"
-            aria-expanded={projectsOpen}
-          >
-            <span>Projects <span className="ml-1 font-mono tabular-nums">{projects.length}</span></span>
-            <ChevronDown className={cn('w-4 h-4 transition-transform', !projectsOpen && '-rotate-90')} />
-          </button>
-          {projectsOpen && <div className="max-h-28 overflow-y-auto scrollbar-thin space-y-0.5">
-            {projects.map(p => (
-              <button
-                key={p.id}
-                onClick={() => onChangeView('projects')}
-                className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
-              >
-                <span className="w-4 flex justify-center flex-shrink-0"><span className="w-2 h-2 rounded-full" style={{ background: p.color }} /></span>
-                <span className="flex-1 text-left truncate">{p.name}</span>
-              </button>
-            ))}
-            <button
-              onClick={() => setProjectModalOpen(true)}
-              className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-accent hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
-            >
-              <FolderPlus className="w-4 h-4 flex-shrink-0" />
-              <span className="flex-1 text-left">New project</span>
-            </button>
-          </div>}
         </div>
 
         <div className="flex-1 min-h-0 mt-4 border-t border-border dark:border-border-dark relative">
@@ -312,6 +339,9 @@ export function Sidebar({
         <div className="p-2 border-t border-border dark:border-border-dark relative" ref={profileRef}>
           <button
             onClick={() => setProfileMenuOpen(o => !o)}
+            aria-label={`Account menu for ${currentUser?.name ?? 'Guest'}`}
+            aria-haspopup="menu"
+            aria-expanded={profileMenuOpen}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
           >
             <div

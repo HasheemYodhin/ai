@@ -249,10 +249,10 @@ CI runs on every pull request: lint, unit tests, CodeQL, and PR metadata checks.
 | Target | Reference |
 |---|---|
 | Docker | `docker build -t dabba . && docker run -p 8080:8080 -v dabba-data:/data dabba` |
-| Render | [render.yaml](render.yaml) and [docs/cloudflare-render-deployment.md](docs/cloudflare-render-deployment.md) |
+| Render | [render.yaml](render.yaml) and [docs/cloudflare-render-deployment.md](docs/cloudflare-render-deployment.md). On the free plan, enable Litestream + Cloudflare R2 to keep data across restarts. |
 | Kubernetes | [helm/](helm/) |
 
-The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check.
+The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check. It also bundles [Litestream](https://litestream.io): set `LITESTREAM_BUCKET` and the R2 variables to back up the SQLite databases to Cloudflare R2 and restore them on startup.
 
 ---
 

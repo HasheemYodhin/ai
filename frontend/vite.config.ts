@@ -35,10 +35,11 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('lucide-react')) return 'lucide'
           if (id.includes('simple-icons')) return 'simple-icons'
-          if (id.includes('/docx/')) return 'word'
-          if (id.includes('/jspdf/')) return 'pdf'
-          if (id.includes('/exceljs/')) return 'excel'
-          if (id.includes('/pptxgenjs/')) return 'powerpoint'
+          // jspdf/docx/exceljs/pptxgenjs are NOT forced into manual chunks:
+          // they are only reached via dynamic import() in lib/download.ts, so
+          // Rollup splits them automatically. Forcing them made Rollup place a
+          // shared helper in the "pdf" chunk, which the entry then imported,
+          // preloading ~390 KB of jsPDF on every first visit.
         },
       },
     },

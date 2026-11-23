@@ -1,4 +1,6 @@
-import { PrismLight } from 'react-syntax-highlighter'
+// Deep import: the package index re-exports every highlighter (including the
+// full Prism and highlight.js builds), which bloated the chunk to ~660 KB.
+import PrismLight from 'react-syntax-highlighter/dist/esm/prism-light'
 import bash from 'react-syntax-highlighter/dist/esm/languages/prism/bash'
 import css from 'react-syntax-highlighter/dist/esm/languages/prism/css'
 import docker from 'react-syntax-highlighter/dist/esm/languages/prism/docker'
