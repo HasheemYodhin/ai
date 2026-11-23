@@ -800,7 +800,7 @@ def create_app(
             )
             if admin_only and user["role"] != "admin":
                 return JSONResponse(
-                    {"detail": "Administrator access is required"}, status_code=403
+                    {"detail": "Only the workspace owner can use this feature"}, status_code=403
                 )
 
         if rate_limiter and (

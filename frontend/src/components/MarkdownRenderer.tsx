@@ -207,8 +207,8 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const runner = isRunnableLanguage && !isAdmin ? (
     <button
       disabled
-      title="Running code is admin only"
-      aria-label="Run (admin only)"
+      title="Only the workspace owner can run code"
+      aria-label="Run (owner only)"
       className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 text-white opacity-40 cursor-not-allowed"
     >
       <Lock className="w-3.5 h-3.5" aria-hidden="true" />

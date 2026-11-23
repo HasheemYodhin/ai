@@ -114,8 +114,8 @@ export function Sidebar({
     <button
       onClick={() => onChangeView(v)}
       aria-current={view === v ? 'page' : undefined}
-      aria-label={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? `${label} (admin only)` : label}
-      title={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? 'Admin only' : undefined}
+      aria-label={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? `${label} (owner only)` : label}
+      title={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? 'Owner only' : undefined}
       className={cn(
         'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors',
         view === v
@@ -297,8 +297,8 @@ export function Sidebar({
             <button
               onClick={isAdmin ? onStartResearch : undefined}
               disabled={!isAdmin}
-              title={isAdmin ? undefined : 'Admin only'}
-              aria-label={isAdmin ? 'Research mode' : 'Research mode (admin only)'}
+              title={isAdmin ? undefined : 'Owner only'}
+              aria-label={isAdmin ? 'Research mode' : 'Research mode (owner only)'}
               className={cn(
                 'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary',
                 isAdmin ? 'hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary' : 'opacity-50 cursor-not-allowed'

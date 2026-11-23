@@ -649,11 +649,17 @@ class IdentityService:
         now = utc_ms()
         try:
             with self.store.transaction() as conn:
+                # The first account becomes the workspace owner (role
+                # "admin"); everyone after is a member. Deciding inside the
+                # INSERT keeps it atomic, so two simultaneous first signups
+                # can't both become owner.
                 conn.execute(
                     """
                     INSERT INTO users
                         (id, email, name, password_hash, role, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'member', ?, ?)
+                    SELECT ?, ?, ?, ?,
+                        CASE WHEN EXISTS (SELECT 1 FROM users) THEN 'member' ELSE 'admin' END,
+                        ?, ?
                     """,
                     (
                         user_id,
@@ -695,6 +701,17 @@ class IdentityService:
         now = utc_ms()
         session_id = new_id("session")
         with self.store.transaction() as conn:
+            # Installs created before "first account = owner" may have no
+            # owner at all; the oldest account claims it on its next login.
+            conn.execute(
+                """
+                UPDATE users SET role='admin', updated_at=?
+                WHERE id=?
+                  AND NOT EXISTS (SELECT 1 FROM users WHERE role='admin' AND disabled=0)
+                  AND id=(SELECT id FROM users ORDER BY created_at, rowid LIMIT 1)
+                """,
+                (now, row["id"]),
+            )
             conn.execute(
                 """
                 INSERT INTO sessions

@@ -6,7 +6,7 @@
 
 Web app · Terminal TUI · VS Code extension · Chrome extension · OpenAI-compatible API
 
-![Dabba sign-in screen](docs/screenshots/auth.png)
+![Dabba landing page](docs/screenshots/landing.png)
 
 </div>
 
@@ -45,13 +45,19 @@ It brings together:
 
 ## Screenshots
 
+### Landing page
+
+Signed-out visitors land on a public page at `/` that introduces Dabba and links to sign up (`/signup`) and log in (`/login`).
+
+![Landing page](docs/screenshots/landing.png)
+
 ### Sign in
 
-Session-based accounts keep each user's chats and settings separate. The layout is responsive, with a separate mobile view.
+A split-screen sign-in with Log in / Sign up tabs. On phones it shows the form only. The first account created on a server becomes its owner.
 
 | Desktop | Mobile |
 |---|---|
-| ![Sign up](docs/screenshots/auth.png) | <img src="docs/screenshots/mobile-login.png" alt="Mobile login" width="260"> |
+| ![Sign up](docs/screenshots/auth.png) | <img src="docs/screenshots/mobile-login.png" alt="Mobile sign up" width="260"> |
 
 ### Cowork
 
@@ -122,7 +128,7 @@ See [DABBA_ARCHITECTURE.md](DABBA_ARCHITECTURE.md) for the full design.
 | **Connectors** | MCP client with a curated connector catalogue |
 | **Automation** | Scheduled skills, hooks on agent events, task center for run history and retries |
 | **Providers** | Anthropic, OpenAI, Google, NVIDIA NIM, Ollama, Hugging Face, local GGUF, built-in `dabba` |
-| **Security** | Session auth, admin/member roles, encrypted provider keys (`DABBA_MASTER_KEY`), CORS allowlist, rate limiting |
+| **Security** | Session auth, owner/member roles (first account is the owner), encrypted provider keys (`DABBA_MASTER_KEY`), CORS allowlist, rate limiting |
 | **Model stack** | BPE tokenizer, GQA/MQA attention, KV cache, gradient checkpointing, quantization, perplexity and latency benchmarks |
 
 ---
@@ -161,7 +167,7 @@ The Vite dev server proxies `/v1` to the backend. Set `VITE_API_URL` to point at
 
 ### 3. Create an account
 
-Open the web app and sign up. To give an account admin rights (needed for connectors, hooks, and Cowork):
+Open the web app and sign up. The first account becomes the workspace owner, with access to Cowork, connectors, hooks and code execution. To give another account the same access later:
 
 ```bash
 python3 -m dabba.platform.accounts [USER_EMAIL] --role admin
@@ -190,7 +196,7 @@ Copy `.env.example` and set the values for your environment.
 | `DABBA_DATA_DIR` | Where accounts, chats, and indexes are stored |
 | `DABBA_MASTER_KEY` | Fernet key used to encrypt stored provider keys. Keep it in a secret manager. |
 | `DABBA_MODEL_PATH` | Local model path, or `rule_based` for a lightweight fallback |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no admin step is needed. |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
 
 > [!IMPORTANT]
 > Never commit real keys. Only placeholders belong in `.env.example`.

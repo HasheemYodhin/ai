@@ -649,3 +649,29 @@ def test_scheduled_skill_dispatch_and_execution_history(store):
     assert completed["status"] == "completed"
     assert completed["output"]["content"] == "Done: Summarize project status"
     assert schedules.get(schedule["id"], user["id"])["lastStatus"] == "completed"
+
+
+def test_first_signup_becomes_owner_and_later_ones_are_members(store):
+    identity = IdentityService(store)
+    owner = identity.signup("Owner", "owner@example.com", "owner-password-1")
+    member = identity.signup("Guest", "guest@example.com", "guest-password-1")
+    assert owner["role"] == "admin"
+    assert member["role"] == "member"
+    # Logging in never changes roles while an owner exists.
+    assert identity.login("guest@example.com", "guest-password-1")["user"]["role"] == "member"
+
+
+def test_oldest_account_claims_owner_when_install_has_none(store):
+    identity = IdentityService(store)
+    first = identity.signup("First", "first@example.com", "first-password-1")
+    second = identity.signup("Second", "second@example.com", "second-password-1")
+    # Simulate an install created before first-account-owner existed.
+    with store.transaction() as conn:
+        conn.execute("UPDATE users SET role='member'")
+
+    # A newer account logging in does not claim it...
+    assert identity.login("second@example.com", "second-password-1")["user"]["role"] == "member"
+    # ...the oldest one does, and only once.
+    assert identity.login("first@example.com", "first-password-1")["user"]["role"] == "admin"
+    assert identity.get_user(second["id"])["role"] == "member"
+    assert identity.get_user(first["id"])["role"] == "admin"

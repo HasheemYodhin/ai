@@ -71,7 +71,7 @@ export function ApiKeyPromptModal({ target, provider, modelName, onClose, onSave
             <div className="p-5">
               <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
                 <span className="font-medium text-text-primary dark:text-text-dark-primary">{modelName}</span> needs a {providerLabel(provider)} API key,
-                which only your Dabba administrator can add (for example as a server environment variable). Pick another model for now.
+                which only the workspace owner can add (for example as a server environment variable). Pick another model for now.
               </p>
             </div>
             <div className="px-5 py-4 border-t border-border dark:border-border-dark flex items-center justify-end bg-surface-secondary dark:bg-surface-dark-tertiary">

@@ -10,6 +10,7 @@ import { Sidebar } from '@/components/Sidebar'
 import { ChatWindow } from '@/components/ChatWindow'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
+import { LandingPage } from '@/components/LandingPage'
 import { ProjectsPage } from '@/components/ProjectsPage'
 import { AgentsPage } from '@/components/AgentsPage'
 import { ToolsPage } from '@/components/ToolsPage'
@@ -415,12 +416,52 @@ function ChatApp() {
   )
 }
 
+type PublicScreen = 'landing' | 'login' | 'signup'
+
+function publicScreenFor(pathname: string): PublicScreen {
+  if (pathname.startsWith('/login')) return 'login'
+  if (pathname.startsWith('/signup')) return 'signup'
+  return 'landing'
+}
+
+/**
+ * Signed out: `/` shows the landing page, `/login` and `/signup` the auth
+ * form. Signed in: the app (any other path, e.g. a /c/:id link, opens the
+ * landing page first and returns there after login).
+ */
 function AuthGate() {
   const { currentUser, isReady } = useAuth()
+  const [screen, setScreen] = useState<PublicScreen>(() => publicScreenFor(window.location.pathname))
+
+  useEffect(() => {
+    const onPopState = () => setScreen(publicScreenFor(window.location.pathname))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const go = useCallback((next: PublicScreen, replace = false) => {
+    const path = next === 'landing' ? '/' : `/${next}`
+    if (window.location.pathname !== path) {
+      if (replace) window.history.replaceState(null, '', path)
+      else window.history.pushState(null, '', path)
+    }
+    setScreen(next)
+    window.scrollTo(0, 0)
+  }, [])
+
+  // After signing in from /login or /signup, start the app at `/`.
+  useEffect(() => {
+    if (currentUser && (window.location.pathname === '/login' || window.location.pathname === '/signup')) {
+      window.history.replaceState(null, '', '/')
+    }
+  }, [currentUser])
+
   if (!isReady) {
     return <div className="flex h-full items-center justify-center bg-surface text-sm text-text-secondary dark:bg-surface-dark dark:text-text-dark-secondary">Restoring your Dabba session...</div>
   }
-  return currentUser ? <ChatApp /> : <AuthPage />
+  if (currentUser) return <ChatApp />
+  if (screen === 'landing') return <LandingPage onLogin={() => go('login')} onSignup={() => go('signup')} />
+  return <AuthPage initialMode={screen} onModeChange={mode => go(mode, true)} onHome={() => go('landing')} />
 }
 
 export default function App() {

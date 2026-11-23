@@ -1,11 +1,33 @@
-import { useState, type FormEvent } from 'react'
-import { Eye, EyeOff, Loader2 } from 'lucide-react'
+import { useEffect, useState, type FormEvent } from 'react'
+import { Eye, EyeOff, Loader2, MessagesSquare, Code2, Workflow, AlertCircle } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { cn } from '@/lib/utils'
 import logo from '../icon.svg'
 
-export function AuthPage() {
+type Mode = 'login' | 'signup'
+
+const HIGHLIGHTS = [
+  { icon: MessagesSquare, title: 'Every model in one place', text: 'Chat with Claude, GPT, Gemini, NVIDIA and local models.' },
+  { icon: Code2, title: 'Write and run code', text: 'Generate code, preview artifacts and export documents.' },
+  { icon: Workflow, title: 'Agents and automation', text: 'Projects, skills, connectors and scheduled tasks.' },
+]
+
+const MIN_PASSWORD = 10
+
+interface AuthPageProps {
+  initialMode?: Mode
+  /** Keeps the URL (/login vs /signup) in step with the selected tab. */
+  onModeChange?: (mode: Mode) => void
+  /** Return to the landing page. */
+  onHome?: () => void
+}
+
+/** Split-screen sign-in: brand panel on the left (md and up), form on the right. */
+export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPageProps = {}) {
   const { signup, login } = useAuth()
-  const [mode, setMode] = useState<'login' | 'signup'>('login')
+  const [mode, setMode] = useState<Mode>(initialMode)
+  // Follow Back/Forward between /login and /signup.
+  useEffect(() => { setMode(initialMode) }, [initialMode])
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -13,114 +35,196 @@ export function AuthPage() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  const isSignup = mode === 'signup'
+  const passwordTooShort = isSignup && password.length > 0 && password.length < MIN_PASSWORD
+
+  const switchMode = (next: Mode) => {
+    setMode(next)
+    setError(null)
+    onModeChange?.(next)
+  }
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError(null)
     setBusy(true)
     try {
-      if (mode === 'signup') {
-        await signup(name, email, password)
-      } else {
-        await login(email, password)
-      }
+      if (isSignup) await signup(name, email, password)
+      else await login(email, password)
     } catch (err) {
-      setError((err as Error).message || 'Something went wrong')
+      setError((err as Error).message || 'Something went wrong. Please try again.')
     } finally {
       setBusy(false)
     }
   }
 
+  const inputClass = 'w-full h-11 px-3.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/15 transition-colors'
+
   return (
-    <div className="flex items-center justify-center h-full bg-surface-secondary dark:bg-surface-dark px-4">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col items-center mb-8">
-          <img src={logo} alt="Dabba Logo" className="w-12 h-12 object-contain rounded-xl mb-3" />
-          <h1 className="text-xl font-bold text-text-primary dark:text-text-dark-primary">Dabba</h1>
-          <p className="text-sm text-text-secondary dark:text-text-dark-secondary mt-1">
-            {mode === 'login' ? 'Welcome back' : 'Create your account'}
-          </p>
+    <div className="flex h-full overflow-y-auto bg-surface dark:bg-surface-dark">
+      {/* Brand panel — hidden on phones so the form gets the full screen. */}
+      <aside className="relative hidden md:flex md:w-[44%] lg:w-[48%] flex-col justify-between overflow-hidden bg-surface-secondary dark:bg-surface-dark-secondary border-r border-border dark:border-border-dark p-10 lg:p-14">
+        <button type="button" onClick={onHome} className="flex items-center gap-2.5 self-start" aria-label="Dabba home">
+          <img src={logo} alt="" className="w-9 h-9 object-contain" />
+          <span className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">Dabba</span>
+        </button>
+
+        <div className="max-w-md">
+          <h2 className="text-3xl lg:text-[34px] leading-tight font-semibold tracking-tight text-text-primary dark:text-text-dark-primary">
+            Your AI workspace for chat, code and automation.
+          </h2>
+          <ul className="mt-10 space-y-6">
+            {HIGHLIGHTS.map(({ icon: Icon, title, text }) => (
+              <li key={title} className="flex gap-3.5">
+                <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                  <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-text-primary dark:text-text-dark-primary">{title}</p>
+                  <p className="mt-0.5 text-sm text-text-secondary dark:text-text-dark-secondary">{text}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3.5 bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark rounded-2xl p-6 shadow-sm">
-          {mode === 'signup' && (
-            <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Name</label>
-              <input
-                autoFocus
-                required
-                autoComplete="name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="Your name"
-                className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors"
-              />
-            </div>
-          )}
+        <p className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
+          Self-hosted. Your chats stay on your Dabba server.
+        </p>
+      </aside>
 
-          <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Email</label>
-            <input
-              type="email"
-              required
-              autoComplete="email"
-              autoFocus={mode === 'login'}
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Password</label>
-            <div className="relative">
-              <input
-                type={showPassword ? 'text' : 'password'}
-                required
-                minLength={mode === 'signup' ? 10 : undefined}
-                autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder={mode === 'signup' ? 'At least 10 characters' : '••••••••••'}
-                className="w-full px-3.5 pr-10 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-text-secondary hover:text-text-primary rounded-lg transition-colors"
-              >
-                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {error && <p className="text-xs text-red-500">{error}</p>}
-
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-60 text-white text-sm font-semibold transition-colors"
-          >
-            {busy && <Loader2 className="w-4 h-4 animate-spin" />}
-            {mode === 'login' ? 'Log in' : 'Sign up'}
+      {/* Form panel */}
+      <main className="flex flex-1 items-center justify-center px-4 py-10 sm:px-8">
+        <div className="w-full max-w-[380px]">
+          {/* Logo only on phones, where the brand panel is hidden. */}
+          <button type="button" onClick={onHome} className="mb-8 flex items-center gap-2.5 md:hidden" aria-label="Dabba home">
+            <img src={logo} alt="" className="w-8 h-8 object-contain" />
+            <span className="text-lg font-semibold text-text-primary dark:text-text-dark-primary">Dabba</span>
           </button>
 
-          <p className="text-center text-xs text-text-tertiary dark:text-text-dark-tertiary pt-1">
-            {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
+          <h1 className="text-2xl font-semibold tracking-tight text-text-primary dark:text-text-dark-primary">
+            {isSignup ? 'Create your account' : 'Welcome back'}
+          </h1>
+          <p className="mt-1.5 text-sm text-text-secondary dark:text-text-dark-secondary">
+            {isSignup ? 'Get started with Dabba in under a minute.' : 'Log in to continue to Dabba.'}
+          </p>
+
+          <div role="tablist" aria-label="Account" className="mt-7 grid grid-cols-2 rounded-xl bg-surface-tertiary dark:bg-surface-dark-tertiary p-1">
+            {(['login', 'signup'] as const).map(tab => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={mode === tab}
+                onClick={() => switchMode(tab)}
+                className={cn(
+                  'h-9 rounded-lg text-sm font-medium transition-colors',
+                  mode === tab
+                    ? 'bg-surface dark:bg-surface-dark-secondary text-text-primary dark:text-text-dark-primary shadow-sm'
+                    : 'text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary'
+                )}
+              >
+                {tab === 'login' ? 'Log in' : 'Sign up'}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+            {isSignup && (
+              <div className="space-y-1.5">
+                <label htmlFor="auth-name" className="block text-sm font-medium text-text-primary dark:text-text-dark-primary">Name</label>
+                <input
+                  id="auth-name"
+                  autoFocus
+                  required
+                  autoComplete="name"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Your name"
+                  className={inputClass}
+                />
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label htmlFor="auth-email" className="block text-sm font-medium text-text-primary dark:text-text-dark-primary">Email</label>
+              <input
+                id="auth-email"
+                type="email"
+                required
+                autoComplete="email"
+                autoFocus={!isSignup}
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className={inputClass}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="auth-password" className="block text-sm font-medium text-text-primary dark:text-text-dark-primary">Password</label>
+              <div className="relative">
+                <input
+                  id="auth-password"
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  minLength={isSignup ? MIN_PASSWORD : undefined}
+                  autoComplete={isSignup ? 'new-password' : 'current-password'}
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder={isSignup ? `At least ${MIN_PASSWORD} characters` : 'Your password'}
+                  aria-describedby={isSignup ? 'auth-password-hint' : undefined}
+                  aria-invalid={passwordTooShort || undefined}
+                  className={cn(inputClass, 'pr-11', passwordTooShort && 'border-amber-500/60')}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(v => !v)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-lg text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              {isSignup && (
+                <p id="auth-password-hint" className={cn('text-xs', passwordTooShort ? 'text-amber-600 dark:text-amber-400' : 'text-text-tertiary dark:text-text-dark-tertiary')}>
+                  {passwordTooShort
+                    ? `${MIN_PASSWORD - password.length} more character${MIN_PASSWORD - password.length === 1 ? '' : 's'} needed`
+                    : `Use at least ${MIN_PASSWORD} characters.`}
+                </p>
+              )}
+            </div>
+
+            {error && (
+              <div role="alert" className="flex items-start gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-3 py-2.5 text-sm text-red-600 dark:text-red-400">
+                <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={busy || passwordTooShort}
+              className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-accent hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+            >
+              {busy && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
+              {busy ? (isSignup ? 'Creating account…' : 'Logging in…') : (isSignup ? 'Create account' : 'Log in')}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-text-secondary dark:text-text-dark-secondary">
+            {isSignup ? 'Already have an account? ' : "Don't have an account? "}
             <button
               type="button"
-              onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setError(null) }}
-              className="text-accent font-semibold hover:text-accent-hover"
+              onClick={() => switchMode(isSignup ? 'login' : 'signup')}
+              className="font-semibold text-accent hover:text-accent-hover"
             >
-              {mode === 'login' ? 'Sign up' : 'Log in'}
+              {isSignup ? 'Log in' : 'Sign up'}
             </button>
           </p>
-        </form>
-
-        <p className="text-center text-[10px] text-text-tertiary dark:text-text-dark-tertiary mt-4">
-          Accounts and conversations are protected by your Dabba server session.
-        </p>
-      </div>
+        </div>
+      </main>
     </div>
   )
 }

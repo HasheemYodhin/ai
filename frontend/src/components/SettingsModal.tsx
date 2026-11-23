@@ -697,8 +697,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {(activeTab === 'keys' || activeTab === 'tools') && !isAdmin && (
               <div className="p-3.5 rounded-2xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed animate-fade-in">
                 {activeTab === 'keys'
-                  ? 'Provider API keys are managed by your Dabba administrator, for example as server environment variables. Models with a key configured are ready to use from the model picker.'
-                  : 'MCP tools are managed by your Dabba administrator.'}
+                  ? 'Provider API keys are managed by the workspace owner, for example as server environment variables. Models with a key configured are ready to use from the model picker.'
+                  : 'MCP tools are managed by the workspace owner.'}
               </div>
             )}
             {activeTab === 'tools' && isAdmin && (

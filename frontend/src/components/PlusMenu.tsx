@@ -308,8 +308,8 @@ function MenuItem({ icon, label, onClick, active, trailing, disabled }: {
     <button
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? 'Admin only' : undefined}
-      aria-label={disabled ? `${label} (admin only)` : undefined}
+      title={disabled ? 'Owner only' : undefined}
+      aria-label={disabled ? `${label} (owner only)` : undefined}
       className={cn(
         'w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors',
         disabled ? 'opacity-50 cursor-not-allowed'
