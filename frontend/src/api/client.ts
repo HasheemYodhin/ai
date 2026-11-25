@@ -779,8 +779,8 @@ export class ApiClient {
   }
 
   /** Token usage recorded by the server for the signed-in user, totalled per model. */
-  fetchUsage(): Promise<ServerUsage> {
-    return this.platformRequest('/usage')
+  fetchUsage(signal?: AbortSignal): Promise<ServerUsage> {
+    return this.platformRequest('/usage', { signal })
   }
 
   /** One full conversation with its messages (only the owner can read it). */
@@ -1036,6 +1036,7 @@ export class ApiClient {
     })
 
     if (!response.ok) {
+      if (response.status === 429) throw await responseError(response, 'Chat usage limit reached')
       const errorText = await response.text().catch(() => 'Unknown error')
       throw new Error(`API error ${response.status}: ${errorText}`)
     }
@@ -1057,6 +1058,7 @@ export class ApiClient {
     })
 
     if (!response.ok) {
+      if (response.status === 429) throw await responseError(response, 'Chat usage limit reached')
       const errorText = await response.text().catch(() => 'Unknown error')
       throw new Error(`API error ${response.status}: ${errorText}`)
     }
@@ -1144,6 +1146,7 @@ export interface ServerUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+  limits?: { label: string; windowHours: number; usedTokens: number; limitTokens: number }[]
   byModel: { model: string; tokens: number; replies: number; promptTokens: number; completionTokens: number }[]
 }
 

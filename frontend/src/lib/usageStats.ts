@@ -6,6 +6,7 @@ export interface UsageStats {
   totalTokens: number
   promptTokens: number
   completionTokens: number
+  limits: NonNullable<ServerUsage['limits']>
   byModel: { model: string; tokens: number; replies: number }[]
 }
 
@@ -24,11 +25,12 @@ export function buildUsageStats(
     totalTokens: usage.totalTokens,
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
+    limits: usage.limits ?? [],
     byModel: usage.byModel.map(({ model, tokens, replies }) => ({ model, tokens, replies })),
   }
 }
 
 export async function loadUsageStats(userId: string, signal?: AbortSignal): Promise<UsageStats> {
-  const [usage, conversations] = await Promise.all([apiClient.fetchUsage(), apiClient.fetchConversations(userId, signal)])
+  const [usage, conversations] = await Promise.all([apiClient.fetchUsage(signal), apiClient.fetchConversations(userId, signal)])
   return buildUsageStats(usage, conversations)
 }

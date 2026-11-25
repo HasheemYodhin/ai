@@ -71,7 +71,7 @@ function MarkdownRendererImpl({ content, className }: MarkdownRendererProps) {
     },
     table({ children }) {
       return (
-        <div className="overflow-x-auto my-4">
+        <div tabIndex={0} role="region" aria-label="Table" className="my-4 max-w-full overflow-x-auto">
           <table className="min-w-full border-collapse border border-border dark:border-border-dark">
             {children}
           </table>
@@ -80,14 +80,14 @@ function MarkdownRendererImpl({ content, className }: MarkdownRendererProps) {
     },
     th({ children }) {
       return (
-        <th className="border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary px-3 py-2 text-left text-sm font-semibold">
+        <th className="border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary min-w-[5.5rem] px-2 py-2 text-left text-xs font-semibold [overflow-wrap:anywhere] sm:px-3 sm:text-sm">
           {children}
         </th>
       )
     },
     td({ children }) {
       return (
-        <td className="border border-border dark:border-border-dark px-3 py-2 text-sm">
+        <td className="border border-border dark:border-border-dark min-w-[5.5rem] px-2 py-2 align-top text-xs [overflow-wrap:anywhere] sm:px-3 sm:text-sm">
           {children}
         </td>
       )
@@ -148,7 +148,7 @@ function MarkdownRendererImpl({ content, className }: MarkdownRendererProps) {
   }), [isDark])
 
   return (
-    <div className={cn('prose prose-sm max-w-none dark:prose-invert', className)}>
+    <div className={cn('prose prose-sm w-full min-w-0 max-w-full [overflow-wrap:anywhere] dark:prose-invert', className)}>
       <ReactMarkdown
         components={components}
         remarkPlugins={REMARK_PLUGINS}
@@ -228,7 +228,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
       disabled
       title={runDisabledReason}
       aria-label={`Run unavailable: ${runDisabledReason}`}
-      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 text-white opacity-40 cursor-not-allowed"
+      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent text-white opacity-40 cursor-not-allowed"
     >
       <Lock className="w-3.5 h-3.5" aria-hidden="true" />
       Run
@@ -239,7 +239,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
         onClick={handleRun}
         disabled={running}
         title={`Run ${language} locally`}
-        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white transition-colors"
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
       >
         {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
         {running ? 'Running' : 'Run'}

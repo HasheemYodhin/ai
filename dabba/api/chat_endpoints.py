@@ -189,7 +189,7 @@ def create_chat_router(
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
 
-        task_context = _create_chat_task(request, req)
+        task_context = await asyncio.to_thread(_create_chat_task, request, req)
         if req.stream:
             return await _handle_streaming_chat(req, model_engine, task_context)
         else:
@@ -214,7 +214,7 @@ def create_chat_router(
             await rate_limiter.check_request(request, api_key)
 
         return await _handle_streaming_chat(
-            req, model_engine, _create_chat_task(request, req)
+            req, model_engine, await asyncio.to_thread(_create_chat_task, request, req)
         )
 
     return router
@@ -507,10 +507,16 @@ def _create_chat_task(request: Request, req: ChatCompletionRequest):
     user = getattr(request.state, "dabba_user", None)
     if not user:
         return None
-    try:
-        from dabba.platform.services import TaskOrchestrator
+    from dabba.platform.services import TaskOrchestrator
 
-        tasks = TaskOrchestrator()
+    tasks = TaskOrchestrator()
+    for limit in tasks.chat_usage_limits(user["id"]):
+        if limit["limitTokens"] and limit["usedTokens"] >= limit["limitTokens"]:
+            raise HTTPException(
+                status_code=429,
+                detail=f'{limit["label"]} chat token limit reached. Try again when older usage expires.',
+            )
+    try:
         task = tasks.create(
             "chat",
             {

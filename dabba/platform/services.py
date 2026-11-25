@@ -108,6 +108,13 @@ TASK_TRANSITIONS = {
 }
 
 
+CHAT_USAGE_WINDOWS = (
+    ("5-hour", 5, "DABBA_CHAT_TOKEN_LIMIT_5H", 250_000),
+    ("Daily", 24, "DABBA_CHAT_TOKEN_LIMIT_DAILY", 1_000_000),
+    ("Weekly", 168, "DABBA_CHAT_TOKEN_LIMIT_WEEKLY", 4_000_000),
+)
+
+
 class TaskOrchestrator:
     """Durable state machine and event log for long-running work."""
 
@@ -287,6 +294,31 @@ class TaskOrchestrator:
             )
         return self.get(task_id)
 
+    def chat_usage_limits(self, user_id: str) -> list[Dict[str, Any]]:
+        now = utc_ms()
+        cutoffs = [now - hours * 3_600_000 for _, hours, _, _ in CHAT_USAGE_WINDOWS]
+        totals = self.store.fetchone(
+            """SELECT COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS five_hour,
+                      COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS daily,
+                      COALESCE(SUM(tokens), 0) AS weekly
+               FROM (
+                   SELECT created_at, prompt_tokens + completion_tokens AS tokens
+                   FROM model_usage WHERE user_id=? AND created_at > ? AND created_at <= ?
+               )""",
+            (cutoffs[0], cutoffs[1], user_id, cutoffs[2], now),
+        )
+        return [
+            {
+                "label": label,
+                "windowHours": hours,
+                "usedTokens": totals[column],
+                "limitTokens": max(0, int(os.getenv(env_var, str(default)))),
+            }
+            for (label, hours, env_var, default), column in zip(
+                CHAT_USAGE_WINDOWS, ("five_hour", "daily", "weekly")
+            )
+        ]
+
     def usage_summary(self, user_id: str) -> Dict[str, Any]:
         """Token totals for a user, from the usage recorded for each finished chat."""
         rows = self.store.fetchall(
@@ -316,6 +348,7 @@ class TaskOrchestrator:
             "completionTokens": sum(item["completionTokens"] for item in by_model),
             "totalTokens": sum(item["tokens"] for item in by_model),
             "byModel": by_model,
+            "limits": self.chat_usage_limits(user_id),
         }
 
     def fail_stale_chat_tasks(self, cutoff_ms: int) -> int:

@@ -42,8 +42,12 @@ test('a model or effort picked in the header is kept when Settings is opened and
   const effort = () => page.evaluate(() => JSON.parse(localStorage.getItem('dabba-settings') ?? '{}').effort)
   const picked = await effort()
 
+  const sidebar = page.getByTitle('Open sidebar (Ctrl+B)')
+  if (await sidebar.isVisible()) await sidebar.click()
   await page.locator('button:has-text("Test User")').first().click()
   await page.getByText('Settings', { exact: true }).first().click()
+  const navigation = page.getByRole('button', { name: 'Open settings navigation' })
+  if (await navigation.isVisible()) await navigation.click()
   await page.getByRole('button', { name: 'Model & Params' }).click()
   // The dialog shows what the header picked, not the value from when the app loaded...
   await expect(page.locator('select').first()).toHaveValue(picked)

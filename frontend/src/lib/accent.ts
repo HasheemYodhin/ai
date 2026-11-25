@@ -87,7 +87,7 @@ export function normalizeAccent(input: string): string {
     else if (value < MIN_LUMINANCE) lightness += 0.005
     else break
     lightness = Math.min(1, Math.max(0, lightness))
-    rgb = hslToRgb(hue, saturation, lightness)
+    rgb = hslToRgb(hue, saturation, lightness).map(Math.round) as Rgb
   }
   return toHex(rgb)
 }

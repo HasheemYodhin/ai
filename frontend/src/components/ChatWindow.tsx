@@ -203,7 +203,7 @@ export function ChatWindow({
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto scrollbar-thin px-4 pt-6 pb-10"
+        className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin px-4 pt-6 pb-10"
       >
         <div className="max-w-3xl mx-auto space-y-6">
           {hiddenCount > 0 && (

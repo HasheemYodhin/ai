@@ -38,6 +38,7 @@ import {
   Bot,
   BrainCircuit,
   Bell,
+  PanelLeft,
 } from 'lucide-react'
 
 interface SettingsModalProps {
@@ -68,6 +69,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const { theme, setTheme } = useTheme()
   const { models, isLoading: modelsLoading, reload: reloadModels } = useModels()
   const [activeTab, setActiveTab] = useState<TabType>('general')
+  const [navigationOpen, setNavigationOpen] = useState(false)
+  const navigationToggle = useRef<HTMLButtonElement>(null)
+  const navigationClose = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (isOpen && navigationOpen) navigationClose.current?.focus()
+  }, [isOpen, navigationOpen])
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isSavedAlert, setIsSavedAlert] = useState(false)
@@ -83,6 +91,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (isOpen !== wasOpen) {
     setWasOpen(isOpen)
     if (isOpen) {
+      setNavigationOpen(false)
       setLocalSettings(settings)
       setStopInput(settings.stop.join(', '))
     }
@@ -119,10 +128,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   useEffect(() => {
     if (!isOpen || activeTab !== 'usage' || !currentUser) return
     const controller = new AbortController()
+    setUsageStats(null)
     setUsageError(null)
     loadUsageStats(currentUser.id, controller.signal)
-      .then(setUsageStats)
-      .catch(err => { if ((err as Error).name !== 'AbortError') setUsageError((err as Error).message || 'Could not load usage') })
+      .then(stats => { if (!controller.signal.aborted) setUsageStats(stats) })
+      .catch(err => { if (!controller.signal.aborted) setUsageError((err as Error).message || 'Could not load usage') })
     return () => controller.abort()
   }, [isOpen, activeTab, currentUser])
 
@@ -285,10 +295,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     { name: 'Socratic Teacher', prompt: 'You are a thoughtful teacher. Help the user learn by asking guiding questions rather than giving direct answers.' },
   ]
 
+  const closeNavigation = () => {
+    setNavigationOpen(false)
+    navigationToggle.current?.focus()
+  }
+
   const navItem = (tab: TabType, icon: React.ReactNode, label: string) => (
     <button
-      onClick={() => setActiveTab(tab)}
-      className={`flex w-auto flex-shrink-0 items-center gap-2.5 whitespace-nowrap px-3 py-2.5 rounded-xl text-xs font-semibold transition-all md:w-full ${
+      aria-current={activeTab === tab ? 'page' : undefined}
+      onClick={() => {
+        setActiveTab(tab)
+        if (navigationOpen) closeNavigation()
+      }}
+      className={`flex w-full items-center gap-2.5 px-3 py-2.5 rounded-xl text-left text-xs font-semibold transition-colors ${
         activeTab === tab
           ? 'bg-accent/15 dark:bg-accent/25 text-accent border border-accent/20'
           : 'text-text-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary border border-transparent'
@@ -307,11 +326,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       />
 
       {/* Claude-style 2-Column Dialog Panel */}
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[100dvh] sm:h-[640px] sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl overflow-hidden relative z-10 sm:border border-border dark:border-border-dark shadow-xl sm:m-4 flex flex-col md:flex-row">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[100dvh] sm:h-[640px] sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl overflow-hidden relative z-10 sm:border border-border dark:border-border-dark shadow-xl sm:m-4 flex flex-row">
 
         {/* Left Column: Navigation Sidebar */}
-        <div className="w-full flex-shrink-0 border-b border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary p-3 flex flex-col md:w-[200px] md:justify-between md:border-b-0 md:border-r md:p-4">
-          <div className="min-w-0 space-y-3 md:space-y-6">
+        {navigationOpen && (
+          <div aria-hidden="true" onClick={closeNavigation} className="absolute inset-0 z-10 bg-black/30 md:hidden" />
+        )}
+        <aside id="settings-navigation" className={cn(
+          'absolute inset-y-0 left-0 z-20 w-[220px] shrink-0 flex-col justify-between overflow-y-auto border-r border-border bg-surface-secondary p-3 dark:border-border-dark dark:bg-surface-dark-tertiary md:static md:z-auto md:flex md:w-[200px] md:p-4',
+          navigationOpen ? 'flex' : 'hidden'
+        )}>
+          <div className="min-w-0 space-y-4">
             <div className="flex items-center justify-between gap-2 px-2 py-1">
               <div className="flex items-center gap-2">
                 <SettingsIcon className="w-5 h-5 text-accent" />
@@ -319,17 +344,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   Dabba Settings
                 </span>
               </div>
-              {/* Close lives here on phones, where the tab strip sits above the page header. */}
               <button
-                onClick={handleDismiss}
-                aria-label="Close settings"
+                ref={navigationClose}
+                onClick={closeNavigation}
+                aria-label="Close settings navigation"
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-tertiary dark:text-text-dark-secondary dark:hover:bg-surface-dark-tertiary md:hidden"
               >
                 <X className="w-4.5 h-4.5" />
               </button>
             </div>
 
-            <nav aria-label="Settings sections" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 scrollbar-thin md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0">
+            <nav aria-label="Settings sections" className="space-y-1">
               {navItem('general', <Globe className="w-4 h-4" />, 'General')}
               {navItem('model', <Sliders className="w-4 h-4" />, 'Model & Params')}
               {navItem('prompt', <MessageSquareCode className="w-4 h-4" />, 'System Prompts')}
@@ -351,27 +376,39 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <RefreshCw className="w-3.5 h-3.5" />
             Reset Defaults
           </button>
-        </div>
+        </aside>
 
         {/* Right Column: Tab View Content */}
         <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-surface dark:bg-surface-dark-secondary overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4.5 border-b border-border dark:border-border-dark">
-            <h3 className="font-semibold text-sm text-text-primary dark:text-text-dark-primary capitalize">
-              {activeTab === 'model' ? 'Model & Parameters'
-                : activeTab === 'prompt' ? 'System Instructions'
-                : activeTab === 'keys' ? 'Provider API Keys'
-                : activeTab === 'tools' ? 'MCP Servers & Tools'
-                : activeTab === 'usage' ? 'Usage Statistics'
-                : activeTab === 'permissions' ? 'Permissions & Safety'
-                : activeTab === 'agent' ? 'Agent Behavior'
-                : activeTab === 'memory' ? 'Persistent Memory'
-                : activeTab + ' settings'}
-            </h3>
+            <div className="flex min-w-0 items-center gap-2">
+              <button
+                ref={navigationToggle}
+                onClick={() => setNavigationOpen(true)}
+                aria-label="Open settings navigation"
+                aria-controls="settings-navigation"
+                aria-expanded={navigationOpen}
+                className="rounded-lg p-2 text-text-secondary hover:bg-surface-tertiary dark:text-text-dark-secondary dark:hover:bg-surface-dark-tertiary md:hidden"
+              >
+                <PanelLeft className="h-5 w-5" />
+              </button>
+              <h3 className="font-semibold text-sm text-text-primary dark:text-text-dark-primary capitalize">
+                {activeTab === 'model' ? 'Model & Parameters'
+                  : activeTab === 'prompt' ? 'System Instructions'
+                  : activeTab === 'keys' ? 'Provider API Keys'
+                  : activeTab === 'tools' ? 'MCP Servers & Tools'
+                  : activeTab === 'usage' ? 'Usage Statistics'
+                  : activeTab === 'permissions' ? 'Permissions & Safety'
+                  : activeTab === 'agent' ? 'Agent Behavior'
+                  : activeTab === 'memory' ? 'Persistent Memory'
+                  : activeTab + ' settings'}
+              </h3>
+            </div>
             <button
               onClick={handleDismiss}
               aria-label="Close settings"
-              className="hidden p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors md:block"
+              className="shrink-0 p-2 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               <X className="w-4.5 h-4.5" />
             </button>
@@ -997,6 +1034,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             )}
             {activeTab === 'usage' && usageStats && (
               <div className="space-y-5 animate-fade-in">
+                {usageStats.limits.length > 0 && (
+                  <section aria-labelledby="chat-usage-limits" className="space-y-3">
+                    <h4 id="chat-usage-limits" className="text-sm font-semibold">Chat usage limits</h4>
+                    {usageStats.limits.map(({ label, windowHours, usedTokens, limitTokens }) => (
+                      <div key={windowHours} className="space-y-2 rounded-xl border border-border bg-surface-secondary p-3 dark:border-border-dark dark:bg-surface-dark-tertiary">
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-xs">
+                          <span className="font-semibold">{label}</span>
+                          <span className="text-text-tertiary">
+                            {usedTokens.toLocaleString()}{limitTokens > 0 ? ` / ${limitTokens.toLocaleString()} tokens` : ' tokens · Unlimited'}
+                          </span>
+                        </div>
+                        {limitTokens > 0 && (
+                          <progress aria-label={`${label} chat token usage`} value={Math.min(usedTokens, limitTokens)} max={limitTokens}
+                            className="block h-2 w-full appearance-none overflow-hidden rounded-full bg-surface-tertiary [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent dark:bg-surface-dark-secondary" />
+                        )}
+                      </div>
+                    ))}
+                    <p className="text-xs text-text-tertiary">Budgets use rolling windows and count tokens reported by completed chat requests.</p>
+                  </section>
+                )}
                 <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
                   <StatCard label="Conversations" value={usageStats.totalConversations} />
                   <StatCard label="Messages" value={usageStats.totalMessages} />

@@ -3,7 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
+from dabba.api.chat_endpoints import _create_chat_task
 from dabba.platform.coding import CodeIndexService
 from dabba.platform.core import PlatformStore
 from dabba.platform.provider_gateway import ProviderFailure, ProviderGateway
@@ -744,6 +746,36 @@ def test_usage_summary_totals_recorded_tokens_per_model(store):
     assert [item["model"] for item in summary["byModel"]] == ["model-a", "model-b"]
     assert summary["byModel"][0]["tokens"] == 165 and summary["byModel"][0]["replies"] == 2
     assert TaskOrchestrator(store).usage_summary("nobody")["totalTokens"] == 0
+
+
+def test_chat_usage_limits_roll_forward_per_account(store, monkeypatch):
+    tasks = TaskOrchestrator(store)
+    now = 1_700_000_000_000
+    hour = 3_600_000
+    user = IdentityService(store).signup("Counter", "quota@example.com", "a-secure-password")
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_5H", "10")
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_DAILY", "0")
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_WEEKLY", "1000")
+    monkeypatch.setattr("dabba.platform.services.TaskOrchestrator", lambda: tasks)
+    for age in (4, 5, 25, 168):
+        monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now - age * hour)
+        task = tasks.create("chat", {}, user_id=user["id"], model="test")
+        tasks.transition(task["id"], "running")
+        tasks.transition(task["id"], "completed", result={
+            "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+        }, record_model_usage=True)
+
+    monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now)
+    assert [limit["usedTokens"] for limit in tasks.chat_usage_limits(user["id"])] == [10, 20, 30]
+    assert [limit["usedTokens"] for limit in tasks.chat_usage_limits("another-user")] == [0, 0, 0]
+    request = SimpleNamespace(state=SimpleNamespace(dabba_user=user), headers={})
+    chat = SimpleNamespace(stream=False, effort=None, model="test")
+    with pytest.raises(HTTPException, match="5-hour chat token limit") as error:
+        _create_chat_task(request, chat)
+    assert error.value.status_code == 429
+
+    monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now + hour)
+    assert _create_chat_task(request, chat) is not None
 
 
 def test_first_signup_becomes_owner_and_later_ones_are_members(store):
