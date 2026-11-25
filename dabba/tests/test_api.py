@@ -1,10 +1,51 @@
+import asyncio
 from unittest.mock import Mock
+
+import httpx
 from fastapi.testclient import TestClient
 from dabba.api import create_app
 from dabba.api.auth import authenticate_request
 from dabba.api.rate_limiter import RateLimiter
 from dabba.api.chat_endpoints import ChatEndpoint, _generate_response
 from dabba.api.streaming_handler import StreamingHandler
+
+
+def test_session_restore_accepts_expired_session_without_exposing_account_data(
+    tmp_path, monkeypatch
+):
+    import dabba.platform.core as platform_core
+    from dabba.platform.services import IdentityService
+
+    monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(platform_core, "_default_store", None)
+    app = create_app(model_engine=Mock())
+    path = "/v1/platform/identity/me"
+    restore_path = f"{path}?restore=true"
+
+    identity = IdentityService()
+    identity.signup("Session Tester", "session@example.com", "a-secure-password")
+    session = identity.login("session@example.com", "a-secure-password")
+    headers = {"Authorization": f"Bearer {session['token']}"}
+
+    async def check():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            active = await client.get(restore_path, headers=headers)
+            assert active.status_code == 200
+            assert active.json() == session["user"]
+            assert active.headers["Cache-Control"] == "no-store"
+
+            with platform_core.get_platform_store().transaction() as conn:
+                conn.execute("UPDATE sessions SET expires_at = 0")
+            expired = await client.get(restore_path, headers=headers)
+            assert expired.status_code == 200
+            assert expired.json() is None
+            assert expired.headers["Cache-Control"] == "no-store"
+            assert (await client.get(path, headers=headers)).status_code == 401
+            protected = await client.get("/v1/platform/usage?restore=true", headers=headers)
+            assert protected.status_code == 401
+
+    asyncio.run(check())
 
 
 class TestAuth:

@@ -209,17 +209,17 @@ export class ApiClient {
   }
 
   async currentUser(signal?: AbortSignal): Promise<PlatformUser | null> {
-    if (!this.sessionToken) return null
-    const response = await fetch(`${this.baseUrl}/v1/platform/identity/me`, {
+    const token = this.sessionToken
+    if (!token) return null
+    const response = await fetch(`${this.baseUrl}/v1/platform/identity/me?restore=true`, {
       headers: this.getPlatformHeaders(),
+      cache: 'no-store',
       signal,
     })
-    if (response.status === 401) {
-      this.setSessionToken('')
-      return null
-    }
-    if (!response.ok) throw await responseError(response, 'Could not restore your session')
-    return response.json()
+    if (!response.ok && response.status !== 401) throw await responseError(response, 'Could not restore your session')
+    const user: PlatformUser | null = response.status === 401 ? null : await response.json()
+    if (!user && !signal?.aborted && this.sessionToken === token) this.setSessionToken('')
+    return user
   }
 
   async logout(): Promise<void> {

@@ -35,6 +35,25 @@ describe('ApiClient platform contracts', () => {
       .rejects.toThrow('Cannot reach the Dabba backend')
   })
 
+  it.each([200, 401])('clears an expired session after a %s restore response', async status => {
+    localStorage.setItem('dabba-session-token', 'expired-token')
+    const fetchMock = vi.fn().mockResolvedValue(new Response('null', { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new ApiClient('http://dabba.test')
+
+    await expect(client.currentUser()).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://dabba.test/v1/platform/identity/me?restore=true',
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.objectContaining({ Authorization: 'Bearer expired-token' }),
+      }),
+    )
+    expect(localStorage.getItem('dabba-session-token')).toBeNull()
+    await expect(client.currentUser()).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('requests approval mode for web agent calls', async () => {
     const body = new ReadableStream({
       start(controller) {

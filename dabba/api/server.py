@@ -781,6 +781,12 @@ def create_app(
                     lambda: IdentityService().authenticate(token)
                 )
             if not user:
+                if (
+                    request.method == "GET"
+                    and path == "/v1/platform/identity/me"
+                    and request.query_params.get("restore") == "true"
+                ):
+                    return JSONResponse(None, headers={"Cache-Control": "no-store"})
                 return JSONResponse(
                     {"detail": "A valid Dabba session is required"}, status_code=401
                 )

@@ -9,7 +9,7 @@ import contextlib
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -1477,8 +1477,11 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     @router.get("/identity/me")
-    async def me(authorization: Optional[str] = Header(default=None)):
-        return current_user(authorization)
+    async def me(
+        request: Request, response: Response, authorization: Optional[str] = Header(default=None)
+    ):
+        response.headers["Cache-Control"] = "no-store"
+        return getattr(request.state, "dabba_user", None) or current_user(authorization)
 
     @router.post("/identity/logout")
     async def logout(authorization: Optional[str] = Header(default=None)):

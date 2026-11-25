@@ -45,9 +45,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const controller = new AbortController()
     apiClient.currentUser(controller.signal)
-      .then(user => setCurrentUser(user ? toProfile(user) : null))
-      .catch(() => setCurrentUser(null))
-      .finally(() => setReady(true))
+      .then(user => { if (!controller.signal.aborted) setCurrentUser(user ? toProfile(user) : null) })
+      .catch(() => { if (!controller.signal.aborted) setCurrentUser(null) })
+      .finally(() => { if (!controller.signal.aborted) setReady(true) })
     return () => controller.abort()
   }, [])
 
