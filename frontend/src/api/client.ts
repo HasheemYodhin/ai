@@ -809,6 +809,13 @@ export class ApiClient {
    * (WebM/Opus, etc.) — the server decodes it with ffmpeg regardless of the
    * nominal filename, no client-side transcoding needed.
    */
+  /** Whether the server can turn speech into text (needs whisper and ffmpeg installed on the server). */
+  async audioStatus(signal?: AbortSignal): Promise<{ transcription: { available: boolean; whisperInstalled: boolean; ffmpegInstalled: boolean } }> {
+    const response = await fetch(`${this.baseUrl}/v1/audio/status`, { headers: this.getHeaders(), signal })
+    if (!response.ok) throw await responseError(response, 'Could not check voice input')
+    return response.json()
+  }
+
   async transcribeAudio(audioBlob: Blob, opts?: { model?: string; signal?: AbortSignal }): Promise<string> {
     const buffer = await audioBlob.arrayBuffer()
     const base64 = btoa(Array.from(new Uint8Array(buffer), b => String.fromCharCode(b)).join(''))

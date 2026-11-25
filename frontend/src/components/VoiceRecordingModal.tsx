@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Square, X, Loader2, Mic } from 'lucide-react'
-import { startRecording, watchAudioLevel, type VoiceRecorder } from '@/lib/voice'
+import { friendlyVoiceError, startRecording, voiceAvailable, VOICE_UNAVAILABLE, watchAudioLevel, type VoiceRecorder } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -12,6 +12,8 @@ interface VoiceRecordingModalProps {
 /** Full "voice mode" overlay — live waveform while recording, then transcribes on stop. */
 export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingModalProps) {
   const [error, setError] = useState<string | null>(null)
+  // True when the server can't transcribe at all (as opposed to a microphone problem).
+  const [unavailable, setUnavailable] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const recorderRef = useRef<VoiceRecorder | null>(null)
@@ -23,7 +25,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
     let stopWatching: (() => void) | null = null
     let cancelled = false
 
-    startRecording()
+    const begin = () => startRecording()
       .then(async (recorder) => {
         if (cancelled) { recorder.cancel(); return }
         recorderRef.current = recorder
@@ -32,6 +34,18 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
         })
       })
       .catch(err => setError((err as Error).message || 'Could not access the microphone'))
+
+    // Ask the server first, so nobody records a message that can't be transcribed.
+    // If the check itself fails, just try recording and report any problem afterwards.
+    voiceAvailable().then(available => {
+      if (cancelled) return
+      if (!available) {
+        setUnavailable(true)
+        setError(VOICE_UNAVAILABLE)
+        return
+      }
+      return begin()
+    })
 
     const timer = setInterval(() => setElapsed(e => e + 1), 1000)
 
@@ -80,7 +94,9 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
       if (text) onTranscribed(text)
       onClose()
     } catch (err) {
-      setError((err as Error).message || 'Transcription failed')
+      const friendly = friendlyVoiceError((err as Error).message || 'Transcription failed')
+      setUnavailable(friendly.unavailable)
+      setError(friendly.text)
       setIsTranscribing(false)
     }
   }
@@ -109,7 +125,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
         </div>
 
         <p className="text-sm font-medium text-text-primary dark:text-text-dark-primary mb-1">
-          {isTranscribing ? 'Transcribing…' : error ? 'Microphone error' : 'Listening…'}
+          {isTranscribing ? 'Transcribing…' : unavailable ? 'Voice input unavailable' : error ? 'Microphone error' : 'Listening…'}
         </p>
 
         {error ? (

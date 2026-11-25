@@ -3,7 +3,7 @@ import { ArrowUp, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot,
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
 import { captureScreenshot } from '@/lib/screenshot'
-import { startRecording, type VoiceRecorder } from '@/lib/voice'
+import { friendlyVoiceError, startRecording, voiceAvailable, VOICE_UNAVAILABLE, type VoiceRecorder } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
@@ -104,7 +104,7 @@ export function InputArea({
         const text = await apiClient.transcribeAudio(blob)
         if (text) insertTranscript(text)
       } catch (err) {
-        setVoiceError((err as Error).message || 'Transcription failed')
+        setVoiceError(friendlyVoiceError((err as Error).message || 'Transcription failed').text)
       } finally {
         setIsTranscribing(false)
       }
@@ -112,6 +112,10 @@ export function InputArea({
     }
 
     setVoiceError(null)
+    if (!(await voiceAvailable())) {
+      setVoiceError(VOICE_UNAVAILABLE)
+      return
+    }
     try {
       quickRecorderRef.current = await startRecording()
       setIsQuickRecording(true)

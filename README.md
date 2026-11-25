@@ -191,6 +191,7 @@ Copy `.env.example` and set the values for your environment.
 | `DABBA_GUEST_CHAT`, `DABBA_GUEST_PROMPT_LIMIT`, `DABBA_GUEST_IP_DAILY_LIMIT` | Free prompts for signed-out visitors on `/try` (default on, 5 per visitor, 20 per IP per day). Replies use the server's `NVIDIA_API_KEY`; set `DABBA_GUEST_CHAT=0` to turn it off. |
 | `SITE_URL` (build time) | Public address of the site, e.g. `https://dabba.example.com`. When set at build time, the app gets a canonical link and absolute social image, and `sitemap.xml` is generated. Pass it as a Docker build arg or a Cloudflare Pages build variable. |
 | `DABBA_TRUSTED_PROXY_HOPS` | Reverse proxies in front of the server (default 1, right for Render), used to find a visitor's real IP for the guest limit. |
+| `DABBA_FFMPEG` | Full path to an `ffmpeg` binary, for voice input. Usually not needed: Dabba also looks on `PATH`, in the `imageio-ffmpeg` package and in common install folders. |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
 
 > [!IMPORTANT]
@@ -252,6 +253,8 @@ CI runs on every pull request: lint, unit tests, CodeQL, and PR metadata checks.
 | Docker | `docker build -t dabba . && docker run -p 8080:8080 -v dabba-data:/data dabba` |
 | Render | [render.yaml](render.yaml) and [docs/cloudflare-render-deployment.md](docs/cloudflare-render-deployment.md). On the free plan, enable Litestream + Cloudflare R2 to keep data across restarts. |
 | Kubernetes | [helm/](helm/) |
+
+**Voice input.** Turning speech into text runs on the server and needs both `ffmpeg` and the `openai-whisper` package (which brings in PyTorch, several GB). Neither is in the slim Docker image, so on Render and similar hosts the microphone buttons report "Voice input isn't set up on this server yet". To use voice, run Dabba where both are installed (`pip install openai-whisper`, then `sudo apt-get install ffmpeg` or `brew install ffmpeg`), or build an image that includes them. `GET /v1/audio/status` shows what is missing.
 
 The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check. It also bundles [Litestream](https://litestream.io): set `LITESTREAM_BUCKET` and the R2 variables to back up the SQLite databases to Cloudflare R2 and restore them on startup.
 

@@ -66,6 +66,7 @@ export const PRIVACY: LegalDocument = {
       blocks: [
         'Conversation history is saved in your browser, on the device you use. It is not uploaded to the Dabba server for storage. You can export or clear it at any time from Settings, then Data Controls.',
         'Your messages are sent to the Dabba server, and from there to the AI model you chose, so that the model can reply.',
+        'Voice input: if you use the microphone, your recording is sent to the Dabba server and turned into text there by a speech model that runs on the server. The recording is deleted as soon as it has been transcribed, and only the resulting text is used as your message.',
       ],
     },
     {

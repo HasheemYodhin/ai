@@ -1,3 +1,4 @@
+import { apiClient } from '@/api/client'
 /**
  * Browser-side microphone capture. Records via MediaRecorder in whatever
  * format the browser natively produces (WebM/Opus in Chrome/Firefox) — the
@@ -79,4 +80,27 @@ export function watchAudioLevel(stream: MediaStream, onLevel: (level: number) =>
     source.disconnect()
     ctx.close()
   }
+}
+
+/** Shown when the server can't turn speech into text (it needs whisper and ffmpeg installed). */
+export const VOICE_UNAVAILABLE = "Voice input isn't set up on this server yet. Ask the person who runs Dabba to turn it on."
+
+/**
+ * Ask the server whether it can transcribe, so nobody records a message that
+ * can't be used. If the check itself fails, assume it can and let any problem
+ * surface after recording.
+ */
+export async function voiceAvailable(): Promise<boolean> {
+  try {
+    const status = await apiClient.audioStatus()
+    return status.transcription.available
+  } catch {
+    return true
+  }
+}
+
+/** The server's setup instructions are for administrators; show visitors something they can act on. */
+export function friendlyVoiceError(message: string): { text: string; unavailable: boolean } {
+  if (/ffmpeg is required|whisper is not installed/i.test(message)) return { text: VOICE_UNAVAILABLE, unavailable: true }
+  return { text: message, unavailable: false }
 }

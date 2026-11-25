@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import importlib.util
+import os
 import shutil
 import tempfile
 import threading
@@ -25,6 +26,76 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 WHISPER_MODELS = {"tiny", "base", "small", "medium", "large"}
+
+# Folders checked for ffmpeg when it is not on PATH. A server started from a
+# service, desktop launcher or IDE often has a shorter PATH than a terminal.
+_FFMPEG_FALLBACK_DIRS = (
+    "/usr/local/bin",
+    "/usr/bin",
+    "/opt/homebrew/bin",
+    "/opt/local/bin",
+    "~/.local/bin",
+    "~/bin",
+)
+_ffmpeg_alias_dir: Optional[str] = None
+
+
+def _is_executable_file(path) -> bool:
+    return os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def find_ffmpeg() -> Optional[str]:
+    """Locate an ffmpeg executable, or None.
+
+    Order: ``DABBA_FFMPEG`` (explicit path), PATH, the static build that the
+    ``imageio-ffmpeg`` package ships, then common install folders.
+    """
+    explicit = os.environ.get("DABBA_FFMPEG", "").strip()
+    if explicit and _is_executable_file(explicit):
+        return explicit
+    on_path = shutil.which("ffmpeg")
+    if on_path:
+        return on_path
+    try:
+        import imageio_ffmpeg  # optional; bundles a static ffmpeg binary
+
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and _is_executable_file(bundled):
+            return bundled
+    except Exception:  # noqa: BLE001 - package missing or no bundled binary
+        pass
+    for folder in _FFMPEG_FALLBACK_DIRS:
+        candidate = Path(folder).expanduser() / "ffmpeg"
+        if _is_executable_file(candidate):
+            return str(candidate)
+    return None
+
+
+def ensure_ffmpeg_on_path() -> Optional[str]:
+    """Find ffmpeg and make the plain name ``ffmpeg`` resolve for whisper.
+
+    whisper decodes audio by running ``ffmpeg`` by name, so a binary found
+    off PATH (or named differently, like imageio's) is exposed under that name
+    in a private temp folder that is added to PATH. Returns the executable
+    path, or None when no ffmpeg exists.
+    """
+    global _ffmpeg_alias_dir
+    exe = find_ffmpeg()
+    if exe is None:
+        return None
+    if shutil.which("ffmpeg"):
+        return exe
+    if _ffmpeg_alias_dir is None:
+        # mkdtemp is private (0700), so no other user can plant a binary here.
+        _ffmpeg_alias_dir = tempfile.mkdtemp(prefix="dabba-ffmpeg-")
+    link = Path(_ffmpeg_alias_dir) / "ffmpeg"
+    if not link.exists():
+        try:
+            link.symlink_to(exe)
+        except OSError:
+            return exe  # cannot alias; the caller may still run it by full path
+    os.environ["PATH"] = _ffmpeg_alias_dir + os.pathsep + os.environ.get("PATH", "")
+    return exe
 DEFAULT_VOICE = "en_US-lessac-medium"
 VOICE_DIR = Path.home() / ".local" / "share" / "piper-voices"
 
@@ -67,7 +138,7 @@ def create_audio_router() -> APIRouter:
     @router.get("/audio/status")
     async def audio_status():
         whisper_installed = importlib.util.find_spec("whisper") is not None
-        ffmpeg_installed = shutil.which("ffmpeg") is not None
+        ffmpeg_installed = ensure_ffmpeg_on_path() is not None
         voice_path = VOICE_DIR / f"{DEFAULT_VOICE}.onnx"
         return {
             "transcription": {
@@ -90,13 +161,14 @@ def create_audio_router() -> APIRouter:
         # whisper.load_audio() shells out to ffmpeg unconditionally to decode
         # audio, regardless of input format — check up front so a missing
         # ffmpeg produces one clear message instead of a raw traceback.
-        if shutil.which("ffmpeg") is None:
+        if ensure_ffmpeg_on_path() is None:
             raise HTTPException(
                 status_code=503,
                 detail=(
                     "ffmpeg is required for voice transcription but was not found. "
                     "Install it with `sudo apt-get install ffmpeg` (Linux), "
-                    "`brew install ffmpeg` (macOS), or download it for Windows."
+                    "`brew install ffmpeg` (macOS), or download it for Windows, "
+                    "or set DABBA_FFMPEG to the full path of an ffmpeg binary."
                 ),
             )
 

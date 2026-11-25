@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useLayoutEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
 import type { Message, AgentStep, ExtractedDocument, DocumentAttachment } from '@/types'
@@ -112,6 +112,9 @@ export interface PendingPlanApproval {
   steps: Array<{ step_id: string; tool: string; description: string }>
 }
 
+/** How long a message waits for the automatic skill lookup before it is sent without one. */
+const SKILL_MATCH_TIMEOUT_MS = 1500
+
 export function useChat({ activeConversationId = null, onConversationUpdate, onConversationTitle }: UseChatOptions = {}): UseChatReturn {
   const [messages, setVisibleMessages] = useState<Message[]>([])
   const [runningConversations, setRunningConversations] = useState<Set<string>>(() => new Set())
@@ -130,6 +133,18 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
   activeConversationRef.current = activeConversationId
   onConversationUpdateRef.current = onConversationUpdate
   const isLoading = !!activeConversationId && runningConversations.has(activeConversationId)
+
+  // Sending from an empty chat creates the conversation and sends in the same
+  // tick, so the first commits happen before this hook has seen the new id and
+  // are not shown (commitMessages only shows the active conversation). Without
+  // this, the welcome screen stays up until the model's first word arrives, which
+  // with a slow model looks like nothing happened. Show what was committed for
+  // a conversation as soon as it becomes the active one.
+  useLayoutEffect(() => {
+    if (!activeConversationId) return
+    const committed = conversationMessagesRef.current.get(activeConversationId)
+    if (committed) setVisibleMessages(committed)
+  }, [activeConversationId])
 
   const commitMessages = useCallback((conversationId: string, next: Message[], persist = true) => {
     conversationMessagesRef.current.set(conversationId, next)
@@ -445,7 +460,12 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     let effectiveOpts = opts
     if (!opts?.systemPromptOverride && content.trim()) {
       try {
-        const matched = await apiClient.matchSkill(content)
+        // Best-effort, and capped: a slow or cold server must not hold up the
+        // model request (it used to wait for this call with no time limit).
+        const matched = await Promise.race([
+          apiClient.matchSkill(content),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), SKILL_MATCH_TIMEOUT_MS)),
+        ])
         if (matched) effectiveOpts = { ...opts, systemPromptOverride: matched.instructions }
       } catch { /* best-effort — a lookup failure just means no auto-skill this turn */ }
     }
