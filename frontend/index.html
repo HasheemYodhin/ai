@@ -17,17 +17,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter+Tight:wght@500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>Dabba: self hosted AI workspace for chat, code and automation</title>
-    <script>
-      // Apply the saved theme before paint.
-      try {
-        var d = document.documentElement
-        var t = localStorage.getItem('dabba-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-        d.classList.add(t === 'light' ? 'light' : 'dark')
-        // Saved accent color (written by Settings), so there is no flash of the default.
-        var a = JSON.parse(localStorage.getItem('dabba-accent') || 'null')
-        if (a) for (var k in a) d.style.setProperty(k, a[k])
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body class="antialiased">
     <div id="root"></div>

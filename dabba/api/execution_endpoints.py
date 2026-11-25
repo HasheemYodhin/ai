@@ -242,9 +242,24 @@ def create_execution_router(
     async def authorize(request: Request) -> Optional[str]:
         return await auth(request) if auth else None
 
+    def execution_unavailable_reason(request: Request) -> Optional[str]:
+        if not request.app.state.config.enable_local_code_execution:
+            return "API code execution is disabled"
+        client_host = request.client.host if request.client else ""
+        try:
+            is_local = ipaddress.ip_address(client_host).is_loopback
+        except ValueError:
+            is_local = client_host == "localhost"
+        if not is_local:
+            return "Code execution is restricted to local clients"
+        return None
+
     @router.get("/languages")
-    async def languages(_: Optional[str] = Depends(authorize)):
-        return {"languages": available_languages()}
+    async def languages(request: Request, _: Optional[str] = Depends(authorize)):
+        return {
+            "languages": available_languages(),
+            "unavailableReason": execution_unavailable_reason(request),
+        }
 
     @router.post("/execute")
     async def execute(
@@ -252,19 +267,9 @@ def create_execution_router(
         request: Request,
         api_key: Optional[str] = Depends(authorize),
     ):
-        if not request.app.state.config.enable_local_code_execution:
-            raise HTTPException(
-                status_code=403, detail="API code execution is disabled"
-            )
-        client_host = request.client.host if request.client else ""
-        try:
-            is_local = ipaddress.ip_address(client_host).is_loopback
-        except ValueError:
-            is_local = client_host == "localhost"
-        if not is_local:
-            raise HTTPException(
-                status_code=403, detail="Code execution is restricted to local clients"
-            )
+        unavailable_reason = execution_unavailable_reason(request)
+        if unavailable_reason:
+            raise HTTPException(status_code=403, detail=unavailable_reason)
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
         try:

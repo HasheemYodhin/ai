@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useCallback, useDeferredValue } from 'react'
+import { memo, useMemo, useState, useCallback, useDeferredValue, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { SyntaxHighlighter } from '@/lib/syntaxHighlighter'
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
@@ -169,11 +169,29 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated?: boolean; durationMs: number; phase?: string } | null>(null)
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
-  const { isAdmin } = useAuth()
+  const { isAdmin, currentUser } = useAuth()
+  const [executionAccess, setExecutionAccess] = useState<{ userId: string; reason: string | null } | null>(null)
+  const userId = currentUser?.id
   const isRunnableLanguage = RUNNABLE_LANGUAGES.has(language.toLowerCase())
-  // /v1/code/execute is admin-only; regular users see a disabled Run button
-  // with an explanation instead of a raw "Administrator access" error.
-  const canRun = isRunnableLanguage && isAdmin
+  const runDisabledReason = !isAdmin
+    ? 'Only the workspace owner can run code'
+    : executionAccess && executionAccess.userId === userId
+      ? executionAccess.reason
+      : 'Checking code execution availability'
+  const canRun = isRunnableLanguage && runDisabledReason === null
+
+  useEffect(() => {
+    if (!isAdmin || !userId || !isRunnableLanguage) return
+    const controller = new AbortController()
+    apiClient.getCodeExecutionUnavailableReason(controller.signal)
+      .then(reason => setExecutionAccess({ userId, reason }))
+      .catch(error => {
+        if (!controller.signal.aborted) {
+          setExecutionAccess({ userId, reason: error instanceof Error ? error.message : 'Could not check code execution availability' })
+        }
+      })
+    return () => controller.abort()
+  }, [isAdmin, userId, isRunnableLanguage])
 
   const handleCopy = useCallback(async () => {
     try {
@@ -192,6 +210,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   }, [openArtifact, code, language, title])
 
   const handleRun = useCallback(async () => {
+    if (!canRun) return
     setRunning(true)
     setRunError('')
     setResult(null)
@@ -202,13 +221,13 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
     } finally {
       setRunning(false)
     }
-  }, [language, code, stdin])
+  }, [canRun, language, code, stdin])
 
-  const runner = isRunnableLanguage && !isAdmin ? (
+  const runner = isRunnableLanguage && runDisabledReason ? (
     <button
       disabled
-      title="Only the workspace owner can run code"
-      aria-label="Run (owner only)"
+      title={runDisabledReason}
+      aria-label={`Run unavailable: ${runDisabledReason}`}
       className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 text-white opacity-40 cursor-not-allowed"
     >
       <Lock className="w-3.5 h-3.5" aria-hidden="true" />

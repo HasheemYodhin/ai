@@ -622,6 +622,19 @@ export class ApiClient {
     return data.documents ?? []
   }
 
+  async getCodeExecutionUnavailableReason(signal?: AbortSignal): Promise<string | null> {
+    return this.cachedRead('code-execution', async () => {
+      const response = await fetch(`${this.baseUrl}/v1/code/languages`, {
+        headers: this.getHeaders(),
+      })
+      if (!response.ok) throw await responseError(response, 'Could not check code execution availability')
+      const data = await response.json() as { unavailableReason?: string | null }
+      return data.unavailableReason === undefined
+        ? 'Code execution availability could not be verified'
+        : data.unavailableReason
+    }, { signal })
+  }
+
   async executeCode(
     language: string,
     code: string,
