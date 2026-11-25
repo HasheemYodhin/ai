@@ -10,16 +10,49 @@ import type { ModelInfo } from '@/types'
 import { cn } from '@/lib/utils'
 
 export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up' } = {}) {
-  const menuPosition = placement === 'up' ? 'max-md:fixed max-md:bottom-4 max-md:right-4 max-md:max-w-[calc(100%-2rem)] md:bottom-full md:right-0 md:mb-2' : 'left-0 top-full mt-2'
   const { settings, updateSettings } = useSettings()
   const { models, isLoading, error, reload } = useModels()
   const [openMenu, setOpenMenu] = useState<'model' | 'effort' | null>(null)
   const [search, setSearch] = useState('')
   const [keyPromptModel, setKeyPromptModel] = useState<ModelInfo | null>(null)
+  // Which side the open menu uses and how tall it may be, measured when it opens.
+  const [fit, setFit] = useState<{ side: 'up' | 'down'; maxHeight: number }>({ side: placement, maxHeight: 420 })
   const ref = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   const modelMenuRef = useDialogFocus(openMenu === 'model', () => setOpenMenu(null))
   const effortMenuRef = useDialogFocus(openMenu === 'effort', () => setOpenMenu(null))
+
+  // Open on the preferred side, but never let the menu run off the page: it
+  // is capped to the room available, and flips to the other side when that
+  // side has clearly more space (e.g. a composer near the top of a short window).
+  const measureFit = () => {
+    const rect = ref.current?.getBoundingClientRect()
+    if (!rect) return
+    const HEADER = 72 // keep clear of the page header
+    const above = rect.top - HEADER
+    const below = window.innerHeight - rect.bottom - 16
+    const preferUp = placement === 'up'
+    const preferred = preferUp ? above : below
+    const other = preferUp ? below : above
+    const flip = preferred < 260 && other > preferred
+    const side: 'up' | 'down' = flip ? (preferUp ? 'down' : 'up') : placement
+    const room = side === 'up' ? above : below
+    setFit({ side, maxHeight: Math.max(160, Math.min(420, Math.floor(room) - 8)) })
+  }
+  const toggleMenu = (menu: 'model' | 'effort') => {
+    if (openMenu !== menu) measureFit()
+    setOpenMenu(openMenu === menu ? null : menu)
+  }
+
+  // Phones keep the bottom sheet style for 'up' menus; from md up the menu is
+  // anchored to the chips on the measured side.
+  const menuPosition = cn(
+    placement === 'up' && 'max-md:fixed max-md:bottom-4 max-md:right-4 max-md:max-w-[calc(100%-2rem)]',
+    placement === 'up'
+      ? (fit.side === 'up' ? 'md:bottom-full md:right-0 md:mb-2' : 'md:top-full md:right-0 md:mt-2')
+      : (fit.side === 'down' ? 'left-0 top-full mt-2' : 'left-0 bottom-full mb-2'),
+  )
+  const menuStyle = { '--menu-max-h': `${fit.maxHeight}px` } as React.CSSProperties
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -106,7 +139,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
     <div className="relative flex min-w-0 items-center gap-0.5 lg:gap-1.5" ref={ref}>
       {/* Model chip */}
       <button
-        onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
+        onClick={() => toggleMenu('model')}
         className={cn(
           'flex min-w-0 items-center gap-1 h-9 px-1 lg:h-8 lg:gap-2 lg:px-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors',
           placement === 'down' && '-ml-2'
@@ -125,7 +158,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Effort chip */}
       <button
-        onClick={() => setOpenMenu(openMenu === 'effort' ? null : 'effort')}
+        onClick={() => toggleMenu('effort')}
         className="flex shrink-0 items-center gap-1 h-9 px-2 lg:h-8 lg:gap-2 rounded-lg text-text-secondary dark:text-text-dark-secondary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
         aria-expanded={openMenu === 'effort'}
         aria-haspopup="dialog"
@@ -141,7 +174,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Model dropdown */}
       {openMenu === 'model' && (
-        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} onKeyDown={handleListKeyDown} className={cn('absolute w-80 max-h-[min(420px,calc(100dvh-2rem))] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
+        <div ref={modelMenuRef} role="dialog" aria-label="Choose model" tabIndex={-1} onKeyDown={handleListKeyDown} style={menuStyle} className={cn('absolute w-80 max-md:max-h-[min(420px,calc(100dvh-2rem))] md:max-h-[var(--menu-max-h)] flex flex-col rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 animate-fade-in overflow-hidden', menuPosition)}>
           <div className="p-2 border-b border-border dark:border-border-dark">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" strokeWidth={1.5} />
@@ -232,7 +265,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
 
       {/* Effort dropdown */}
       {openMenu === 'effort' && (
-        <div ref={effortMenuRef} role="dialog" aria-label="Reasoning effort" tabIndex={-1} className={cn('absolute w-60 max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
+        <div ref={effortMenuRef} role="dialog" aria-label="Reasoning effort" tabIndex={-1} style={menuStyle} className={cn('absolute w-60 max-md:max-h-[calc(100dvh-2rem)] md:max-h-[var(--menu-max-h)] overflow-y-auto rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in', menuPosition)}>
           {EFFORT_TIERS.map(tier => (
             <button
               key={tier.id}

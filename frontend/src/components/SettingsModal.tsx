@@ -72,6 +72,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [isSavedAlert, setIsSavedAlert] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
   const [stopInput, setStopInput] = useState(settings.stop.join(', '))
+
+  // The dialog edits a working copy that Save writes back. It stays mounted
+  // while closed, so refresh the copy each time it opens; otherwise a model or
+  // effort picked in the header since the last open would be overwritten by
+  // the stale copy on Save. (Adjusting state during render is React's
+  // recommended way to reset state when a prop changes.)
+  const [wasOpen, setWasOpen] = useState(isOpen)
+  if (isOpen !== wasOpen) {
+    setWasOpen(isOpen)
+    if (isOpen) {
+      setLocalSettings(settings)
+      setStopInput(settings.stop.join(', '))
+    }
+  }
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
   const [revealedKeys, setRevealedKeys] = useState<Record<string, boolean>>({})
   const [keyBusy, setKeyBusy] = useState<string | null>(null)
