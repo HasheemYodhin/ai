@@ -121,3 +121,80 @@ async def test_transcribe_runs_worker_and_returns_text(monkeypatch):
     result = await _endpoint("/v1/transcribe", "POST")(request)
 
     assert result == {"text": "hello from audio"}
+
+
+class _FakeRequest:
+    def __init__(self, audio: bytes = b"fake webm"):
+        self.audio_base64 = base64.b64encode(audio).decode()
+        self.model = "base"
+
+
+@pytest.mark.asyncio
+async def test_hosted_transcription_is_never_used_unless_the_owner_opts_in(monkeypatch):
+    monkeypatch.delenv("DABBA_HOSTED_TRANSCRIPTION", raising=False)
+    monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
+    called = []
+    monkeypatch.setattr(audio_endpoints, "_transcribe_hosted", lambda audio, key: called.append(1) or "x")
+
+    with pytest.raises(HTTPException, match="ffmpeg is required") as error:
+        await _endpoint("/v1/transcribe", "POST")(_FakeRequest())
+
+    assert error.value.status_code == 503
+    assert called == []  # no audio left the server
+
+
+@pytest.mark.asyncio
+async def test_hosted_transcription_runs_when_enabled_and_local_cannot(monkeypatch):
+    monkeypatch.setenv("DABBA_HOSTED_TRANSCRIPTION", "openai")
+    monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
+    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+    seen = {}
+    monkeypatch.setattr(
+        audio_endpoints,
+        "_transcribe_hosted",
+        lambda audio, key: seen.update(audio=audio, key=key) or "hello from the cloud",
+    )
+
+    result = await _endpoint("/v1/transcribe", "POST")(_FakeRequest(b"some audio"))
+
+    assert result == {"text": "hello from the cloud"}
+    assert seen["audio"] == b"some audio"
+
+
+@pytest.mark.asyncio
+async def test_hosted_transcription_needs_a_key_and_a_reasonable_recording(monkeypatch):
+    monkeypatch.setenv("DABBA_HOSTED_TRANSCRIPTION", "openai")
+    monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
+    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "")
+    with pytest.raises(HTTPException, match="no OpenAI API key") as no_key:
+        await _endpoint("/v1/transcribe", "POST")(_FakeRequest())
+    assert no_key.value.status_code == 503
+
+    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+    with pytest.raises(HTTPException) as empty:
+        await _endpoint("/v1/transcribe", "POST")(_FakeRequest(b""))
+    assert empty.value.status_code == 400
+
+    monkeypatch.setattr(audio_endpoints, "MAX_HOSTED_AUDIO_BYTES", 4)
+    with pytest.raises(HTTPException) as too_long:
+        await _endpoint("/v1/transcribe", "POST")(_FakeRequest(b"too many bytes"))
+    assert too_long.value.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_status_reports_hosted_transcription_as_available(monkeypatch):
+    monkeypatch.setenv("DABBA_HOSTED_TRANSCRIPTION", "openai")
+    monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
+    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+
+    status = (await _endpoint("/v1/audio/status", "GET")())["transcription"]
+
+    assert status["available"] is True and status["hostedReady"] is True and status["ffmpegInstalled"] is False
+
+
+def test_audio_suffix_recognises_what_browsers_record():
+    assert audio_endpoints._audio_suffix(b"\x1a\x45\xdf\xa3rest") == ".webm"
+    assert audio_endpoints._audio_suffix(b"OggS....") == ".ogg"
+    assert audio_endpoints._audio_suffix(b"RIFF\x00\x00\x00\x00WAVEfmt ") == ".wav"
+    assert audio_endpoints._audio_suffix(b"\x00\x00\x00\x18ftypM4A ") == ".m4a"
+    assert audio_endpoints._audio_suffix(b"unknown") == ".webm"

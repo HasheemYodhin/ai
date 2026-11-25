@@ -7,7 +7,9 @@ responses, fully compatible with the OpenAI API format.
 
 import asyncio
 import json
+import logging
 import re
+import time
 from contextlib import aclosing
 from threading import Event
 from typing import AsyncGenerator, Dict, Iterator, Optional, Tuple
@@ -27,6 +29,8 @@ from dabba.api.auth import ApiKeyAuth
 from dabba.api.rate_limiter import RateLimiter
 from dabba.api.streaming_handler import StreamingHandler
 from dabba.providers.base import ReasoningDelta
+
+logger = logging.getLogger(__name__)
 
 
 def _content_to_text(content) -> str:
@@ -345,6 +349,8 @@ async def _handle_streaming_chat(
             usage_holder: Dict[str, int] = {}
             complete_text = ""
             event_buffer = ""
+            started = time.monotonic()
+            first_seen = False
             try:
                 async with aclosing(
                     _stream_provider_response(req, messages, model_engine, usage_holder)
@@ -353,6 +359,17 @@ async def _handle_streaming_chat(
                         if token is None:
                             yield ": keepalive\n\n"
                             continue
+                        if not first_seen:
+                            # Where "it is slow" comes from: how long the provider took to
+                            # start answering. A large model with a deep reasoning setting
+                            # can take many seconds here before any text exists.
+                            first_seen = True
+                            logger.info(
+                                "chat first output: model=%s after=%.1fs kind=%s",
+                                req.model,
+                                time.monotonic() - started,
+                                "reasoning" if isinstance(token, ReasoningDelta) else "text",
+                            )
                         if isinstance(token, ReasoningDelta):
                             yield handler.create_chunk("", reasoning=token)
                             continue

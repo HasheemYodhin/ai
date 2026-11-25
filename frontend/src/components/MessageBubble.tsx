@@ -4,6 +4,7 @@ import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
 import { AlertCircle, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
+import { useSettings } from '@/hooks/useSettings'
 import { useSmoothText } from '@/hooks/useSmoothText'
 import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
 import { RegenerateMenu } from './RegenerateMenu'
@@ -42,6 +43,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speakError, setSpeakError] = useState<string | null>(null)
   const [streamElapsed, setStreamElapsed] = useState(0)
+  const { settings } = useSettings()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const stopSpeakingRef = useRef<(() => void) | null>(null)
   // Guards against re-triggering auto-play on unrelated re-renders — this
@@ -402,10 +404,20 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 ) : isStreaming && !message.isGeneratingImage ? (
                   <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label="Dabba is thinking">
                     <span className="thinking-dot" />
-                    {streamElapsed >= 20 && (
-                      <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">Still thinking…</span>
+                    {streamElapsed >= 6 && (
+                      <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">
+                        {streamElapsed >= 20 ? 'Still waiting for the model' : 'Waiting for the model'} · {streamElapsed}s
+                      </span>
                     )}
                   </div>
+                ) : null}
+
+                {!shownContent && isStreaming && !message.isGeneratingImage && streamElapsed >= 15 ? (
+                  <p className="mt-1 max-w-md text-xs text-text-tertiary dark:text-text-dark-tertiary">
+                    {['high', 'xhigh', 'max'].includes(settings.effort)
+                      ? 'High reasoning effort makes large models slower to start. Medium effort is much quicker for everyday questions.'
+                      : 'Large models can be slow to start when they are busy. A smaller model usually replies faster.'}
+                  </p>
                 ) : null}
 
                 {message.generatedFiles && message.generatedFiles.length > 0 && (

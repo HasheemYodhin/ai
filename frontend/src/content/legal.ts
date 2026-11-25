@@ -68,7 +68,7 @@ export const PRIVACY: LegalDocument = {
         'Your conversations are saved on the Dabba server and tied to your account, so they are there when you sign in on any device. Other users cannot read them, but the person or company that runs the server can access the stored data.',
         'You can download all your conversations, or delete them, at any time from Settings, then Data Controls. Deleting removes them from the server.',
         'Your messages are sent to the Dabba server, and from there to the AI model you chose, so that the model can reply.',
-        'Voice input: if you use the microphone, your recording is sent to the Dabba server and turned into text there by a speech model that runs on the server. The recording is deleted as soon as it has been transcribed, and only the resulting text is used as your message.',
+        'Voice input: if you use the microphone, your recording is sent to the Dabba server and turned into text there. By default a speech model on the server does this and the recording is deleted as soon as it has been transcribed. If the person who runs the server has turned on hosted transcription, the recording is instead sent to OpenAI to be turned into text, under OpenAI\'s terms and privacy policy. Only the resulting text is used as your message.',
       ],
     },
     {
