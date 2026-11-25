@@ -120,6 +120,8 @@ export interface ScheduledSkill {
   name: string
   skillName: string
   instructions: string
+  /** Model the schedule runs with; empty uses the server default. */
+  model?: string | null
   cadence: ScheduleCadence
   intervalMinutes?: number | null
   timeOfDay?: string | null
@@ -138,7 +140,7 @@ export interface ScheduledSkillRun {
   taskId?: string | null
   status: string
   triggeredBy: string
-  output?: { message?: string } | null
+  output?: { content?: string; message?: string } | null
   error?: string | null
   startedAt: number
   completedAt?: number | null

@@ -651,6 +651,101 @@ def test_scheduled_skill_dispatch_and_execution_history(store):
     assert schedules.get(schedule["id"], user["id"])["lastStatus"] == "completed"
 
 
+def test_scheduled_skill_keeps_its_own_model(store):
+    user = IdentityService(store).signup("Scheduler", "model@example.com", "a-secure-password")
+    schedules = ScheduledSkillService(store)
+    schedule = schedules.create(
+        user["id"], "Daily words", "Words", "Give 5 new words",
+        cadence="daily", time_of_day="08:00", model="some-provider/some-model",
+    )
+    assert schedule["model"] == "some-provider/some-model"
+    updated = schedules.update(schedule["id"], user["id"], {"model": "another-model"})
+    assert updated["model"] == "another-model"
+    # A blank model means "use the server default".
+    assert schedules.update(schedule["id"], user["id"], {"model": ""})["model"] is None
+
+
+def test_scheduled_skill_prompt_carries_the_date_and_earlier_results(store):
+    user = IdentityService(store).signup("Scheduler", "context@example.com", "a-secure-password")
+    schedules = ScheduledSkillService(store)
+    schedule = schedules.create(
+        user["id"], "Daily words", "Words", "Give 5 new words", cadence="interval", interval_minutes=5
+    )
+    first = schedules.dispatch(schedule["id"], user["id"])
+    schedules.execute(first["id"], user["id"], lambda prompt: "1. ephemeral 2. ubiquitous")
+    second = schedules.dispatch(schedule["id"], user["id"])
+
+    prompt = schedules.prompt_with_context(schedule, user["id"], second["id"])
+
+    assert prompt.startswith("Give 5 new words")
+    assert "Today's date is" in prompt
+    assert "ephemeral" in prompt and "Do not repeat" in prompt
+    # The first run has nothing earlier to avoid.
+    assert "Earlier results" not in schedules.prompt_with_context(schedule, user["id"], first["id"])
+
+
+def test_existing_database_gains_the_schedule_model_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """CREATE TABLE scheduled_skills (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+            skill_name TEXT NOT NULL, instructions TEXT NOT NULL, cadence TEXT NOT NULL,
+            interval_minutes INTEGER, time_of_day TEXT,
+            weekdays_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1,
+            next_run_at INTEGER, last_run_at INTEGER, last_status TEXT,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        INSERT INTO scheduled_skills VALUES
+            ('old','u','Old','Old','do it','daily',NULL,'09:00','[]',1,1,NULL,NULL,1,1);"""
+    )
+    conn.commit()
+    conn.close()
+
+    store = PlatformStore(str(path))
+    store.initialize()
+    store.initialize()  # safe to run again on every start
+
+    row = store.fetchone("SELECT * FROM scheduled_skills WHERE id='old'")
+    assert row["model"] is None and row["name"] == "Old"
+
+
+def test_usage_summary_totals_recorded_tokens_per_model(store):
+    identity = IdentityService(store)
+    user = identity.signup("Counter", "counter@example.com", "a-secure-password")
+    other = identity.signup("Other", "other@example.com", "a-secure-password")
+    now = 1_700_000_000_000
+    with store.transaction() as conn:
+        for index, (owner, model, prompt, completion) in enumerate(
+            [
+                (user["id"], "model-a", 100, 50),
+                (user["id"], "model-a", 10, 5),
+                (user["id"], "model-b", 1, 2),
+                (other["id"], "model-a", 999, 999),  # someone else's usage is never counted
+            ]
+        ):
+            conn.execute(
+                "INSERT INTO tasks (id,kind,status,request_json,progress,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (f"t{index}", "chat", "completed", "{}", 1.0, now, now),
+            )
+            conn.execute(
+                "INSERT INTO model_usage (task_id,user_id,model,prompt_tokens,completion_tokens,created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (f"t{index}", owner, model, prompt, completion, now),
+            )
+
+    summary = TaskOrchestrator(store).usage_summary(user["id"])
+
+    assert summary["replies"] == 3
+    assert summary["promptTokens"] == 111 and summary["completionTokens"] == 57
+    assert summary["totalTokens"] == 168
+    assert [item["model"] for item in summary["byModel"]] == ["model-a", "model-b"]
+    assert summary["byModel"][0]["tokens"] == 165 and summary["byModel"][0]["replies"] == 2
+    assert TaskOrchestrator(store).usage_summary("nobody")["totalTokens"] == 0
+
+
 def test_first_signup_becomes_owner_and_later_ones_are_members(store):
     identity = IdentityService(store)
     owner = identity.signup("Owner", "owner@example.com", "owner-password-1")

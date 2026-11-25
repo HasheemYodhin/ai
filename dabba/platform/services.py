@@ -287,6 +287,37 @@ class TaskOrchestrator:
             )
         return self.get(task_id)
 
+    def usage_summary(self, user_id: str) -> Dict[str, Any]:
+        """Token totals for a user, from the usage recorded for each finished chat."""
+        rows = self.store.fetchall(
+            """SELECT model, COUNT(*) AS replies,
+                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                      COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+               FROM model_usage WHERE user_id=? GROUP BY model""",
+            (user_id,),
+        )
+        by_model = sorted(
+            (
+                {
+                    "model": row["model"],
+                    "replies": row["replies"],
+                    "promptTokens": row["prompt_tokens"],
+                    "completionTokens": row["completion_tokens"],
+                    "tokens": row["prompt_tokens"] + row["completion_tokens"],
+                }
+                for row in rows
+            ),
+            key=lambda item: item["tokens"],
+            reverse=True,
+        )
+        return {
+            "replies": sum(item["replies"] for item in by_model),
+            "promptTokens": sum(item["promptTokens"] for item in by_model),
+            "completionTokens": sum(item["completionTokens"] for item in by_model),
+            "totalTokens": sum(item["tokens"] for item in by_model),
+            "byModel": by_model,
+        }
+
     def fail_stale_chat_tasks(self, cutoff_ms: int) -> int:
         """Recover abandoned API chat tasks after allowing for active workers."""
         failure = {
@@ -2985,6 +3016,7 @@ class ScheduledSkillService:
         weekdays: Optional[list[int]] = None,
         enabled: bool = True,
         next_run_at: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._validate(
             name, instructions, cadence, interval_minutes, time_of_day, weekdays
@@ -2996,15 +3028,16 @@ class ScheduledSkillService:
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO scheduled_skills
-                   (id,user_id,name,skill_name,instructions,cadence,interval_minutes,
+                   (id,user_id,name,skill_name,instructions,model,cadence,interval_minutes,
                     time_of_day,weekdays_json,enabled,next_run_at,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     schedule_id,
                     user_id,
                     name.strip(),
                     skill_name.strip() or name.strip(),
                     instructions.strip(),
+                    (model or "").strip() or None,
                     cadence,
                     interval_minutes,
                     time_of_day,
@@ -3041,6 +3074,7 @@ class ScheduledSkillService:
             "name",
             "skillName",
             "instructions",
+            "model",
             "cadence",
             "intervalMinutes",
             "timeOfDay",
@@ -3072,13 +3106,14 @@ class ScheduledSkillService:
             )
         with self.store.transaction() as conn:
             conn.execute(
-                """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,cadence=?,
+                """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,model=?,cadence=?,
                    interval_minutes=?,time_of_day=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
                    WHERE id=? AND user_id=?""",
                 (
                     str(values["name"]).strip(),
                     str(values["skillName"]).strip(),
                     str(values["instructions"]).strip(),
+                    (str(values["model"] or "").strip() or None),
                     values["cadence"],
                     values["intervalMinutes"],
                     values["timeOfDay"],
@@ -3157,6 +3192,34 @@ class ScheduledSkillService:
             (now, max(1, min(limit, 100))),
         )
         return [self.dispatch(row["id"], row["user_id"], "schedule") for row in rows]
+
+    def prompt_with_context(
+        self, schedule: Dict[str, Any], user_id: str, current_run_id: str
+    ) -> str:
+        """The schedule's instructions plus what a model can't otherwise know.
+
+        A model doesn't know today's date, and each run starts with no memory of
+        the last one, so a recurring job like "new words every day" would keep
+        giving the same answer. Add the date and the last few results, and ask
+        for something new.
+        """
+        today = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
+        text = f"{schedule['instructions']}\n\nToday's date is {today} (UTC)."
+        earlier: list[str] = []
+        for run in self.runs(user_id, schedule["id"], 10):
+            if run["id"] == current_run_id or run["status"] != "completed":
+                continue
+            content = str((run.get("output") or {}).get("content") or "").strip()
+            if content:
+                earlier.append(content[:1500])
+            if len(earlier) == 5:
+                break
+        if earlier:
+            text += (
+                "\n\nEarlier results from this schedule are below. Do not repeat "
+                "them; give new content.\n---\n" + "\n---\n".join(earlier)[:5000]
+            )
+        return text
 
     def execute(
         self, run_id: str, user_id: str, executor: Callable[[str], str]
@@ -3279,6 +3342,7 @@ class ScheduledSkillService:
             "name": row["name"],
             "skillName": row["skill_name"],
             "instructions": row["instructions"],
+            "model": row["model"] if "model" in row.keys() else None,
             "cadence": row["cadence"],
             "intervalMinutes": row["interval_minutes"],
             "timeOfDay": row["time_of_day"],

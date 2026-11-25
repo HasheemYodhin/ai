@@ -52,6 +52,7 @@ export const PRIVACY: LegalDocument = {
         [
           'Account details: your name, your email address and your password. The password is stored only as a salted PBKDF2 SHA 256 hash, never in plain text.',
           'Sign in sessions: a session token that keeps you signed in.',
+          'Your conversations: the messages you send and the replies, including any files or images you attach, saved on the Dabba server and tied to your account.',
           'Work you create: projects, skills, scheduled tasks, Cowork items, agent definitions, saved memories and files you add, stored on the Dabba server.',
           'Provider API keys you add: stored encrypted on the server and never sent back to your browser.',
           'Usage records: which model was used and token counts, plus an audit log of sensitive actions such as sign in and changes to settings.',
@@ -64,7 +65,8 @@ export const PRIVACY: LegalDocument = {
       id: 'conversations',
       title: 'Your conversations',
       blocks: [
-        'Conversation history is saved in your browser, on the device you use. It is not uploaded to the Dabba server for storage. You can export or clear it at any time from Settings, then Data Controls.',
+        'Your conversations are saved on the Dabba server and tied to your account, so they are there when you sign in on any device. Other users cannot read them, but the person or company that runs the server can access the stored data.',
+        'You can download all your conversations, or delete them, at any time from Settings, then Data Controls. Deleting removes them from the server.',
         'Your messages are sent to the Dabba server, and from there to the AI model you chose, so that the model can reply.',
         'Voice input: if you use the microphone, your recording is sent to the Dabba server and turned into text there by a speech model that runs on the server. The recording is deleted as soon as it has been transcribed, and only the resulting text is used as your message.',
       ],
@@ -104,12 +106,12 @@ export const PRIVACY: LegalDocument = {
         'Dabba does not set cookies. It uses your browser\'s local storage for these items:',
         [
           'dabba-session-token: keeps you signed in.',
-          'dabba-conversations: your saved chats.',
+          'The chat you last had open, and any chat changes still waiting to be saved to the server.',
           'dabba-settings: your preferences.',
           'dabba-theme: your light or dark choice.',
           'A random guest identifier, used only to count free prompts.',
         ],
-        'You can remove all of these by clearing site data in your browser. Doing so signs you out and deletes chats saved on that device.',
+        'You can remove all of these by clearing site data in your browser. Doing so signs you out. Your conversations stay on the server and are there again when you sign in.',
       ],
     },
     {
@@ -129,7 +131,7 @@ export const PRIVACY: LegalDocument = {
       title: 'Security and retention',
       blocks: [
         'We protect data with hashed passwords, encrypted provider keys, security headers and sign in sessions that expire. No system is perfectly secure, so we cannot guarantee absolute security.',
-        'Account data stays until it is deleted. Guest counters are kept so the free limit keeps working. Chats saved in your browser stay until you clear them. [RETENTION_PERIODS: to be confirmed by legal counsel.]',
+        'Account data stays until it is deleted. Guest counters are kept so the free limit keeps working. Conversations stay until you delete them. [RETENTION_PERIODS: to be confirmed by legal counsel.]',
       ],
     },
     {
@@ -137,7 +139,7 @@ export const PRIVACY: LegalDocument = {
       title: 'Your choices and rights',
       blocks: [
         [
-          'Export or delete your saved chats yourself from Settings, then Data Controls.',
+          'Export or delete your conversations yourself from Settings, then Data Controls.',
           'Ask us to correct, export or delete your account data at [CONTACT_EMAIL]. [ACCOUNT_DELETION_PROCESS: to be confirmed.]',
           'Use Dabba as a guest if you prefer not to create an account.',
         ],

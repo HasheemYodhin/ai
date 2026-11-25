@@ -754,6 +754,22 @@ export class ApiClient {
     }))
   }
 
+  /** Every conversation with all its messages, for exporting. */
+  async fetchAllConversations(userId: string, signal?: AbortSignal): Promise<Conversation[]> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}&include_messages=true`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (!response.ok) throw new Error(`Failed to load conversations (status ${response.status})`)
+    const data = await response.json() as { conversations?: Conversation[] }
+    return data.conversations ?? []
+  }
+
+  /** Token usage recorded by the server for the signed-in user, totalled per model. */
+  fetchUsage(): Promise<ServerUsage> {
+    return this.platformRequest('/usage')
+  }
+
   /** One full conversation with its messages (only the owner can read it). */
   async fetchConversation(id: string, signal?: AbortSignal): Promise<Conversation> {
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
@@ -1108,6 +1124,14 @@ export class ApiClient {
 
     return fullContent
   }
+}
+
+export interface ServerUsage {
+  replies: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  byModel: { model: string; tokens: number; replies: number; promptTokens: number; completionTokens: number }[]
 }
 
 export interface PlatformUser {

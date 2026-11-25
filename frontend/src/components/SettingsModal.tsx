@@ -7,8 +7,8 @@ import { useMcpStatus } from '@/hooks/useMcpStatus'
 import { useProviderKeys } from '@/hooks/useProviderKeys'
 import { useAuth } from '@/hooks/useAuth'
 import { apiClient } from '@/api/client'
-import { EFFORT_TIERS, providerLabel } from '@/lib/models'
-import { loadConversationsForUsage, computeUsageStats } from '@/lib/usageStats'
+import { EFFORT_TIERS, modelDisplayName, providerLabel } from '@/lib/models'
+import { loadUsageStats, type UsageStats } from '@/lib/usageStats'
 import { cn } from '@/lib/utils'
 import { ApiKeyPromptModal } from './ApiKeyPromptModal'
 import type { ModelInfo } from '@/types'
@@ -103,17 +103,27 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
   // /v1/agent/keys and /v1/mcp/* are admin-only; regular users get an
   // explanation instead of "Failed to load ... (status 403)".
-  const { isAdmin } = useAuth()
+  const { isAdmin, currentUser } = useAuth()
   const { keys: providerKeys, isLoading: keysLoading, error: keysError, reload: reloadKeys } =
     useProviderKeys(isAdmin && isOpen && activeTab === 'keys')
 
   const { servers: mcpServers, isLoading: mcpLoading, error: mcpError, reload: reloadMcp } =
     useMcpStatus(isAdmin && isOpen && activeTab === 'tools')
 
-  const usageStats = useMemo(
-    () => (activeTab === 'usage' ? computeUsageStats(loadConversationsForUsage()) : null),
-    [activeTab]
-  )
+  // Usage and chats live on the server, so load them when the tab is opened.
+  const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
+  const [usageError, setUsageError] = useState<string | null>(null)
+  const [dataBusy, setDataBusy] = useState<'export' | 'clear' | null>(null)
+  const [dataError, setDataError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'usage' || !currentUser) return
+    const controller = new AbortController()
+    setUsageError(null)
+    loadUsageStats(currentUser.id, controller.signal)
+      .then(setUsageStats)
+      .catch(err => { if ((err as Error).name !== 'AbortError') setUsageError((err as Error).message || 'Could not load usage') })
+    return () => controller.abort()
+  }, [isOpen, activeTab, currentUser])
 
   // Hooks must run on every render regardless of `isOpen` — computing this
   // here (before the early return below) keeps the hook count stable across
@@ -205,25 +215,55 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }, 50)
   }
 
-  const handleExportAll = () => {
-    const raw = localStorage.getItem('dabba-conversations')
-    if (!raw) {
-      alert('No conversation history found to export.')
-      return
+  // Chats are stored on the server (not in this browser), so export and
+  // delete go through the server.
+  const handleExportAll = async () => {
+    if (!currentUser) return
+    setDataBusy('export'); setDataError(null)
+    try {
+      const conversations = await apiClient.fetchAllConversations(currentUser.id)
+      if (!conversations.length) { setDataError('You have no conversations to export yet.'); return }
+      const blob = new Blob([JSON.stringify(conversations, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dabba-conversations-export-${Date.now()}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setDataError((err as Error).message || 'Export failed')
+    } finally {
+      setDataBusy(null)
     }
-    const blob = new Blob([raw], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `dabba-conversations-export-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
-  const handleClearHistory = () => {
-    if (confirm('Are you sure you want to delete all conversation history? This action cannot be undone.')) {
+  const handleClearHistory = async () => {
+    if (!currentUser) return
+    if (!confirm('Delete all conversations in this account? They are removed from the Dabba server and from every device you use. This cannot be undone.')) return
+    setDataBusy('clear'); setDataError(null)
+    try {
+      const conversations = await apiClient.fetchConversations(currentUser.id)
+      let failed = 0
+      // A few at a time, so a long history doesn't open dozens of requests at once.
+      for (let i = 0; i < conversations.length; i += 4) {
+        const results = await Promise.allSettled(
+          conversations.slice(i, i + 4).map(conv => apiClient.deleteConversationRemote(currentUser.id, conv.id)),
+        )
+        failed += results.filter(result => result.status === 'rejected').length
+      }
+      if (failed) {
+        setDataError(`${failed} of ${conversations.length} conversations could not be deleted. Try again.`)
+        return
+      }
+      // Forget the copies this browser keeps (older versions saved chats here).
       localStorage.removeItem('dabba-conversations')
+      localStorage.removeItem(`dabba-pending-conversations:${currentUser.id}`)
+      localStorage.removeItem(`dabba_current_conversation_id_${currentUser.id}`)
       window.location.reload()
+    } catch (err) {
+      setDataError((err as Error).message || 'Could not delete conversations')
+    } finally {
+      setDataBusy(null)
     }
   }
 
@@ -900,6 +940,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {activeTab === 'memory' && <MemoryTabContent />}
 
             {/* Usage Tab */}
+            {activeTab === 'usage' && !usageStats && (
+              <div role={usageError ? 'alert' : 'status'} className="flex items-center justify-center gap-2 py-12 text-xs text-text-tertiary">
+                {usageError ? <span className="text-red-500">{usageError}</span> : <><Loader2 className="w-4 h-4 animate-spin" /> Loading usage…</>}
+              </div>
+            )}
             {activeTab === 'usage' && usageStats && (
               <div className="space-y-5 animate-fade-in">
                 <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
@@ -925,7 +970,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         return (
                           <div key={m.model} className="space-y-1">
                             <div className="flex items-center justify-between text-xs">
-                              <span className="font-medium text-text-primary dark:text-text-dark-primary">{m.model}</span>
+                              <span className="font-medium text-text-primary dark:text-text-dark-primary">{modelDisplayName(m.model)}</span>
                               <span className="text-text-tertiary">{m.tokens.toLocaleString()} tok · {m.replies} replies</span>
                             </div>
                             <div className="h-1.5 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary overflow-hidden">
@@ -938,7 +983,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   )}
                 </div>
                 <p className="text-xs text-text-tertiary">
-                  Computed from conversations saved in this browser. Clearing history (Data Controls) resets these stats.
+                  Totals come from your Dabba server and cover every device you sign in on. They include the short requests Dabba makes to name your chats.
                 </p>
               </div>
             )}
@@ -946,19 +991,21 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* Data Controls Tab */}
             {activeTab === 'data' && (
               <div className="space-y-5 animate-fade-in">
+                {dataError && <p role="alert" className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs text-red-600 dark:text-red-400">{dataError}</p>}
                 <div className="p-4 rounded-2xl bg-surface-secondary dark:bg-surface-dark-tertiary border border-border dark:border-border-dark space-y-2">
                   <h4 className="text-xs font-semibold text-text-primary dark:text-text-dark-primary flex items-center gap-1.5">
                     <Download className="w-4 h-4 text-accent" />
-                    Export Local Data
+                    Export Conversations
                   </h4>
                   <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-                    Download all your saved conversation records as a single structured JSON file. You can import this data back into the app or backup your sessions.
+                    Download all the conversations in this account as a single JSON file, as a backup or to use elsewhere.
                   </p>
                   <button
-                    onClick={handleExportAll}
+                    onClick={() => void handleExportAll()}
+                    disabled={dataBusy !== null}
                     className="flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-surface dark:bg-surface-dark-tertiary hover:bg-accent/10 border border-border dark:border-border-dark hover:border-accent/30 text-text-primary dark:text-text-dark-primary transition-colors"
                   >
-                    <Download className="w-4 h-4" />
+                    {dataBusy === 'export' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                     Export Conversations (.json)
                   </button>
                 </div>
@@ -969,13 +1016,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     Danger Zone
                   </h4>
                   <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-                    Permanently delete all conversation records stored in your browser session. This will clear the chat history list and resets the current window.
+                    Permanently delete every conversation in this account. They are removed from the Dabba server, so they disappear on all your devices too. This cannot be undone.
                   </p>
                   <button
-                    onClick={handleClearHistory}
+                    onClick={() => void handleClearHistory()}
+                    disabled={dataBusy !== null}
                     className="flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 text-red-500 hover:text-white transition-all active:scale-[0.98]"
                   >
-                    <Trash2 className="w-4 h-4" />
+                    {dataBusy === 'clear' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                     Clear History & Reset
                   </button>
                 </div>

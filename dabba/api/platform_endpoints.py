@@ -7,7 +7,7 @@ import binascii
 import asyncio
 import contextlib
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import FileResponse
@@ -301,6 +301,7 @@ class ScheduledSkillCreateRequest(BaseModel):
     name: str
     skillName: str
     instructions: str
+    model: Optional[str] = None
     cadence: str = "daily"
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = "09:00"
@@ -313,6 +314,7 @@ class ScheduledSkillUpdateRequest(BaseModel):
     name: Optional[str] = None
     skillName: Optional[str] = None
     instructions: Optional[str] = None
+    model: Optional[str] = None
     cadence: Optional[str] = None
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = None
@@ -745,12 +747,20 @@ def create_platform_router() -> APIRouter:
         finally:
             proxy.close()
 
-    def execute_skill(instructions: str) -> str:
+    def skill_executor_for(run: Dict[str, Any]) -> Callable[[str], str]:
+        """Executor for one run: uses the schedule's own model (not the server's
+        tiny default) and a prompt that carries today's date and earlier results."""
+        schedule = scheduled_skills.get(run["scheduleId"], run["userId"])
+        prompt = scheduled_skills.prompt_with_context(schedule, run["userId"], run["id"])
+        return lambda _instructions: execute_skill(prompt, schedule.get("model"))
+
+    def execute_skill(instructions: str, model: Optional[str] = None) -> str:
         from dabba.api.agent_endpoints import _get_agent_proxy
 
         proxy = _get_agent_proxy()
         return proxy._get_provider_registry().chat(
-            [
+            model=model or None,
+            messages=[
                 {"role": "system", "content": instructions},
                 {
                     "role": "user",
@@ -769,7 +779,7 @@ def create_platform_router() -> APIRouter:
                             scheduled_skills.execute,
                             run["id"],
                             run["userId"],
-                            execute_skill,
+                            skill_executor_for(run),
                         )
                     )
             except Exception:
@@ -1376,6 +1386,7 @@ def create_platform_router() -> APIRouter:
                 weekdays=body.weekdays,
                 enabled=body.enabled,
                 next_run_at=body.nextRunAt,
+                model=body.model,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1417,7 +1428,10 @@ def create_platform_router() -> APIRouter:
             run = scheduled_skills.dispatch(schedule_id, user["id"])
             launch(
                 asyncio.to_thread(
-                    scheduled_skills.execute, run["id"], user["id"], execute_skill
+                    scheduled_skills.execute,
+                    run["id"],
+                    user["id"],
+                    skill_executor_for(run),
                 )
             )
             return run
@@ -1439,6 +1453,12 @@ def create_platform_router() -> APIRouter:
             }
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
+
+    @router.get("/usage")
+    async def usage_summary(authorization: Optional[str] = Header(default=None)):
+        """The signed-in user's token usage, totalled per model."""
+        user = current_user(authorization)
+        return await asyncio.to_thread(tasks.usage_summary, user["id"])
 
     @router.post("/identity/signup", status_code=201)
     async def signup(body: SignupRequest):

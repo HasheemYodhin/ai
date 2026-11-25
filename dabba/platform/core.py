@@ -443,6 +443,7 @@ CREATE TABLE IF NOT EXISTS scheduled_skills (
     name TEXT NOT NULL,
     skill_name TEXT NOT NULL,
     instructions TEXT NOT NULL,
+    model TEXT,
     cadence TEXT NOT NULL,
     interval_minutes INTEGER,
     time_of_day TEXT,
@@ -493,10 +494,19 @@ class PlatformStore:
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
+    # Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS does
+    # not touch a table that already exists, so databases created earlier get
+    # these added here. (table, column, SQL type); names are constants.
+    _ADDED_COLUMNS = (("scheduled_skills", "model", "TEXT"),)
+
     def initialize(self) -> None:
         with self._lock, self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            for table, column, sql_type in self._ADDED_COLUMNS:
+                existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
