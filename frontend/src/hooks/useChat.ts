@@ -8,14 +8,22 @@ import { ocrImages } from '@/lib/ocr'
 import { createGeneratedDocument, type DocumentFormat } from '@/lib/download'
 
 const FILE_EXPORT_CAPABILITY = [
-  'This chat client can create and attach real PDF, Word (.docx), Excel (.xlsx),',
+  'This chat client can create and attach real PDF, Word (.docx), Markdown (.md), Excel (.xlsx),',
   'and PowerPoint (.pptx) files from your response. When the user asks for one',
   'of these formats, or asks to edit an attached document, provide the complete',
   'revised content for the whole file, not only a description of the changes.',
+  'When writing a document, use this Markdown structure so the file is laid out properly:',
+  'one "# Title" line first, then a one or two sentence summary;',
+  '"## " for sections and "### " for subsections, never skipping a level;',
+  'short paragraphs; "- " bullets for lists of items and "1. " for ordered steps;',
+  'a Markdown table with a header row for comparisons and data;',
+  '**bold** only for key terms; code in fenced blocks with a language.',
+  'Do not use emoji, HTML or decorative divider lines.',
+  'Return only the document itself: no sentence before the title and no closing remark after the end.',
   'For Excel, use markdown tables that preserve all rows and columns. For',
   'PowerPoint, use markdown headings for slide titles and bullets for slide content.',
-  'Return only the final revised document content. Do not narrate your plan,',
-  'repeat the request, expose internal reasoning, or say what you are about to do.',
+  'Do not narrate your plan, repeat the request, expose internal reasoning,',
+  'or say what you are about to do.',
   'Never claim that you cannot create binary files, never ask the user to copy',
   'and paste the response, and do not substitute extracted text for the requested file.',
 ].join(' ')
@@ -49,6 +57,8 @@ function requestedDocumentFormats(
     if (/\b(docx|word(?:\s+(?:file|document))?|microsoft word)\b/i.test(prompt)) formats.push('docx')
     if (/\b(xlsx|excel|spreadsheet|workbook)\b/i.test(prompt)) formats.push('xlsx')
     if (/\b(pptx|powerpoint|presentation|slide deck|slides)\b/i.test(prompt)) formats.push('pptx')
+    // "markdown file", "md document", ".md", "as markdown" - not every mention of markdown.
+    if (/\b(?:markdown|md)\s+(?:file|document|doc)\b|\.md\b|\b(?:as|in|to)\s+(?:a\s+)?markdown\b/i.test(prompt)) formats.push('md')
   }
 
   if (formats.length === 0 && EDIT_DOCUMENT_RE.test(prompt)) {
@@ -60,12 +70,21 @@ function requestedDocumentFormats(
   return formats
 }
 
-function generatedDocumentBaseName(message: Message, prompt = message.content): string {
+/** The first Markdown heading in generated text, without the markup. */
+function titleFromContent(content: string): string {
+  const heading = /^#{1,3}\s+(.+)$/m.exec(content)?.[1] ?? ''
+  return heading.replace(/[*_`#]/g, '').trim()
+}
+
+function generatedDocumentBaseName(message: Message, prompt = message.content, generated = ''): string {
   const attachmentName = message.documentAttachments?.[0]?.name
   if (attachmentName) {
     const stem = attachmentName.replace(/\.(pdf|docx|xlsx|pptx|txt|md|csv)$/i, '') || 'dabba-document'
     return EDIT_DOCUMENT_RE.test(prompt) ? `${stem}-edited` : stem
   }
+  // Name a new file after its own title, not after the request that asked for it.
+  const title = titleFromContent(generated)
+  if (title) return title.slice(0, 60)
   const usefulLine = message.content
     .split('\n')
     .map(line => line.trim())
@@ -352,7 +371,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       }, conversationId)
       if (requestedFormats.length > 0 && fullContent.trim() && userMessage) {
         const sourceMessage = attachmentMessage ?? userMessage
-        const baseName = generatedDocumentBaseName(sourceMessage, userMessage.content)
+        const baseName = generatedDocumentBaseName(sourceMessage, userMessage.content, fullContent)
         const generatedFiles = await Promise.all(
           requestedFormats.map(format => createGeneratedDocument(fullContent, baseName, format))
         )
@@ -590,7 +609,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       const finalContent = textParts.join('\n\n').trim()
       const generatedFiles = requestedFormats.length > 0 && finalContent
         ? await Promise.all(requestedFormats.map(format =>
-            createGeneratedDocument(finalContent, generatedDocumentBaseName(userMessage, content), format)
+            createGeneratedDocument(finalContent, generatedDocumentBaseName(userMessage, content, finalContent), format)
           ))
         : undefined
       updateMessage(assistantMessage.id, {
