@@ -4,7 +4,9 @@ WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-RUN npm run build
+# Public site address for the canonical link and sitemap.xml (optional).
+ARG SITE_URL=""
+RUN SITE_URL="$SITE_URL" npm run build
 
 FROM python:3.10-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \

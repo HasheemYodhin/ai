@@ -227,7 +227,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const navItem = (tab: TabType, icon: React.ReactNode, label: string) => (
     <button
       onClick={() => setActiveTab(tab)}
-      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all ${
+      className={`flex w-auto flex-shrink-0 items-center gap-2.5 whitespace-nowrap px-3 py-2.5 rounded-xl text-xs font-semibold transition-all md:w-full ${
         activeTab === tab
           ? 'bg-accent/15 dark:bg-accent/25 text-accent border border-accent/20'
           : 'text-text-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary border border-transparent'
@@ -239,26 +239,36 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/40 animate-fade-in sm:items-center">
       <div
         className="fixed inset-0"
         onClick={handleDismiss}
       />
 
       {/* Claude-style 2-Column Dialog Panel */}
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[640px] rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4 flex">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-3xl w-full h-[100dvh] sm:h-[640px] sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl overflow-hidden relative z-10 sm:border border-border dark:border-border-dark shadow-xl sm:m-4 flex flex-col md:flex-row">
 
         {/* Left Column: Navigation Sidebar */}
-        <div className="w-[200px] border-r border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary p-4 flex flex-col justify-between">
-          <div className="space-y-6">
-            <div className="flex items-center gap-2 px-2 py-1">
-              <SettingsIcon className="w-5 h-5 text-accent" />
-              <span className="font-semibold text-sm tracking-tight text-text-primary dark:text-text-dark-primary">
-                Dabba Settings
-              </span>
+        <div className="w-full flex-shrink-0 border-b border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary p-3 flex flex-col md:w-[200px] md:justify-between md:border-b-0 md:border-r md:p-4">
+          <div className="min-w-0 space-y-3 md:space-y-6">
+            <div className="flex items-center justify-between gap-2 px-2 py-1">
+              <div className="flex items-center gap-2">
+                <SettingsIcon className="w-5 h-5 text-accent" />
+                <span className="font-semibold text-sm tracking-tight text-text-primary dark:text-text-dark-primary">
+                  Dabba Settings
+                </span>
+              </div>
+              {/* Close lives here on phones, where the tab strip sits above the page header. */}
+              <button
+                onClick={handleDismiss}
+                aria-label="Close settings"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-tertiary dark:text-text-dark-secondary dark:hover:bg-surface-dark-tertiary md:hidden"
+              >
+                <X className="w-4.5 h-4.5" />
+              </button>
             </div>
 
-            <nav className="space-y-1">
+            <nav aria-label="Settings sections" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 scrollbar-thin md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0 md:pb-0">
               {navItem('general', <Globe className="w-4 h-4" />, 'General')}
               {navItem('model', <Sliders className="w-4 h-4" />, 'Model & Params')}
               {navItem('prompt', <MessageSquareCode className="w-4 h-4" />, 'System Prompts')}
@@ -274,7 +284,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           <button
             onClick={handleReset}
-            className="flex items-center justify-center gap-2 text-[11px] text-text-tertiary hover:text-text-secondary px-3 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors border border-transparent"
+            className="hidden items-center justify-center gap-2 text-[11px] text-text-tertiary hover:text-text-secondary px-3 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors border border-transparent md:flex"
             title="Reset to factory defaults"
           >
             <RefreshCw className="w-3.5 h-3.5" />
@@ -283,9 +293,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Right Column: Tab View Content */}
-        <div className="flex-1 flex flex-col bg-surface dark:bg-surface-dark-secondary overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col bg-surface dark:bg-surface-dark-secondary overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4.5 border-b border-border dark:border-border-dark">
+          <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4.5 border-b border-border dark:border-border-dark">
             <h3 className="font-semibold text-sm text-text-primary dark:text-text-dark-primary capitalize">
               {activeTab === 'model' ? 'Model & Parameters'
                 : activeTab === 'prompt' ? 'System Instructions'
@@ -300,14 +310,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             <button
               onClick={handleDismiss}
               aria-label="Close settings"
-              className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              className="hidden p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors md:block"
             >
               <X className="w-4.5 h-4.5" />
             </button>
           </div>
 
           {/* Content Pane */}
-          <div className="flex-1 overflow-y-auto scrollbar-thin p-6 space-y-6">
+          <div className="flex-1 overflow-y-auto scrollbar-thin p-4 sm:p-6 space-y-6">
 
             {/* General Tab */}
             {activeTab === 'general' && (
@@ -878,7 +888,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* Usage Tab */}
             {activeTab === 'usage' && usageStats && (
               <div className="space-y-5 animate-fade-in">
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
                   <StatCard label="Conversations" value={usageStats.totalConversations} />
                   <StatCard label="Messages" value={usageStats.totalMessages} />
                   <StatCard label="Total Tokens" value={usageStats.totalTokens.toLocaleString()} />
@@ -961,9 +971,17 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* Footer Controls */}
-          <div className="px-6 py-4 border-t border-border dark:border-border-dark flex items-center justify-end gap-2 bg-surface-secondary dark:bg-surface-dark-tertiary">
+          <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-border dark:border-border-dark flex items-center justify-end gap-2 bg-surface-secondary dark:bg-surface-dark-tertiary">
+            <button
+              onClick={handleReset}
+              title="Reset to factory defaults"
+              className="mr-auto flex items-center gap-1.5 rounded-xl px-2 py-2 text-[11px] text-text-tertiary hover:text-text-secondary md:hidden"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              Reset
+            </button>
             {isSavedAlert ? (
-              <span className="text-xs text-green-500 font-semibold flex items-center gap-1 animate-fade-in mr-auto">
+              <span className="text-xs text-green-500 font-semibold flex items-center gap-1 animate-fade-in md:mr-auto">
                 <Check className="w-4 h-4" />
                 Settings Saved!
               </span>

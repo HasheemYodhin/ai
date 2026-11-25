@@ -4,7 +4,6 @@ import { apiClient } from '@/api/client'
 import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
 import { cn } from '@/lib/utils'
-import { clearGuestPrefill, peekGuestPrefill } from '@/lib/guestPrefill'
 import logo from '../icon.svg'
 
 const MarkdownRenderer = lazy(loadMarkdownRenderer)
@@ -64,11 +63,7 @@ interface GuestChatPageProps {
 export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps) {
   const [guestId] = useState(getGuestId)
   const [messages, setMessages] = useState<GuestMessage[]>(loadSavedChat)
-  // A sample prompt chosen on the landing page fills the box but isn't sent,
-  // so it never uses a free prompt without the visitor pressing Send.
-  const [input, setInput] = useState(peekGuestPrefill)
-  // Use the sample prompt once; a later visit to /try starts empty.
-  useEffect(() => { clearGuestPrefill() }, [])
+  const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState<number | null>(null)
@@ -93,7 +88,9 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, sending])
 
-  const send = useCallback(async (text: string) => {
+  // `history` lets retry resend from a trimmed conversation without waiting
+  // for the state update to land.
+  const send = useCallback(async (text: string, history: GuestMessage[] = messages) => {
     const prompt = text.trim()
     if (!prompt || sending) return
     // Out of free prompts: ask to sign up instead of sending.
@@ -101,23 +98,28 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
       setGateOpen(true)
       return
     }
-    const next: GuestMessage[] = [...messages, { role: 'user', content: prompt }]
+    const next: GuestMessage[] = [...history, { role: 'user', content: prompt }]
     setMessages(next)
     setInput('')
     setError(null)
     setSending(true)
     try {
+      // Show the reply as it streams in: the assistant bubble appears with
+      // the first piece of text and grows from there.
+      let reply = ''
+      const onDelta = (piece: string) => {
+        reply += piece
+        setMessages([...next, { role: 'assistant', content: reply }])
+      }
       // Only the recent turns go to the server (it accepts up to 20 messages).
-      const result = await apiClient.guestChat(guestId, next.slice(-20))
+      const result = await apiClient.guestChat(guestId, next.slice(-20), onDelta)
       setRemaining(result.remaining)
       if (result.limitReached) {
-        setMessages(messages) // the prompt wasn't answered; keep it in the box instead
+        setMessages(history) // the prompt wasn't answered; keep it in the box instead
         setInput(prompt)
         setGateOpen(true)
       } else if (result.error) {
         setError(result.error)
-      } else if (result.content !== undefined) {
-        setMessages([...next, { role: 'assistant', content: result.content }])
       }
     } catch (err) {
       setError((err as Error).message)
@@ -138,15 +140,15 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
     }
   }
 
-  // Retry the last unanswered prompt after an error.
+  // Retry the last prompt after an error, dropping any partial reply it got.
   const retry = () => {
-    const last = messages[messages.length - 1]
-    if (last?.role !== 'user') return
-    setMessages(messages.slice(0, -1))
-    void send(last.content)
+    let lastUser = messages.length - 1
+    while (lastUser >= 0 && messages[lastUser].role !== 'user') lastUser -= 1
+    if (lastUser < 0) return
+    const prompt = messages[lastUser].content
+    void send(prompt, messages.slice(0, lastUser))
   }
 
-  const used = remaining === null ? null : Math.max(0, limit - remaining)
   const outOfPrompts = remaining === 0
 
   return (
@@ -164,11 +166,6 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {remaining !== null && (
-            <span className="hidden caption-2 text-text-secondary dark:text-text-dark-secondary sm:inline" aria-live="polite">
-              {outOfPrompts ? 'No free prompts left' : `${remaining} free ${remaining === 1 ? 'prompt' : 'prompts'} left`}
-            </span>
-          )}
           <button onClick={onLogin} className={cn('rounded-lg px-3 py-2 button-sm text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
             Log in
           </button>
@@ -185,7 +182,7 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
             <div className="pt-8 text-center sm:pt-16">
               <h1 className="heading-5 sm:heading-4 text-balance">Try Dabba</h1>
               <p className="body-3 mx-auto mt-3 max-w-md text-pretty text-text-secondary dark:text-text-dark-secondary">
-                Ask anything. You get {limit} free prompts, no account needed.
+                Ask anything.
               </p>
               <div className="mx-auto mt-8 grid max-w-2xl gap-3 sm:grid-cols-3">
                 {STARTERS.map(starter => (
@@ -217,7 +214,7 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
           ))}
 
           {/* Loading: a skeleton shaped like a reply, not a spinner. */}
-          {sending && (
+          {sending && messages[messages.length - 1]?.role === 'user' && (
             <div role="status" aria-label="Dabba is replying" className="space-y-2">
               {['w-11/12', 'w-9/12', 'w-6/12'].map(width => (
                 <div key={width} className={cn('h-4 animate-pulse rounded bg-surface-tertiary dark:bg-[#272727] motion-reduce:animate-none', width)} />
@@ -266,9 +263,6 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
               </button>
             </div>
           )}
-          <p className="mt-2 text-center caption-5 text-text-tertiary dark:text-text-dark-tertiary">
-            {used === null ? 'Free prompts are limited for guests.' : `${used} of ${limit} free prompts used. Sign up to save your chats.`}
-          </p>
         </form>
       </div>
 

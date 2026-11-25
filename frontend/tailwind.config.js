@@ -9,29 +9,31 @@ export default {
     extend: {
       colors: {
         surface: {
+          // Landing page palette: white cards on an off-white page.
           DEFAULT: '#ffffff',
-          secondary: '#f7f6f4',
-          tertiary: '#eeece8',
+          secondary: '#f2f1ef',
+          tertiary: '#e7e5e1',
           dark: '#000000',
           'dark-secondary': '#0a0a0a',
           'dark-tertiary': '#171717',
         },
         border: {
-          DEFAULT: '#e5e2dc',
+          DEFAULT: '#e2dfd9',
           dark: '#262626',
         },
         accent: {
-          DEFAULT: '#2f9e5c',
-          hover: '#268049',
-          light: '#d7f0e0',
-          'dark-hover': '#4cbf7c',
+          // Landing orange (#FF5B23), deepened so white text on it meets AA (4.7:1).
+          DEFAULT: '#cf4419',
+          hover: '#b23a14',
+          light: '#ffe4d8',
+          'dark-hover': '#ff7a4d',
         },
         // Secondary/tertiary meet WCAG AA (4.5:1) on every surface color of
         // their theme, including surface-tertiary hover/chip backgrounds.
         text: {
-          primary: '#1f1e1d',
-          secondary: '#5f5e5a', // 6.49 white, 6.01 secondary, 5.50 tertiary
-          tertiary: '#6a6862', // 5.57 white, 5.16 secondary, 4.72 tertiary
+          primary: '#141414',
+          secondary: '#56554f', // ~7.4 white, ~6.6 secondary, ~5.9 tertiary
+          tertiary: '#615f5a', // ~6.4 white, ~5.7 secondary, ~5.1 tertiary
           'dark-primary': '#f5f5f5',
           'dark-secondary': '#a3a3a3',
           'dark-tertiary': '#858585', // 5.69 black, 5.37 dark-secondary, 4.86 dark-tertiary
@@ -39,6 +41,7 @@ export default {
       },
       fontFamily: {
         sans: ['Geist', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['"Inter Tight"', 'Geist', 'system-ui', 'sans-serif'],
         mono: ['Geist Mono', 'ui-monospace', 'monospace'],
       },
       animation: {

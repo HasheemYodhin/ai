@@ -1,451 +1,611 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, ArrowUpRight } from '@phosphor-icons/react'
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from 'react'
+import {
+  ArrowUpRight, Brain, CalendarCheck, ChatsCircle, Check, FileArrowDown, FlowArrow, FolderSimple, ListChecks, Lock,
+  Microphone, Play, Plus, PlugsConnected, Quotes, Robot, ShieldCheck, Handshake, X,
+} from '@phosphor-icons/react'
+import { LANDING } from '@/content/landing'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { cn } from '@/lib/utils'
-import { setGuestPrefill } from '@/lib/guestPrefill'
 import logo from '../icon.svg'
 
 /**
- * Public landing page for signed out visitors at `/`, laid out like a
- * product announcement article: slim header, left aligned title with a
- * button pair, a narrow reading column with an "on this page" index,
- * sample prompt chips, a sample conversation, limitations, related cards
- * and a multi column footer.
+ * Public landing page for signed out visitors at `/`.
  *
- * Visual rules from the landing page design system still apply (Geist,
- * named text styles, token spacing, flat backgrounds, one easing curve).
- * Every number comes from the codebase; nothing is invented.
+ * Light, editorial SaaS look: off-white page, one large rounded hero card
+ * holding the navbar and a two column hero, a gradient media panel with
+ * floating glass cards, then features, steps, stats, a quote, plans, FAQ,
+ * a closing call to action and the footer. Copy lives in content/landing.ts.
+ *
+ * Motion is CSS only (`lp-rise`, `lp-float` in globals.css) and switches off
+ * under prefers-reduced-motion. The page is always light, whatever the app
+ * theme, because the design is built around the off-white background.
  */
 
-const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]'
-
-const SECTIONS = [
-  { id: 'how-it-works', label: 'How it works' },
-  { id: 'samples', label: 'Samples' },
-  { id: 'limitations', label: 'Limitations' },
-  { id: 'self-hosting', label: 'Self hosting' },
-]
-
-const SAMPLE_PROMPTS = [
-  'Explain how HTTPS keeps data private, in simple terms',
-  'Write a Python function that removes duplicates from a list',
-  'Summarize the key points of a text I paste',
-  'Plan a productive week with a simple daily schedule',
-]
-
-const LIMITATIONS = [
-  'Dabba is only as good as the model you pick. Answers can still be wrong or out of date, so check anything important.',
-  'The built in Dabba model is small and meant for experiments and casual chat. For real work, use a hosted model such as Claude, GPT, Gemini or NVIDIA.',
-  'Hosted models need provider keys on your server, and you pay those providers for what you use.',
-  'Features that run commands on the server, such as running code, Cowork, hooks and connectors, are limited to the workspace owner.',
-]
-
-const RELATED = [
-  { image: '/landing/cowork.png', alt: 'Dabba Cowork task box', tag: 'Cowork', title: 'Hand off a whole task and get a report back' },
-  { image: '/landing/connectors.png', alt: 'Dabba connectors catalogue', tag: 'Connectors', title: 'Bring GitHub, Drive, Slack and 57 more tools into the chat' },
-  { image: '/landing/scheduled-skills.png', alt: 'Dabba scheduled skills page', tag: 'Automation', title: 'Run saved instructions on a schedule' },
-]
-
-const SAMPLE_REPLY_CODE = `def dedupe(items):
-    seen = set()
-    result = []
-    for item in items:
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
-
-print(dedupe([3, 1, 3, 2, 1]))  # [3, 1, 2]`
-
-// ── Motion ───────────────────────────────────────────────────────────────
-
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
-/** Rises 32px and fades in once when it enters the viewport. */
-function Reveal({ children, className }: { children: ReactNode; className?: string }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [shown, setShown] = useState(prefersReducedMotion)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el || shown) return
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) {
-        setShown(true)
-        observer.disconnect() // reveal once; never replay on scroll up
-      }
-    }, { rootMargin: '0px 0px -10% 0px' })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [shown])
-
-  return (
-    <div
-      ref={ref}
-      className={cn(
-        'transition-[opacity,transform] duration-700 motion-reduce:transition-opacity',
-        EASE,
-        shown ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0 motion-reduce:translate-y-0',
-        className,
-      )}
-    >
-      {children}
-    </div>
-  )
-}
-
-// ── Building blocks ──────────────────────────────────────────────────────
-
-const primaryButton = cn(
-  'inline-flex items-center justify-center gap-2 rounded-full bg-accent px-3 py-2 button-md text-white',
-  'transition-[background-color,transform] duration-300 hover:bg-accent-hover active:scale-[0.98]',
-  EASE,
-)
-
-const secondaryButton = cn(
-  'inline-flex items-center justify-center gap-2 rounded-full border border-border px-3 py-2 button-md text-text-primary',
-  'dark:border-[#313131] dark:text-text-dark-primary',
-  'transition-[background-color,transform] duration-300 hover:bg-surface-tertiary active:scale-[0.98] dark:hover:bg-[#272727]',
-  EASE,
-)
-
-function SectionTitle({ id, children }: { id: string; children: ReactNode }) {
-  return <h2 id={id} className="heading-5 scroll-mt-24 text-balance">{children}</h2>
-}
-
-function Paragraph({ children }: { children: ReactNode }) {
-  return <p className="body-3 text-pretty text-text-secondary dark:text-text-dark-secondary">{children}</p>
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────
-
 interface LandingPageProps {
-  /** Opens the free guest chat at /try. */
   onTry: () => void
   onLogin: () => void
   onSignup: () => void
   onNavigate: (path: '/privacy' | '/terms') => void
 }
 
-export function LandingPage({ onTry, onLogin, onSignup, onNavigate }: LandingPageProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const [currentSection, setCurrentSection] = useState<string>(SECTIONS[0].id)
+const ICONS = [ChatsCircle, PlugsConnected, CalendarCheck]
+// One icon per entry in LANDING.capabilities, in the same order.
+const CAPABILITY_ICONS = [FolderSimple, Robot, Handshake, FileArrowDown, Microphone, Brain, ShieldCheck, ListChecks]
+const PROVIDER_INITIALS = ['A', 'O', 'G', 'N']
 
-  // Highlight the "on this page" entry for the section in view.
-  useEffect(() => {
-    const headings = SECTIONS.map(s => document.getElementById(s.id)).filter(Boolean) as HTMLElement[]
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) if (entry.isIntersecting) setCurrentSection(entry.target.id)
-    }, { rootMargin: '0px 0px -70% 0px' })
-    headings.forEach(h => observer.observe(h))
-    return () => observer.disconnect()
-  }, [])
+// Shared focus ring: dark outline that passes 3:1 on every surface here.
+const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--lp-ink)]'
 
-  useEffect(() => {
-    if (!menuOpen) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false) }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [menuOpen])
-
-  /** A sample chip fills the guest chat's message box; the visitor still presses Send. */
-  const trySample = (prompt: string) => {
-    setGuestPrefill(prompt)
-    onTry()
+/** Real href for crawlers and new-tab clicks, client side navigation otherwise. */
+function appLink(path: string, go: () => void) {
+  return {
+    href: path,
+    onClick: (e: MouseEvent<HTMLAnchorElement>) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+      e.preventDefault()
+      go()
+    },
   }
+}
 
-  const footerColumns: { title: string; links: { label: string; onClick?: () => void; href?: string }[] }[] = [
-    { title: 'Product', links: [{ label: 'Try Dabba', onClick: onTry }, { label: 'Create an account', onClick: onSignup }, { label: 'Log in', onClick: onLogin }] },
-    { title: 'Learn', links: [{ label: 'How it works', href: '#how-it-works' }, { label: 'Samples', href: '#samples' }, { label: 'Limitations', href: '#limitations' }] },
-    { title: 'Legal', links: [{ label: 'Privacy', onClick: () => onNavigate('/privacy') }, { label: 'Terms', onClick: () => onNavigate('/terms') }] },
-  ]
+/** Staggered entrance; `delay` in ms. */
+function rise(delay: number): CSSProperties {
+  return { animationDelay: `${delay}ms` }
+}
+
+function SectionHeading({ eyebrow, title, text }: { eyebrow: string; title: string; text?: string }) {
+  return (
+    <div className="max-w-2xl">
+      <p className="inline-flex items-center gap-2 rounded-full border border-[var(--lp-line)] bg-[var(--lp-card)] px-3 py-1 text-[13px] font-medium text-[var(--lp-ink-2)]">
+        <span className="h-1.5 w-1.5 rounded-full bg-[#FF5B23]" aria-hidden="true" />
+        {eyebrow}
+      </p>
+      <h2 className="mt-5 font-display text-[40px] font-semibold leading-[1.02] tracking-[-0.035em] text-[var(--lp-ink)] sm:text-[56px]">
+        {title}
+      </h2>
+      {text && <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-[var(--lp-muted)]">{text}</p>}
+    </div>
+  )
+}
+
+function AvatarStack({ items, size = 'md' }: { items: string[]; size?: 'sm' | 'md' }) {
+  const shades = ['bg-[var(--lp-btn)] text-[var(--lp-btn-text)]', 'bg-[#FF5B23] text-[#141414]', 'bg-[#d9d6d0] text-[#141414]', 'bg-[#3b6cf6] text-white']
+  return (
+    <span className="flex -space-x-2" aria-hidden="true">
+      {items.map((letter, i) => (
+        <span
+          key={letter + i}
+          className={cn(
+            'flex items-center justify-center rounded-full border-2 border-[var(--lp-card)] font-semibold',
+            size === 'sm' ? 'h-7 w-7 text-[11px]' : 'h-9 w-9 text-[13px]',
+            shades[i % shades.length],
+          )}
+        >
+          {letter}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function PillButton({ children, className, ...link }: { children: ReactNode; className?: string; href: string; onClick?: (e: MouseEvent<HTMLAnchorElement>) => void }) {
+  return (
+    <a
+      {...link}
+      className={cn(
+        'inline-flex items-center justify-center gap-2 rounded-full bg-[var(--lp-btn)] px-6 py-3.5 text-[15px] font-semibold text-[var(--lp-btn-text)]',
+        'shadow-[0_1px_0_rgba(255,255,255,0.15)_inset,0_8px_24px_-8px_rgba(20,20,20,0.45)] transition-transform duration-300 hover:-translate-y-0.5 active:translate-y-0',
+        FOCUS,
+        className,
+      )}
+    >
+      {children}
+    </a>
+  )
+}
+
+// ── Hero media panel ────────────────────────────────────────────────────────
+
+// Demo recording of the guest chat (public/demo). Re-record it with a real
+// screen capture by replacing these three files.
+// The video has a voiceover; captions in the .vtt match it line for line.
+const DEMO = {
+  mp4: '/demo/dabba-demo.mp4',
+  webm: '/demo/dabba-demo.webm',
+  poster: '/demo/dabba-demo-poster.jpg',
+  captions: '/demo/dabba-demo.vtt',
+}
+
+/** Modal video player: Escape or the close button dismisses it; focus stays inside. */
+function DemoDialog({ onClose, onTry }: { onClose: () => void; onTry: () => void }) {
+  const panelRef = useDialogFocus(true, onClose)
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  // Start with the voiceover on (the dialog was opened by a click). If the
+  // browser still blocks sound, play muted; the controls offer unmute.
+  // Under reduced motion, don't start on its own.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    video.play().catch(() => {
+      video.muted = true
+      video.play().catch(() => {})
+    })
+  }, [])
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141414]/70 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Dabba demo video"
+        tabIndex={-1}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-5xl overflow-hidden rounded-[24px] bg-[var(--lp-card)] shadow-[0_40px_80px_-20px_rgba(0,0,0,0.6)] outline-none"
+      >
+        <div className="flex items-center justify-between gap-4 px-5 py-3">
+          <p className="font-display text-[17px] font-semibold tracking-[-0.02em] text-[var(--lp-ink)]">See Dabba in action</p>
+          <button type="button" onClick={onClose} aria-label="Close video" className={cn('flex h-9 w-9 items-center justify-center rounded-full bg-[var(--lp-soft)] text-[var(--lp-ink)] hover:bg-[var(--lp-hover)]', FOCUS)}>
+            <X size={16} weight="bold" aria-hidden="true" />
+          </button>
+        </div>
+        <video
+          ref={videoRef}
+          controls
+          playsInline
+          preload="auto"
+          poster={DEMO.poster}
+          width={1280}
+          height={720}
+          className="block aspect-video h-auto w-full bg-[var(--lp-soft)]"
+        >
+          <source src={DEMO.webm} type="video/webm" />
+          <source src={DEMO.mp4} type="video/mp4" />
+          <track kind="captions" src={DEMO.captions} srcLang="en" label="English" />
+        </video>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <p className="text-[14px] text-[var(--lp-muted)]">Ask a question and watch the answer stream in.</p>
+          <a {...appLink('/try', onTry)} className={cn('inline-flex items-center rounded-full bg-[var(--lp-btn)] px-5 py-2.5 text-[14px] font-semibold text-[var(--lp-btn-text)]', FOCUS)}>
+            Try it yourself
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function HeroPanel({ onPlay }: { onPlay: () => void }) {
+  const { chips, stat, task } = LANDING.panel
+  return (
+    <div className="lp-light relative min-h-[520px] overflow-hidden rounded-[28px] bg-[radial-gradient(120%_90%_at_20%_10%,#ffd9c7_0%,#ff9a6b_38%,#ff5b23_70%,#c93b0c_100%)] sm:min-h-[600px] lg:min-h-full">
+      {/* Product window in the background: the first frame of the demo video. */}
+      <div aria-hidden="true" className="absolute inset-x-8 bottom-10 top-28 overflow-hidden rounded-[22px] border border-white/50 bg-white/30 p-2 shadow-[0_30px_60px_-20px_rgba(60,20,0,0.45)] backdrop-blur-sm sm:inset-x-12">
+        <img src={DEMO.poster} alt="" width={1280} height={720} loading="lazy" className="h-full w-full rounded-[16px] object-cover object-left-top opacity-95" />
+      </div>
+
+      {/* Stat card, top right */}
+      <div className="lp-rise absolute right-4 top-4 w-[168px] sm:right-6 sm:top-6 sm:w-[188px]" style={rise(250)}>
+        <div className="lp-float rounded-[20px] bg-[var(--lp-card)] p-4 shadow-[0_2px_4px_rgba(0,0,0,0.04),0_18px_40px_-12px_rgba(60,20,0,0.35)]" style={{ animationDelay: '0.4s' }}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--lp-muted)]">— {stat.label}</p>
+          <p className="mt-1 font-display text-[52px] font-semibold leading-none tracking-[-0.04em] text-[var(--lp-ink)]">{stat.value}</p>
+          <p className="mt-2 text-[12.5px] leading-snug text-[var(--lp-muted)]">{stat.caption}</p>
+        </div>
+      </div>
+
+      {/* Play button, centre: opens the demo video */}
+      <button
+        type="button"
+        onClick={onPlay}
+        aria-label="Play the Dabba demo video"
+        className={cn(
+          'lp-rise absolute left-1/2 top-1/2 flex h-[76px] w-[76px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-[var(--lp-card)] text-[var(--lp-ink)]',
+          'shadow-[0_0_0_10px_rgba(255,255,255,0.28),0_20px_40px_-10px_rgba(60,20,0,0.5)] transition-transform duration-300 hover:scale-105',
+          FOCUS,
+        )}
+        style={rise(150)}
+      >
+        <Play size={26} weight="fill" aria-hidden="true" />
+      </button>
+
+      {/* Glass prompt chips, staggered */}
+      <ul className="absolute left-4 top-[22%] space-y-3 sm:left-6 lg:top-[24%]" aria-label="Example prompts">
+        {chips.map((chip, i) => (
+          <li key={chip.text} className={cn('lp-rise', i === 1 && 'ml-8 sm:ml-14')} style={rise(350 + i * 120)}>
+            <div
+              className="lp-float flex items-center gap-2.5 rounded-full border border-white/50 bg-white/70 py-2 pl-2 pr-4 text-[13.5px] font-medium text-[var(--lp-ink)] shadow-[0_10px_30px_-12px_rgba(60,20,0,0.45)] backdrop-blur-md"
+              style={{ animationDelay: `${0.9 + i * 0.7}s` }}
+            >
+              <span className={cn('flex h-6 w-6 items-center justify-center rounded-full text-[var(--lp-btn-text)]', chip.tone === 'orange' ? 'bg-[#FF5B23]' : 'bg-[#3b6cf6]')}>
+                <Check size={13} weight="bold" aria-hidden="true" />
+              </span>
+              {chip.text}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {/* Scheduled task card, bottom right */}
+      <div className="lp-rise absolute bottom-4 right-4 w-[250px] sm:bottom-6 sm:right-6 sm:w-[270px]" style={rise(600)}>
+        <div className="lp-float flex items-center gap-3 rounded-[20px] bg-[var(--lp-card)] p-3 shadow-[0_2px_4px_rgba(0,0,0,0.04),0_18px_40px_-12px_rgba(60,20,0,0.35)]" style={{ animationDelay: '1.6s' }}>
+          <span className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-[14px] bg-[var(--lp-soft)] text-[var(--lp-ink)]">
+            <CalendarCheck size={26} aria-hidden="true" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 text-[13.5px] font-medium leading-snug text-[var(--lp-ink)]">{task.title}<br /><span className="text-[var(--lp-muted)]">{task.schedule}</span></p>
+            <div className="mt-1.5 flex items-center justify-between gap-2">
+              <p className="text-[14px] font-bold text-[var(--lp-ink)]">{task.status}</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--lp-btn)] px-2 py-0.5 text-[11.5px] font-semibold text-[var(--lp-btn-text)]">
+                <Check size={11} weight="bold" aria-hidden="true" />
+                {task.result}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
+
+export function LandingPage({ onTry, onLogin, onSignup, onNavigate }: LandingPageProps) {
+  const { hero } = LANDING
+  const tryLink = appLink('/try', onTry)
+  const signupLink = appLink('/signup', onSignup)
+  const loginLink = appLink('/login', onLogin)
+  const [demoOpen, setDemoOpen] = useState(false)
 
   return (
-    <div className="h-full overflow-y-auto bg-surface text-text-primary dark:bg-[#000000] dark:text-text-dark-primary">
-      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-accent focus:px-3 focus:py-2 focus:text-white">
+    <div className="h-full overflow-y-auto lp-theme overflow-x-hidden bg-[var(--lp-page)] font-sans text-[var(--lp-ink)]">
+      <a href="#main" className={cn('sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-full focus:bg-[var(--lp-card)] focus:px-4 focus:py-2', FOCUS)}>
         Skip to content
       </a>
 
-      {/* Slim header */}
-      <header className="sticky top-0 z-40 border-b border-border/60 bg-surface/80 backdrop-blur-md dark:border-[#272727] dark:bg-[#000000]/80">
-        <nav aria-label="Main" className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
-          <a href="/" aria-label="Dabba home" className="flex items-center gap-2">
-            <img src={logo} alt="" className="h-6 w-6 object-contain" />
-            <span className="title-3">Dabba</span>
-          </a>
-          <div className="hidden items-center gap-6 md:flex">
-            {SECTIONS.map(s => (
-              <a key={s.id} href={`#${s.id}`} className={cn('body-5 text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
-                {s.label}
-              </a>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onLogin} className={cn('hidden rounded-full px-3 py-2 button-sm text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors duration-300 sm:inline-flex', EASE)}>
-              Log in
-            </button>
-            <button onClick={onTry} className={cn(primaryButton, 'button-sm')}>
-              Try Dabba <ArrowUpRight size={16} weight="bold" aria-hidden="true" />
-            </button>
-            <button
-              onClick={() => setMenuOpen(open => !open)}
-              aria-label={menuOpen ? 'Close menu' : 'Open menu'}
-              aria-expanded={menuOpen}
-              aria-controls="mobile-menu"
-              className="relative flex h-10 w-10 items-center justify-center rounded-lg md:hidden"
-            >
-              <span className={cn('absolute h-0.5 w-4 rounded-full bg-current transition-transform duration-500', EASE, menuOpen ? 'rotate-45' : '-translate-y-1')} />
-              <span className={cn('absolute h-0.5 w-4 rounded-full bg-current transition-transform duration-500', EASE, menuOpen ? '-rotate-45' : 'translate-y-1')} />
-            </button>
-          </div>
-        </nav>
-      </header>
+      {/* ── Hero card ─────────────────────────────────────────────────── */}
+      <div className="px-3 pt-3 sm:px-4 sm:pt-4">
+        <div className="mx-auto max-w-[1408px] rounded-[32px] bg-[var(--lp-card)] p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] sm:p-4">
+          <header className="flex items-center justify-between gap-4 px-3 py-2 sm:px-5 sm:py-3">
+            <a href="/" className={cn('flex items-center gap-2 rounded-full', FOCUS)} aria-label="Dabba home">
+              <img src={logo} alt="" width={30} height={30} className="h-[30px] w-[30px]" />
+              <span className="font-display text-[20px] font-semibold tracking-[-0.03em]">Dabba</span>
+            </a>
 
-      {/* Mobile menu: full height panel; links rise in one after another. */}
-      <div
-        id="mobile-menu"
-        aria-hidden={!menuOpen}
-        className={cn(
-          'fixed inset-x-0 bottom-0 top-16 z-30 flex flex-col bg-surface/95 px-6 pt-6 backdrop-blur-xl transition-opacity duration-500 dark:bg-[#000000]/95 md:hidden',
-          EASE,
-          menuOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-        )}
-      >
-        {[...SECTIONS.map(s => ({ key: s.id, label: s.label, href: `#${s.id}` })), { key: 'login', label: 'Log in', href: '' }].map((item, index) => {
-          const style = { transitionDelay: menuOpen ? `${Math.min(index * 60, 400)}ms` : '0ms' }
-          const className = cn(
-            'border-b border-border py-4 text-left heading-6 transition-[opacity,transform] duration-500 dark:border-[#272727]',
-            EASE,
-            menuOpen ? 'translate-y-0 opacity-100' : 'translate-y-6 opacity-0',
-          )
-          return item.href ? (
-            <a key={item.key} href={item.href} tabIndex={menuOpen ? 0 : -1} onClick={() => setMenuOpen(false)} style={style} className={className}>{item.label}</a>
-          ) : (
-            <button key={item.key} tabIndex={menuOpen ? 0 : -1} onClick={() => { setMenuOpen(false); onLogin() }} style={style} className={className}>{item.label}</button>
-          )
-        })}
+            <nav aria-label="Sections" className="hidden items-center lg:flex">
+              {LANDING.nav.map((link, i) => (
+                <span key={link.href} className="flex items-center">
+                  {i > 0 && <span className="mx-3 h-1 w-1 rounded-full bg-[var(--lp-dot)]" aria-hidden="true" />}
+                  <a href={link.href} className={cn('rounded-md px-1 text-[14.5px] font-medium text-[var(--lp-ink-2)] transition-colors hover:text-[var(--lp-ink)]', FOCUS)}>
+                    {link.label}
+                  </a>
+                </span>
+              ))}
+            </nav>
+
+            <div className="flex items-center gap-2 sm:gap-5">
+              <ThemeToggle />
+              <a {...loginLink} className={cn('rounded-md px-1 text-[14.5px] font-medium text-[var(--lp-ink-2)] hover:text-[var(--lp-ink)]', FOCUS)}>Log in</a>
+              <a
+                {...signupLink}
+                className={cn('inline-flex items-center gap-1.5 rounded-full bg-[var(--lp-btn)] py-2.5 pl-4 pr-4 text-[14px] text-[var(--lp-btn-text)] transition-transform duration-300 hover:-translate-y-0.5 sm:pl-5', FOCUS)}
+              >
+                <span className="font-semibold">Get started</span>
+                <span className="hidden text-[var(--lp-btn-text)] opacity-70 sm:inline">· Sign up</span>
+              </a>
+            </div>
+          </header>
+
+          <main id="main" className="mt-2 grid grid-cols-1 gap-4 lg:grid-cols-[1.05fr_1fr]">
+            {/* Left column */}
+            <div className="flex flex-col justify-between px-3 pb-4 pt-6 sm:px-6 sm:pt-10 lg:px-8 lg:pb-8">
+              <div className="lp-rise flex items-center gap-3" style={rise(0)}>
+                <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--lp-soft)]">
+                  <AvatarStack items={['A', 'G']} size="sm" />
+                </span>
+                <p className="text-[14px] leading-tight">
+                  <span className="block font-semibold">{hero.proofTitle}</span>
+                  <a href={hero.proofLink.href} className={cn('rounded text-[var(--lp-muted)] underline decoration-[var(--lp-dot)] underline-offset-4 hover:text-[var(--lp-ink)]', FOCUS)}>
+                    {hero.proofLink.label}
+                  </a>
+                </p>
+              </div>
+
+              <h1 className="lp-rise mt-10 font-display text-[clamp(88px,16vw,168px)] font-semibold leading-[0.86] tracking-[-0.06em] lg:text-[clamp(120px,11.5vw,168px)]" style={rise(80)}>
+                {hero.headline}
+                <sup className="ml-1 align-super text-[max(0.22em,24px)] font-medium tracking-[-0.02em] text-[#FF5B23]">{hero.headlineMark}</sup>
+              </h1>
+
+              <div className="lp-rise mt-10" style={rise(160)}>
+                <hr className="border-[var(--lp-line)]" />
+                <p className="py-6 text-[18px] leading-relaxed text-[var(--lp-muted)] sm:text-[20px]">
+                  {hero.subheadline[0]}
+                  <br className="hidden sm:block" /> {hero.subheadline[1]}
+                </p>
+                <hr className="border-[var(--lp-line)]" />
+              </div>
+
+              <div className="lp-rise flex flex-wrap items-center gap-4 py-6" style={rise(240)}>
+                <AvatarStack items={PROVIDER_INITIALS} />
+                <p className="text-[14px] leading-tight">
+                  <span className="block font-semibold">{hero.badgeTitle}</span>
+                  <span className="text-[var(--lp-muted)]">{hero.badgeText}</span>
+                </p>
+                <span className="hidden h-9 w-px bg-[var(--lp-line)] sm:block" aria-hidden="true" />
+                <p className="flex items-center gap-1.5 text-[15px] font-semibold">
+                  <Lock size={18} weight="fill" className="text-[#FF5B23]" aria-hidden="true" />
+                  {hero.badgeAside}
+                </p>
+              </div>
+
+              <div className="lp-rise flex flex-wrap items-center gap-x-6 gap-y-3" style={rise(320)}>
+                <PillButton {...tryLink}>{hero.primaryCta}</PillButton>
+                <a {...signupLink} className={cn('group inline-flex items-center gap-1.5 rounded-full px-1 py-2 text-[15px] font-semibold', FOCUS)}>
+                  {hero.secondaryCta}
+                  <ArrowUpRight size={18} weight="bold" aria-hidden="true" className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                </a>
+              </div>
+            </div>
+
+            {/* Right column */}
+            <HeroPanel onPlay={() => setDemoOpen(true)} />
+          </main>
+        </div>
       </div>
 
-      <main id="main">
-        {/* Title block */}
-        <section className="mx-auto max-w-6xl px-4 pb-12 pt-16 sm:px-6 sm:pt-24">
-          <div className="max-w-3xl">
-            <p className="caption-4 text-text-secondary dark:text-text-dark-secondary">Dabba · Product</p>
-            <h1 className="heading-3 sm:heading-2 mt-4 text-balance">
-              Introducing Dabba, a self hosted AI workspace
-            </h1>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <button onClick={onTry} className={primaryButton}>
-                Try Dabba <ArrowUpRight size={18} weight="bold" aria-hidden="true" />
-              </button>
-              <button onClick={onSignup} className={secondaryButton}>
-                Create an account
-              </button>
+      {/* ── Works with ────────────────────────────────────────────────── */}
+      <section aria-label="Works with" className="mx-auto max-w-[1408px] px-6 py-12 sm:py-14">
+        <ul className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 sm:justify-between sm:px-6">
+          <li className="w-full text-center text-[13px] font-medium text-[var(--lp-muted)] sm:w-auto">Works with models from</li>
+          {LANDING.worksWith.map(name => (
+            <li key={name} className="font-display text-[22px] font-semibold tracking-[-0.03em] text-[var(--lp-ink)] opacity-60">{name}</li>
+          ))}
+        </ul>
+      </section>
+
+      {/* ── Features ──────────────────────────────────────────────────── */}
+      <section id="features" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-14 sm:px-8 sm:py-20">
+        <SectionHeading eyebrow="Product" title="Everything you need to get work done with AI." />
+        <div className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-3">
+          {LANDING.features.map((f, i) => {
+            const Icon = ICONS[i] ?? FlowArrow
+            return (
+              <article key={f.title} className="group rounded-[28px] bg-[var(--lp-soft-2)] p-7 transition-transform duration-300 hover:-translate-y-1 sm:p-8">
+                <span className={cn('flex h-12 w-12 items-center justify-center rounded-2xl', i === 0 ? 'bg-[#FF5B23] text-[var(--lp-ink)]' : 'bg-[var(--lp-card)] text-[var(--lp-ink)]')}>
+                  <Icon size={24} aria-hidden="true" />
+                </span>
+                <h3 className="mt-16 font-display text-[26px] font-semibold leading-tight tracking-[-0.03em]">{f.title}</h3>
+                <p className="mt-3 text-[15.5px] leading-relaxed text-[var(--lp-muted)]">{f.text}</p>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── Capabilities ──────────────────────────────────────────────── */}
+      <section id="capabilities" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-10 sm:px-8 sm:py-14">
+        <SectionHeading eyebrow="Everything included" title="More than a chat box." text="Dabba comes with the tools around the conversation, so work does not leave the workspace." />
+        <ul className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {LANDING.capabilities.map((c, i) => {
+            const Icon = CAPABILITY_ICONS[i] ?? FlowArrow
+            return (
+              <li key={c.title} className="rounded-[24px] bg-[var(--lp-card)] p-6 transition-transform duration-300 hover:-translate-y-1">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--lp-soft)] text-[var(--lp-ink)]">
+                  <Icon size={22} aria-hidden="true" />
+                </span>
+                <h3 className="mt-8 font-display text-[20px] font-semibold tracking-[-0.02em]">{c.title}</h3>
+                <p className="mt-2 text-[14.5px] leading-relaxed text-[var(--lp-muted)]">{c.text}</p>
+              </li>
+            )
+          })}
+        </ul>
+      </section>
+
+      {/* ── How it works ──────────────────────────────────────────────── */}
+      <section id="how-it-works" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-14 sm:px-8 sm:py-20">
+        <div className="rounded-[32px] bg-[var(--lp-card)] p-7 sm:p-12">
+          <SectionHeading eyebrow="How it works" title="From first question to running on its own." />
+          <ol className="mt-12 grid grid-cols-1 border-t border-[var(--lp-line)] md:grid-cols-3">
+            {LANDING.steps.map((s, i) => (
+              <li key={s.title} className={cn('py-8 md:px-8 md:first:pl-0', i > 0 && 'border-t border-[var(--lp-line)] md:border-l md:border-t-0')}>
+                <span className="font-display text-[15px] font-semibold text-[var(--lp-accent-text)]">0{i + 1}</span>
+                <h3 className="mt-6 font-display text-[24px] font-semibold tracking-[-0.03em]">{s.title}</h3>
+                <p className="mt-2 text-[15.5px] leading-relaxed text-[var(--lp-muted)]">{s.text}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* ── Models and connectors ─────────────────────────────────────── */}
+      <section id="models" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-10 sm:px-8 sm:py-14">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <div className="rounded-[32px] bg-[var(--lp-card)] p-7 sm:p-10">
+            <SectionHeading eyebrow="Models" title={LANDING.models.title} text={LANDING.models.text} />
+            <ul className="mt-8 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {LANDING.models.providers.map(p => (
+                <li key={p.name} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--lp-soft)] px-4 py-3">
+                  <span className="font-display text-[17px] font-semibold tracking-[-0.02em]">{p.name}</span>
+                  <span className="text-right text-[13px] text-[var(--lp-muted)]">{p.family}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-[32px] bg-[var(--lp-soft-2)] p-7 sm:p-10">
+            <SectionHeading eyebrow="Connectors" title={LANDING.models.connectorsTitle} text={LANDING.models.connectorsText} />
+            <ul className="mt-8 flex flex-wrap gap-2">
+              {LANDING.models.connectors.map(name => (
+                <li key={name} className="rounded-full bg-[var(--lp-card)] px-4 py-2 text-[14.5px] font-medium">{name}</li>
+              ))}
+              <li className="rounded-full border border-[var(--lp-line)] px-4 py-2 text-[14.5px] font-medium text-[var(--lp-muted)]">and more</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Stats band ────────────────────────────────────────────────── */}
+      <section aria-label="Dabba in numbers" className="mx-auto max-w-[1408px] px-4 py-6 sm:px-8">
+        <dl className="grid grid-cols-2 gap-px overflow-hidden lp-dark rounded-[32px] bg-[var(--lp-band-line)] lg:grid-cols-4">
+          {LANDING.stats.map(s => (
+            <div key={s.label} className="bg-[var(--lp-band)] px-6 py-10 sm:px-10 sm:py-14">
+              <dt className="text-[14px] text-[var(--lp-muted)]">{s.label}</dt>
+              <dd className="mt-2 font-display text-[56px] font-semibold leading-none tracking-[-0.05em] text-[var(--lp-ink)] sm:text-[72px]">{s.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
+      {/* ── Quote ─────────────────────────────────────────────────────── */}
+      <section aria-label="Privacy" className="mx-auto max-w-[1408px] px-4 py-14 sm:px-8 sm:py-20">
+        <figure className="mx-auto max-w-4xl text-center">
+          <Quotes size={40} weight="fill" className="mx-auto text-[#FF5B23]" aria-hidden="true" />
+          <blockquote className="mt-6 font-display text-[28px] font-medium leading-[1.2] tracking-[-0.03em] sm:text-[40px]">
+            {LANDING.quote.text}
+          </blockquote>
+          <figcaption className="mt-6 text-[14px] font-medium text-[var(--lp-muted)]">— {LANDING.quote.source}</figcaption>
+        </figure>
+      </section>
+
+      {/* ── Security ──────────────────────────────────────────────────── */}
+      <section id="security" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-14 sm:px-8 sm:py-20">
+        <SectionHeading eyebrow="Security" title="Built to be run by you." text="Dabba is self hosted, so the controls sit with the person who runs the server." />
+        <ul className="mt-12 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {LANDING.security.map(item => (
+            <li key={item.title} className="rounded-[24px] bg-[var(--lp-soft-2)] p-6 sm:p-7">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--lp-btn)] text-[var(--lp-btn-text)]">
+                <Check size={18} weight="bold" aria-hidden="true" />
+              </span>
+              <h3 className="mt-6 font-display text-[20px] font-semibold tracking-[-0.02em]">{item.title}</h3>
+              <p className="mt-2 text-[14.5px] leading-relaxed text-[var(--lp-muted)]">{item.text}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* ── Plans ─────────────────────────────────────────────────────── */}
+      <section id="plans" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-14 sm:px-8 sm:py-20">
+        <SectionHeading eyebrow="Plans" title="Start small. Run it your way." text="Model usage is billed by the provider you choose, using your own keys." />
+        <div className="mt-12 grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {LANDING.plans.map(plan => {
+            const link = plan.target === 'try' ? tryLink : signupLink
+            return (
+              <article
+                key={plan.name}
+                className={cn(
+                  'flex flex-col rounded-[28px] p-7 sm:p-8',
+                  plan.featured ? 'bg-[var(--lp-card)] shadow-[0_2px_4px_rgba(0,0,0,0.03),0_24px_48px_-24px_rgba(0,0,0,0.25)] ring-1 ring-[var(--lp-line)]' : 'bg-[var(--lp-soft-2)]',
+                )}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-display text-[28px] font-semibold tracking-[-0.03em]">{plan.name}</h3>
+                  <span className={cn('rounded-full px-3 py-1 text-[12.5px] font-semibold', plan.featured ? 'bg-[#FF5B23] text-[var(--lp-ink)]' : 'bg-[var(--lp-card)] text-[var(--lp-ink-2)]')}>
+                    {plan.tag}
+                  </span>
+                </div>
+                <p className="mt-3 text-[15.5px] text-[var(--lp-muted)]">{plan.summary}</p>
+                <hr className="my-6 border-[var(--lp-line)]" />
+                <ul className="flex-1 space-y-3">
+                  {plan.points.map(point => (
+                    <li key={point} className="flex items-start gap-3 text-[15px]">
+                      <span className="mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[var(--lp-btn)] text-[var(--lp-btn-text)]">
+                        <Check size={11} weight="bold" aria-hidden="true" />
+                      </span>
+                      {point}
+                    </li>
+                  ))}
+                </ul>
+                <a
+                  {...link}
+                  className={cn(
+                    'mt-8 inline-flex items-center justify-center rounded-full px-5 py-3 text-[15px] font-semibold transition-transform duration-300 hover:-translate-y-0.5',
+                    plan.featured ? 'bg-[var(--lp-btn)] text-[var(--lp-btn-text)]' : 'bg-[var(--lp-card)] text-[var(--lp-ink)]',
+                    FOCUS,
+                  )}
+                >
+                  {plan.cta}
+                </a>
+              </article>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ── FAQ ───────────────────────────────────────────────────────── */}
+      <section id="faq" className="mx-auto max-w-[1408px] scroll-mt-6 px-4 py-14 sm:px-8 sm:py-20">
+        <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_1.4fr]">
+          <SectionHeading eyebrow="FAQ" title="Questions, answered." />
+          <div className="border-t border-[var(--lp-line)]">
+            {LANDING.faqs.map(item => (
+              <details key={item.q} className="group border-b border-[var(--lp-line)]">
+                <summary className={cn('flex cursor-pointer list-none items-center justify-between gap-6 rounded-lg py-6 [&::-webkit-details-marker]:hidden', FOCUS)}>
+                  <h3 className="font-display text-[19px] font-semibold tracking-[-0.02em] sm:text-[21px]">{item.q}</h3>
+                  <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[var(--lp-card)] transition-transform duration-300 group-open:rotate-45">
+                    <Plus size={16} weight="bold" aria-hidden="true" />
+                  </span>
+                </summary>
+                <p className="max-w-2xl pb-6 text-[16px] leading-relaxed text-[var(--lp-muted)]">{item.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Final CTA ─────────────────────────────────────────────────── */}
+      <section aria-label="Get started" className="px-3 sm:px-4">
+        <div className="relative mx-auto max-w-[1408px] lp-dark overflow-hidden rounded-[32px] bg-[var(--lp-band)] px-7 py-16 text-[var(--lp-ink)] sm:px-14 sm:py-24">
+          <div aria-hidden="true" className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-[#FF5B23] opacity-90 blur-[2px]" />
+          <div className="relative max-w-2xl">
+            <h2 className="font-display text-[44px] font-semibold leading-[0.98] tracking-[-0.045em] sm:text-[72px]">{LANDING.finalCta.title}</h2>
+            <p className="mt-6 max-w-lg text-[17px] leading-relaxed text-[var(--lp-muted)]">{LANDING.finalCta.text}</p>
+            <div className="mt-10 flex flex-wrap items-center gap-x-6 gap-y-3">
+              <a {...tryLink} className={cn('inline-flex items-center rounded-full bg-[var(--lp-btn)] px-6 py-3.5 text-[15px] font-semibold text-[var(--lp-btn-text)] transition-transform duration-300 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white')}>
+                {hero.primaryCta}
+              </a>
+              <a {...signupLink} className="group inline-flex items-center gap-1.5 rounded-full px-1 py-2 text-[15px] font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">
+                {hero.secondaryCta}
+                <ArrowUpRight size={18} weight="bold" aria-hidden="true" className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+              </a>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="mx-auto max-w-6xl px-4 sm:px-6">
-          <Reveal>
-            <div className="overflow-hidden rounded-2xl border border-border bg-surface-secondary dark:border-[#272727] dark:bg-[#181818]">
-              <img src="/landing/cowork.png" alt="The Dabba workspace with the chat sidebar and the Cowork task box" width={1440} height={900} className="block h-auto w-full" />
-            </div>
-          </Reveal>
-        </section>
-
-        {/* Article body with an "on this page" index on wide screens */}
-        <div className="mx-auto grid max-w-6xl grid-cols-1 gap-12 px-4 py-16 sm:px-6 lg:grid-cols-4">
-          <aside className="hidden lg:block">
-            <nav aria-label="On this page" className="sticky top-24">
-              <p className="caption-3 text-text-tertiary dark:text-text-dark-tertiary">On this page</p>
-              <ul className="mt-3 space-y-1">
-                {SECTIONS.map(s => (
-                  <li key={s.id}>
-                    <a
-                      href={`#${s.id}`}
-                      aria-current={currentSection === s.id ? 'location' : undefined}
-                      className={cn(
-                        'block rounded-lg px-2 py-1 body-6 transition-colors duration-300',
-                        EASE,
-                        currentSection === s.id
-                          ? 'bg-surface-tertiary text-text-primary dark:bg-[#272727] dark:text-text-dark-primary'
-                          : 'text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary',
-                      )}
-                    >
-                      {s.label}
-                    </a>
+      {/* ── Footer ────────────────────────────────────────────────────── */}
+      <footer className="mx-auto max-w-[1408px] px-6 pb-10 pt-16 sm:px-10">
+        <div className="grid grid-cols-2 gap-10 border-b border-[var(--lp-line)] pb-12 md:grid-cols-[2fr_1fr_1fr_1fr]">
+          <div className="col-span-2 md:col-span-1">
+            <a href="/" className={cn('inline-flex items-center gap-2 rounded-full', FOCUS)} aria-label="Dabba home">
+              <img src={logo} alt="" width={28} height={28} className="h-7 w-7" />
+              <span className="font-display text-[20px] font-semibold tracking-[-0.03em]">Dabba</span>
+            </a>
+            <p className="mt-4 max-w-xs text-[14.5px] leading-relaxed text-[var(--lp-muted)]">The self hosted AI workspace for chat, code and automation.</p>
+          </div>
+          {[
+            { title: 'Product', links: [{ label: 'Try Dabba', ...tryLink }, { label: 'Create an account', ...signupLink }, { label: 'Log in', ...loginLink }] },
+            { title: 'Learn', links: LANDING.footerLinks.map(n => ({ label: n.label, href: n.href })) },
+            {
+              title: 'Legal',
+              links: [
+                { label: 'Privacy', ...appLink('/privacy', () => onNavigate('/privacy')) },
+                { label: 'Terms', ...appLink('/terms', () => onNavigate('/terms')) },
+              ],
+            },
+          ].map(col => (
+            <nav key={col.title} aria-label={col.title}>
+              <h2 className="text-[13px] font-semibold text-[var(--lp-ink)]">{col.title}</h2>
+              <ul className="mt-4 space-y-3">
+                {col.links.map(({ label, ...link }) => (
+                  <li key={label}>
+                    <a {...link} className={cn('rounded text-[14.5px] text-[var(--lp-muted)] hover:text-[var(--lp-ink)]', FOCUS)}>{label}</a>
                   </li>
                 ))}
               </ul>
             </nav>
-          </aside>
-
-          <article className="min-w-0 max-w-[680px] space-y-12 lg:col-span-3">
-            <div className="space-y-4">
-              <Paragraph>
-                Dabba is an AI workspace you run on your own server. It puts models from Anthropic, OpenAI, Google, NVIDIA, Hugging Face and Ollama behind one chat, and adds the tools to get work done: agents that work through tasks, connectors to the apps you already use, saved skills, projects and scheduled automations.
-              </Paragraph>
-              <Paragraph>
-                You can <button onClick={onTry} className="body-2 text-text-primary underline underline-offset-4 dark:text-text-dark-primary">try Dabba now</button> or create an account to pick your own models and keep your chats.
-              </Paragraph>
-            </div>
-
-            {/* How it works */}
-            <Reveal className="space-y-4">
-              <SectionTitle id="how-it-works">How it works</SectionTitle>
-              <Paragraph>
-                One server runs the whole workspace. The web app, the terminal, the VS Code and Chrome extensions, and any OpenAI compatible client all talk to the same API. Behind it, an agent runtime plans and runs tasks, calls tools and connectors, and routes each request to the model you chose.
-              </Paragraph>
-              <div className="overflow-hidden rounded-2xl border border-border bg-surface-secondary dark:border-[#272727] dark:bg-[#181818]">
-                <img src="/landing/architecture.png" alt="Dabba architecture: four clients, one API server, the platform and agent runtime, and the model and knowledge layer" loading="lazy" width={2400} height={1768} className="block h-auto w-full" />
-              </div>
-              <Paragraph>
-                Today the model picker lists 43 models from 8 providers, and the connector catalogue offers 60 tools through MCP. Provider keys stay on the server and are never sent to the browser.
-              </Paragraph>
-            </Reveal>
-
-            {/* Samples */}
-            <Reveal className="space-y-4">
-              <SectionTitle id="samples">Samples</SectionTitle>
-              <Paragraph>Pick a prompt to open it in the free chat. It fills the message box; nothing is sent until you press Send.</Paragraph>
-              <ul className="flex flex-wrap gap-2">
-                {SAMPLE_PROMPTS.map(prompt => (
-                  <li key={prompt}>
-                    <button
-                      onClick={() => trySample(prompt)}
-                      className={cn('rounded-full border border-border px-3 py-2 body-6 text-text-secondary hover:bg-surface-tertiary hover:text-text-primary active:scale-[0.98] dark:border-[#313131] dark:text-text-dark-secondary dark:hover:bg-[#272727] dark:hover:text-text-dark-primary transition-[background-color,color,transform] duration-300', EASE)}
-                    >
-                      {prompt}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-
-              {/* A sample exchange, clearly labelled, showing the reply style. */}
-              <figure className="mt-6 rounded-2xl border border-border p-6 dark:border-[#272727] dark:bg-[#181818]">
-                <figcaption className="caption-3 text-text-tertiary dark:text-text-dark-tertiary">Sample conversation</figcaption>
-                <div className="mt-4 space-y-4">
-                  <div>
-                    <p className="caption-3 text-text-secondary dark:text-text-dark-secondary">User</p>
-                    <p className="body-3 mt-1">Write a Python function that removes duplicates from a list and keeps the order.</p>
-                  </div>
-                  <div>
-                    <p className="caption-3 text-accent">Dabba</p>
-                    <p className="body-3 mt-1 text-pretty">Here's a version that keeps the first time each item appears. A set makes each check fast.</p>
-                    <pre className="mt-3 overflow-x-auto rounded-xl bg-surface-tertiary p-4 font-mono text-sm dark:bg-[#000000]"><code>{SAMPLE_REPLY_CODE}</code></pre>
-                  </div>
-                </div>
-              </figure>
-            </Reveal>
-
-            {/* Limitations */}
-            <Reveal className="space-y-4">
-              <SectionTitle id="limitations">Limitations</SectionTitle>
-              <ul className="list-disc space-y-3 pl-6 marker:text-text-tertiary">
-                {LIMITATIONS.map(item => (
-                  <li key={item} className="body-3 text-pretty text-text-secondary dark:text-text-dark-secondary">{item}</li>
-                ))}
-              </ul>
-            </Reveal>
-
-            {/* Self hosting */}
-            <Reveal className="space-y-4">
-              <SectionTitle id="self-hosting">Self hosting</SectionTitle>
-              <Paragraph>
-                Dabba is free to run on your own server. One Docker image serves the app and the API, with ready setups for Render, a Helm chart for Kubernetes, and an optional backup of the databases to Cloudflare R2 for hosts that wipe their disk.
-              </Paragraph>
-              <Paragraph>
-                The first account created on a server becomes its owner. Later accounts are regular members.
-              </Paragraph>
-              <div className="flex flex-wrap gap-3 pt-2">
-                <button onClick={onTry} className={primaryButton}>
-                  Try Dabba <ArrowUpRight size={18} weight="bold" aria-hidden="true" />
-                </button>
-                <button onClick={onSignup} className={secondaryButton}>
-                  Create an account
-                </button>
-              </div>
-            </Reveal>
-
-            <ul className="flex flex-wrap gap-2" aria-label="Topics">
-              {['Dabba', 'Self hosted', 'Agents'].map(tag => (
-                <li key={tag} className="rounded-full bg-surface-tertiary px-3 py-1 caption-4 text-text-secondary dark:bg-[#272727] dark:text-text-dark-secondary">{tag}</li>
-              ))}
-            </ul>
-          </article>
+          ))}
         </div>
-
-        {/* Explore more */}
-        <section aria-labelledby="explore-title" className="border-t border-border dark:border-[#272727]">
-          <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-            <div className="flex items-baseline justify-between gap-4">
-              <h2 id="explore-title" className="heading-5">Explore Dabba</h2>
-              <button onClick={onTry} className="body-5 text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary">
-                Try it now
-              </button>
-            </div>
-            <div className="mt-8 grid gap-6 md:grid-cols-3">
-              {RELATED.map(card => (
-                <button key={card.tag} onClick={onTry} className={cn('group flex flex-col items-stretch justify-start text-left', EASE)}>
-                  <div className="overflow-hidden rounded-2xl border border-border bg-surface-secondary dark:border-[#272727] dark:bg-[#181818]">
-                    <img src={card.image} alt={card.alt} loading="lazy" width={1440} height={900} className={cn('block aspect-[16/10] w-full object-cover object-top transition-transform duration-500 group-hover:scale-[1.02]', EASE)} />
-                  </div>
-                  <p className="caption-4 mt-4 text-text-tertiary dark:text-text-dark-tertiary">{card.tag}</p>
-                  <p className="title-2 mt-1 text-balance">{card.title}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Closing call to action */}
-        <section className="border-t border-border dark:border-[#272727]">
-          <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-6 px-4 py-16 sm:px-6 md:flex-row md:items-center">
-            <h2 className="heading-5 sm:heading-4 max-w-[680px] text-balance">Start using Dabba today.</h2>
-            <button onClick={onTry} className={primaryButton}>
-              Try Dabba <ArrowRight size={18} weight="bold" aria-hidden="true" />
-            </button>
-          </div>
-        </section>
-      </main>
-
-      {/* Multi column footer */}
-      <footer className="border-t border-border dark:border-[#272727]">
-        <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
-          <div className="grid grid-cols-2 gap-8 md:grid-cols-3">
-            {footerColumns.map(column => (
-              <div key={column.title}>
-                <p className="title-4">{column.title}</p>
-                <ul className="mt-3 space-y-2">
-                  {column.links.map(link => (
-                    <li key={link.label}>
-                      {link.href ? (
-                        <a
-                          href={link.href}
-                          {...(link.href.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-                          className="body-6 text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary"
-                        >
-                          {link.label}
-                        </a>
-                      ) : (
-                        <button onClick={link.onClick} className="body-6 text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary">
-                          {link.label}
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-          <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border pt-6 dark:border-[#272727] sm:flex-row sm:items-center">
-            <span className="flex items-center gap-2 caption-2 text-text-secondary dark:text-text-dark-secondary">
-              <img src={logo} alt="" className="h-5 w-5 object-contain" /> Dabba © {new Date().getFullYear()}
-            </span>
-          </div>
-        </div>
+        <p className="mt-8 text-[13px] text-[var(--lp-muted)]">© {new Date().getFullYear()} Dabba. Your chats stay on your Dabba server.</p>
       </footer>
+
+      {demoOpen && <DemoDialog onClose={() => setDemoOpen(false)} onTry={() => { setDemoOpen(false); onTry() }} />}
     </div>
   )
 }

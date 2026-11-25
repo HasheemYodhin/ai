@@ -5,7 +5,7 @@ import tseslint from "typescript-eslint"
 
 export default tseslint.config(
   {
-    ignores: ["dist", "coverage", "node_modules", "playwright-report", "test-results"],
+    ignores: ["dist", "dist-ssr", "coverage", "node_modules", "playwright-report", "test-results"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -23,6 +23,13 @@ export default tseslint.config(
     rules: {
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "error",
+    },
+  },
+  {
+    // Build scripts run in Node (scripts/prerender.mjs).
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: globals.node,
     },
   },
 )

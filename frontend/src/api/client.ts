@@ -159,15 +159,17 @@ export class ApiClient {
   }
 
   /**
-   * Send a guest prompt. The server replies with keepalive comments and then
-   * one `data:` event holding the whole reply (or an error); a 429 means the
-   * free prompts are used up.
+   * Send a guest prompt and stream the reply. The server sends
+   * `{"delta": text}` events as the reply is generated, then
+   * `{"done": true, "remaining": n}` or `{"error": ..., "remaining": n}`;
+   * comment lines are keepalives. A 429 means the free prompts are used up.
    */
   async guestChat(
     guestId: string,
     messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    onDelta: (text: string) => void,
     signal?: AbortSignal,
-  ): Promise<{ content?: string; error?: string; remaining: number; limitReached?: boolean }> {
+  ): Promise<{ error?: string; remaining: number; limitReached?: boolean }> {
     let response: Response
     try {
       response = await fetch(`${this.baseUrl}/v1/guest/chat`, {
@@ -181,11 +183,29 @@ export class ApiClient {
       throw new Error('Cannot reach Dabba right now. Check your connection and try again.')
     }
     if (response.status === 429) return { remaining: 0, limitReached: true }
-    if (!response.ok) throw await responseError(response, 'Dabba couldn\'t answer just now. Try again in a moment.')
-    const text = await response.text()
-    const line = text.split('\n').find(row => row.startsWith('data: '))
-    if (!line) throw new Error('Dabba couldn\'t answer just now. Try again in a moment.')
-    return JSON.parse(line.slice('data: '.length))
+    if (!response.ok || !response.body) throw await responseError(response, 'Dabba couldn\'t answer just now. Try again in a moment.')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let result: { error?: string; remaining: number } | null = null
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE events are separated by a blank line; keep any partial event.
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.split('\n').find(row => row.startsWith('data: '))
+        if (!line) continue // keepalive comment
+        const event = JSON.parse(line.slice('data: '.length)) as { delta?: string; done?: boolean; error?: string; remaining?: number }
+        if (event.delta) onDelta(event.delta)
+        else if (event.done || event.error) result = { error: event.error, remaining: event.remaining ?? 0 }
+      }
+    }
+    if (!result) throw new Error('Dabba couldn\'t answer just now. Try again in a moment.')
+    return result
   }
 
   async currentUser(signal?: AbortSignal): Promise<PlatformUser | null> {

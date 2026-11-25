@@ -12,9 +12,11 @@ test('guests get 5 free prompts, then are asked to sign up', async ({ page }) =>
       return route.fulfill({ status: 429, json: { code: 'guest_limit_reached', remaining: 0 } })
     }
     used += 1
+    // Streamed like the server: text pieces, then a done event.
+    const events = [{ delta: 'Answer ' }, { delta: String(used) }, { done: true, remaining: 5 - used }]
     return route.fulfill({
       contentType: 'text/event-stream',
-      body: `data: ${JSON.stringify({ content: `Answer ${used}`, remaining: 5 - used })}\n\n`,
+      body: ': keepalive\n\n' + events.map(e => `data: ${JSON.stringify(e)}\n\n`).join(''),
     })
   })
 
@@ -30,7 +32,8 @@ test('guests get 5 free prompts, then are asked to sign up', async ({ page }) =>
     // The first reply lazily loads the Markdown renderer, which is slow on a cold dev server.
     await expect(page.getByText(`Answer ${i}`)).toBeVisible({ timeout: 15_000 })
   }
-  await expect(page.getByText('5 of 5 free prompts used. Sign up to save your chats.')).toBeVisible()
+  // No prompt counter is shown to guests.
+  await expect(page.getByText(/free prompts? (left|used)/)).toHaveCount(0)
 
   // The 6th prompt opens the sign up gate instead of sending.
   await box.fill('Question 6')
@@ -41,4 +44,25 @@ test('guests get 5 free prompts, then are asked to sign up', async ({ page }) =>
 
   await gate.getByRole('button', { name: 'Create your account' }).click()
   await expect(page).toHaveURL(/\/signup$/)
+})
+
+test('a failed reply can be retried without repeating the question', async ({ page }) => {
+  let calls = 0
+  await page.route('**/v1/guest/status**', route => route.fulfill({ json: { available: true, remaining: 5, limit: 5 } }))
+  await page.route('**/v1/guest/chat', route => {
+    calls += 1
+    const events = calls === 1
+      ? [{ error: "Dabba couldn't answer just now. Try again in a moment.", remaining: 5 }]
+      : [{ delta: 'Recovered answer' }, { done: true, remaining: 4 }]
+    return route.fulfill({ contentType: 'text/event-stream', body: events.map(e => `data: ${JSON.stringify(e)}\n\n`).join('') })
+  })
+
+  await page.goto('/try')
+  const box = page.getByLabel('Message Dabba')
+  await box.fill('Hello there')
+  await box.press('Enter')
+  await expect(page.getByRole('alert')).toContainText("Dabba couldn't answer just now")
+  await page.getByRole('button', { name: 'Try again' }).click()
+  await expect(page.getByText('Recovered answer')).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('Hello there', { exact: true })).toHaveCount(1)
 })

@@ -10,9 +10,9 @@ import { Sidebar } from '@/components/Sidebar'
 import { ChatWindow } from '@/components/ChatWindow'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
-import { LandingPage } from '@/components/LandingPage'
 import { LegalPage, NotFoundPage } from '@/components/PublicPages'
 import { GuestChatPage } from '@/components/GuestChatPage'
+import { LandingPage } from '@/components/LandingPage'
 import { ProjectsPage } from '@/components/ProjectsPage'
 import { AgentsPage } from '@/components/AgentsPage'
 import { ToolsPage } from '@/components/ToolsPage'
@@ -350,7 +350,9 @@ function ChatApp() {
       />
 
       <main className={cn(
+        // Landing page look: a white rounded card inset on the off-white shell (md and up).
         'flex-1 flex flex-col min-w-0 bg-surface dark:bg-surface-dark border-l border-border dark:border-border-dark overflow-hidden relative z-10',
+        'md:my-2 md:mr-2 md:rounded-[24px] md:border md:border-border md:shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:md:border-border-dark',
         sidebarOpen ? 'md:ml-0' : ''
       )}>
         {/* Reopen control lives here, in normal layout flow, instead of a
@@ -443,10 +445,10 @@ function ChatApp() {
   )
 }
 
-type PublicScreen = 'landing' | 'try' | 'login' | 'signup' | 'privacy' | 'terms' | 'not-found'
+type PublicScreen = 'home' | 'try' | 'login' | 'signup' | 'privacy' | 'terms' | 'not-found'
 
 const PUBLIC_PATHS: Partial<Record<PublicScreen, string>> = {
-  landing: '/', try: '/try', login: '/login', signup: '/signup', privacy: '/privacy', terms: '/terms',
+  home: '/', try: '/try', login: '/login', signup: '/signup', privacy: '/privacy', terms: '/terms',
 }
 
 function publicScreenFor(pathname: string): PublicScreen {
@@ -454,10 +456,10 @@ function publicScreenFor(pathname: string): PublicScreen {
   for (const [screen, screenPath] of Object.entries(PUBLIC_PATHS)) {
     if (screenPath === path) return screen as PublicScreen
   }
-  // App addresses (/c/:id, /agents, ...) need a login: show the landing page;
+  // App addresses (/c/:id, /agents, ...) need a login: show the login form;
   // after login the app opens that address. Anything else is a 404.
   const route = parsePath(path)
-  if (route.conversationId || route.view !== 'chat') return 'landing'
+  if (route.conversationId || route.view !== 'chat') return 'login'
   return 'not-found'
 }
 
@@ -497,14 +499,12 @@ function AuthGate() {
   if (!isReady) {
     return <div className="flex h-full items-center justify-center bg-surface text-sm text-text-secondary dark:bg-surface-dark dark:text-text-dark-secondary">Restoring your Dabba session...</div>
   }
-  if (screen === 'privacy' || screen === 'terms') return <LegalPage kind={screen} onHome={() => go('landing')} />
+  if (screen === 'privacy' || screen === 'terms') return <LegalPage kind={screen} onHome={() => go('home')} onSwitch={kind => go(kind)} />
   if (currentUser) return <ChatApp />
-  if (screen === 'landing') {
-    return <LandingPage onTry={() => go('try')} onLogin={() => go('login')} onSignup={() => go('signup')} onNavigate={path => go(path === '/privacy' ? 'privacy' : 'terms')} />
-  }
-  if (screen === 'try') return <GuestChatPage onLogin={() => go('login')} onSignup={() => go('signup')} onHome={() => go('landing')} />
-  if (screen === 'not-found') return <NotFoundPage onHome={() => go('landing')} />
-  return <AuthPage initialMode={screen} onModeChange={mode => go(mode, true)} onHome={() => go('landing')} />
+  if (screen === 'try') return <GuestChatPage onLogin={() => go('login')} onSignup={() => go('signup')} onHome={() => go('home')} />
+  if (screen === 'not-found') return <NotFoundPage onHome={() => go('home')} />
+  if (screen === 'home') return <LandingPage onTry={() => go('try')} onLogin={() => go('login')} onSignup={() => go('signup')} onNavigate={path => go(path === '/privacy' ? 'privacy' : 'terms')} />
+  return <AuthPage initialMode={screen === 'signup' ? 'signup' : 'login'} onModeChange={mode => go(mode, true)} onHome={() => go('home')} />
 }
 
 export default function App() {

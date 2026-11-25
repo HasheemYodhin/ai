@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -217,29 +218,64 @@ def create_guest_router(
         ]
 
         async def event_stream():
-            # Keep the connection alive while slow provider calls (NVIDIA cold
-            # starts) run, then send the whole reply as one event.
-            task = asyncio.create_task(
-                asyncio.to_thread(
-                    registry.chat, messages, model=GUEST_MODEL, effort="medium", max_tokens=2048
-                )
-            )
-            # Wait up to 5s at a time: return as soon as the reply is ready,
-            # and send a keepalive comment only while it's still running.
-            while True:
-                done, _ = await asyncio.wait({task}, timeout=5)
-                if done:
-                    break
-                yield ": keepalive\n\n"
+            """Stream the reply as it's generated.
+
+            Events: ``{"delta": text}`` for each piece, then
+            ``{"done": true, "remaining": n}``, or ``{"error": ..., "remaining": n}``.
+            Comment lines keep the connection alive during slow starts.
+            """
+            from dabba.providers.base import ReasoningDelta
+
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+            cancel = threading.Event()
+
+            def produce() -> None:
+                # The provider stream is blocking, so it runs in a thread and
+                # hands pieces to the event loop through the queue.
+                try:
+                    for piece in registry.stream_chat(
+                        messages,
+                        model=GUEST_MODEL,
+                        effort="medium",
+                        max_tokens=2048,
+                        thinking=False,  # skip Nemotron's reasoning phase: ~2x faster
+                        cancel_event=cancel,
+                    ):
+                        if isinstance(piece, ReasoningDelta) or not piece:
+                            continue
+                        loop.call_soon_threadsafe(queue.put_nowait, ("delta", piece))
+                    loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+                except Exception as exc:  # noqa: BLE001 - reported to the client below
+                    loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+
+            threading.Thread(target=produce, daemon=True, name="guest-chat").start()
+            sent_text = False
             try:
-                text = task.result()
-            except Exception as exc:  # provider failure: don't charge the prompt
-                logger.warning("Guest chat failed: %s", exc)
-                await asyncio.to_thread(get_usage().refund, body.guestId, ip)
-                payload = {"error": "Dabba couldn't answer just now. Try again in a moment.", "remaining": remaining + 1}
-                yield f"data: {json.dumps(payload)}\n\n"
-                return
-            yield f"data: {json.dumps({'content': text, 'remaining': remaining})}\n\n"
+                while True:
+                    try:
+                        kind, value = await asyncio.wait_for(queue.get(), timeout=5)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+                    if kind == "delta":
+                        sent_text = True
+                        yield f"data: {json.dumps({'delta': value})}\n\n"
+                    elif kind == "done":
+                        yield f"data: {json.dumps({'done': True, 'remaining': remaining})}\n\n"
+                        return
+                    else:
+                        logger.warning("Guest chat failed: %s", value)
+                        left = remaining
+                        if not sent_text:
+                            # Nothing reached the visitor: don't charge the prompt.
+                            await asyncio.to_thread(get_usage().refund, body.guestId, ip)
+                            left = remaining + 1
+                        payload = {"error": "Dabba couldn't answer just now. Try again in a moment.", "remaining": left}
+                        yield f"data: {json.dumps(payload)}\n\n"
+                        return
+            finally:
+                cancel.set()  # visitor left or reply finished: stop the provider stream
 
         return StreamingResponse(
             event_stream(),

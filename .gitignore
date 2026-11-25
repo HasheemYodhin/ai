@@ -48,3 +48,4 @@ attachments/
 .env
 .env.*
 !.env.example
+frontend/dist-ssr/

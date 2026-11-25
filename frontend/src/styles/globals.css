@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /*
- * Named text styles from the landing page design system. Each maps to one
+ * Named text styles for the frontend. Each maps to one
  * Tailwind type step and weight, so pages never mix ad hoc sizes.
  */
 @layer components {
@@ -277,4 +277,72 @@
 
 .dark :where(button, a[href], summary, select, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]:not(input):not(textarea)):focus-visible {
   outline-color: #4cbf7c;
+}
+
+/* Landing page motion. Uses the standalone `translate` property so it
+   composes with Tailwind transforms (centering, hover scale). */
+@keyframes lpRise {
+  from { opacity: 0; translate: 0 14px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes lpFloat {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -8px; }
+}
+.lp-rise { animation: lpRise 700ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lp-float { animation: lpFloat 6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-rise, .lp-float { animation: none; }
+}
+
+/* ── Landing / login / signup theme ─────────────────────────────────────
+   Light is the default. `html.dark` flips the page, cards and ink.
+   `.lp-light` pins a subtree to the light set (cards on the orange
+   gradient); `.lp-dark` pins one to the dark set (the black bands). */
+.lp-theme,
+.lp-light {
+  --lp-page: #f2f1ef;
+  --lp-card: #ffffff;
+  --lp-soft: #f2f1ef;
+  --lp-soft-2: #e7e5e1;
+  --lp-hover: #e7e5e1;
+  --lp-ink: #141414;
+  --lp-ink-2: #3d3c39;
+  --lp-muted: #5f5e5a;
+  --lp-line: rgba(0, 0, 0, 0.1);
+  --lp-dot: #c9c6c0;
+  --lp-btn: #141414;
+  --lp-btn-text: #ffffff;
+  --lp-accent-text: #c2410c;
+}
+.lp-theme {
+  --lp-band: #141414;
+  --lp-band-line: #2b2b2b;
+  color-scheme: light;
+}
+html.dark .lp-theme {
+  --lp-page: #0a0a0a;
+  --lp-card: #151515;
+  --lp-soft: #232323;
+  --lp-soft-2: #1c1c1c;
+  --lp-hover: #2e2e2e;
+  --lp-ink: #f5f5f5;
+  --lp-ink-2: #d4d4d4;
+  --lp-muted: #a3a3a3;
+  --lp-line: rgba(255, 255, 255, 0.12);
+  --lp-dot: #525252;
+  --lp-btn: #f5f5f5;
+  --lp-btn-text: #141414;
+  --lp-accent-text: #ff7a4d;
+  --lp-band: #1c1c1c;
+  --lp-band-line: #2e2e2e;
+  color-scheme: dark;
+}
+.lp-dark {
+  --lp-ink: #f5f5f5;
+  --lp-ink-2: #d4d4d4;
+  --lp-muted: #a3a3a3;
+  --lp-line: rgba(255, 255, 255, 0.12);
+  --lp-btn: #f5f5f5;
+  --lp-btn-text: #141414;
 }

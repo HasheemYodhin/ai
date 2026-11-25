@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/src/icon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#000000" />
-    <meta name="description" content="Dabba is a free, self hosted AI workspace: Claude, GPT, Gemini, NVIDIA and local models in one chat, with agents, connectors and scheduled skills." />
+    <meta name="theme-color" content="#f2f1ef" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="Dabba is a self hosted AI workspace: Claude, GPT, Gemini, NVIDIA and local models in one chat, with agents, connectors, saved skills and scheduled automations." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Dabba" />
     <meta property="og:title" content="Dabba: self hosted AI workspace for chat, code and automation" />
@@ -14,8 +15,16 @@
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter+Tight:wght@500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <title>Dabba: self hosted AI workspace for chat, code and automation</title>
+    <script>
+      // Apply the saved theme before paint.
+      try {
+        var d = document.documentElement
+        var t = localStorage.getItem('dabba-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        d.classList.add(t === 'light' ? 'light' : 'dark')
+      } catch (e) {}
+    </script>
   </head>
   <body class="antialiased">
     <div id="root"></div>

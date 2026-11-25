@@ -165,7 +165,7 @@ export function ChatWindow({
 
       <div className="flex-1 flex flex-col items-center overflow-y-auto scrollbar-thin px-3 py-4 sm:justify-center sm:px-4 sm:py-0">
         <div className="my-auto w-full max-w-2xl shrink-0 sm:my-0 sm:-mt-16">
-          <h1 className="text-center text-2xl leading-tight font-medium mb-4 sm:mb-8 sm:text-[28px] text-text-primary dark:text-text-dark-primary">
+          <h1 className="text-center font-display text-[28px] leading-tight font-semibold tracking-[-0.03em] mb-4 sm:mb-8 sm:text-[36px] text-text-primary dark:text-text-dark-primary">
             {isTemporary ? "This chat won't be saved" : 'Chat, write code or make an image'}
           </h1>
 
