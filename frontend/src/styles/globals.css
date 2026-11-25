@@ -346,3 +346,12 @@ html.dark .lp-theme {
   --lp-btn: #f5f5f5;
   --lp-btn-text: #141414;
 }
+
+/* Accent color defaults (the original orange). Settings > General can override
+   these on <html>; see src/lib/accent.ts. Space separated so Tailwind can add alpha. */
+:root {
+  --accent-rgb: 207 68 25;
+  --accent-hover-rgb: 178 58 20;
+  --accent-light-rgb: 255 228 216;
+  --accent-dark-hover-rgb: 255 122 77;
+}

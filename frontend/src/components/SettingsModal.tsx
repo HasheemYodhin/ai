@@ -7,6 +7,7 @@ import { useMcpStatus } from '@/hooks/useMcpStatus'
 import { useProviderKeys } from '@/hooks/useProviderKeys'
 import { useAuth } from '@/hooks/useAuth'
 import { apiClient } from '@/api/client'
+import { ACCENT_PRESETS, applyAccent, normalizeAccent } from '@/lib/accent'
 import { EFFORT_TIERS, modelDisplayName, providerLabel } from '@/lib/models'
 import { loadUsageStats, type UsageStats } from '@/lib/usageStats'
 import { cn } from '@/lib/utils'
@@ -155,10 +156,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }, [isOpen])
   const handleDismiss = useCallback(() => {
     setTheme(themeOnOpenRef.current)
+    applyAccent(settings.accentColor)
     onClose()
-  }, [onClose, setTheme])
+  }, [onClose, setTheme, settings.accentColor])
 
   const dialogRef = useDialogFocus(isOpen, handleDismiss)
+
+  // The accent previews live while Settings is open; Save keeps it and Cancel restores the saved one.
+  useEffect(() => {
+    if (isOpen) applyAccent(localSettings.accentColor)
+  }, [isOpen, localSettings.accentColor])
 
   if (!isOpen) return null
 
@@ -404,6 +411,49 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       Dark Theme
                     </button>
                   </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label id="accent-color-label" className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                    Accent color
+                  </label>
+                  <div role="radiogroup" aria-labelledby="accent-color-label" className="flex flex-wrap items-center gap-2.5">
+                    {ACCENT_PRESETS.map(preset => {
+                      const selected = normalizeAccent(localSettings.accentColor) === preset.hex
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={preset.name}
+                          title={preset.name}
+                          onClick={() => setLocalSettings(prev => ({ ...prev, accentColor: preset.hex }))}
+                          style={{ backgroundColor: preset.hex }}
+                          className={cn(
+                            'flex h-8 w-8 items-center justify-center rounded-full ring-offset-2 ring-offset-surface transition-shadow dark:ring-offset-surface-dark-secondary',
+                            'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text-primary dark:focus-visible:outline-text-dark-primary',
+                            selected ? 'ring-2 ring-text-primary dark:ring-text-dark-primary' : 'hover:ring-2 hover:ring-border dark:hover:ring-border-dark',
+                          )}
+                        >
+                          {selected && <Check className="h-4 w-4 text-white" aria-hidden="true" />}
+                        </button>
+                      )
+                    })}
+                    <label className="flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-text-secondary dark:border-border-dark dark:text-text-dark-secondary">
+                      <input
+                        type="color"
+                        aria-label="Custom color"
+                        value={normalizeAccent(localSettings.accentColor)}
+                        onChange={event => setLocalSettings(prev => ({ ...prev, accentColor: event.target.value }))}
+                        className="h-5 w-5 cursor-pointer rounded border-0 bg-transparent p-0"
+                      />
+                      Custom
+                    </label>
+                  </div>
+                  <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary">
+                    Used for buttons, links and highlights. Very light colors are darkened so text stays readable.
+                  </p>
                 </div>
 
                 <div className="space-y-4 pt-3 border-t border-border dark:border-border-dark">

@@ -21,12 +21,13 @@ export default {
           DEFAULT: '#e2dfd9',
           dark: '#262626',
         },
+        // The user's accent color. The variables are set from Settings (see
+        // src/lib/accent.ts); the defaults in globals.css are the original orange.
         accent: {
-          // Landing orange (#FF5B23), deepened so white text on it meets AA (4.7:1).
-          DEFAULT: '#cf4419',
-          hover: '#b23a14',
-          light: '#ffe4d8',
-          'dark-hover': '#ff7a4d',
+          DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+          hover: 'rgb(var(--accent-hover-rgb) / <alpha-value>)',
+          light: 'rgb(var(--accent-light-rgb) / <alpha-value>)',
+          'dark-hover': 'rgb(var(--accent-dark-hover-rgb) / <alpha-value>)',
         },
         // Secondary/tertiary meet WCAG AA (4.5:1) on every surface color of
         // their theme, including surface-tertiary hover/chip backgrounds.

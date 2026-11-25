@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Square, X, Loader2, Mic } from 'lucide-react'
+import { currentAccentColor } from '@/lib/accent'
 import { friendlyVoiceError, startRecording, voiceAvailable, VOICE_UNAVAILABLE, watchAudioLevel, type VoiceRecorder } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { useTheme } from '@/hooks/useTheme'
@@ -63,7 +64,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
         ctx.clearRect(0, 0, w, h)
         const barWidth = w / levelsRef.current.length
-        const accent = theme === 'dark' ? '#e08a6a' : '#c96442'
+        const accent = currentAccentColor()
         levelsRef.current.forEach((level, i) => {
           const barHeight = Math.max(3, level * h * 0.9)
           ctx.fillStyle = accent

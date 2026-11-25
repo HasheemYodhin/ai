@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { apiClient, DEFAULT_API_URL } from '@/api/client'
+import { applyAccent, DEFAULT_ACCENT, normalizeAccent } from '@/lib/accent'
 
 /** Generation params that can be remembered per-model. */
 export interface ModelParams {
@@ -10,6 +11,8 @@ export interface ModelParams {
 }
 
 export interface AppSettings {
+  /** Accent color (hex) used for buttons, links and highlights. */
+  accentColor: string
   baseUrl: string
   apiKey: string
   model: string
@@ -48,6 +51,7 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
+  accentColor: DEFAULT_ACCENT,
   // Relative URLs work locally; Cloudflare Pages injects the Render URL at build time.
   baseUrl: DEFAULT_API_URL,
   apiKey: '',
@@ -97,6 +101,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           ...DEFAULT_SETTINGS,
           ...parsed,
           baseUrl: parsed.baseUrl || DEFAULT_API_URL,
+          // A missing or invalid saved color falls back to the default.
+          accentColor: normalizeAccent(parsed.accentColor ?? DEFAULT_ACCENT),
         }
       }
     } catch {
@@ -111,6 +117,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     apiClient.setApiKey(settings.apiKey)
     localStorage.setItem('dabba-settings', JSON.stringify(settings))
   }, [settings])
+
+  useEffect(() => { applyAccent(settings.accentColor) }, [settings.accentColor])
 
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettingsState(prev => {
