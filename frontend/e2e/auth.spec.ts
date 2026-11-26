@@ -12,3 +12,23 @@ test('authentication screen is usable on desktop and mobile', async ({ page }) =
     maxDiffPixelRatio: 0.02,
   })
 })
+
+test('login and signup keep the header controls together at 320px', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 560 })
+  for (const path of ['/login', '/signup']) {
+    await page.goto(path)
+    const header = page.locator('main header')
+    const home = header.getByRole('button', { name: 'Dabba home' })
+    const theme = header.getByRole('button', { name: /Switch to/ })
+    const tryDabba = header.getByRole('link', { name: 'Try Dabba', exact: true })
+    await expect(home).toBeInViewport()
+    await expect(theme).toBeInViewport()
+    await expect(tryDabba).toBeInViewport()
+    await expect(page.getByLabel(path === '/login' ? 'Email' : 'Name', { exact: true })).not.toBeFocused()
+    const controls = await Promise.all([home.boundingBox(), theme.boundingBox(), tryDabba.boundingBox()])
+    expect(controls.map(control => control && [control.y, control.height])).toEqual(
+      Array(3).fill([controls[0]?.y, 44]),
+    )
+    expect(controls[2]!.x + controls[2]!.width).toBeLessThan(320)
+  }
+})

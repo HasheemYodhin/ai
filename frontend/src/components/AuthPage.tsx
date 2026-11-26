@@ -40,6 +40,7 @@ export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPa
   const [busy, setBusy] = useState(false)
 
   const isSignup = mode === 'signup'
+  const canAutoFocus = window.matchMedia('(min-width: 640px) and (pointer: fine)').matches
   const passwordTooShort = isSignup && password.length > 0 && password.length < MIN_PASSWORD
   // Client side email check, shown once the field has been left.
   const emailInvalid = emailTouched && email.trim().length > 0 && !EMAIL_PATTERN.test(email.trim())
@@ -70,7 +71,7 @@ export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPa
 
   const labelClass = 'block text-[13px] font-semibold text-[var(--lp-ink)]'
   const inputClass = cn(
-    'w-full rounded-2xl border border-transparent bg-[var(--lp-soft)] px-4 py-3 text-[15px] text-[var(--lp-ink)] outline-none',
+    'w-full rounded-2xl border border-transparent bg-[var(--lp-soft)] px-4 py-3 text-base text-[var(--lp-ink)] outline-none sm:text-[15px]',
     'placeholder:text-[var(--lp-muted)] transition-colors duration-200 focus:border-[var(--lp-ink)] focus:bg-[var(--lp-card)]',
   )
 
@@ -78,20 +79,20 @@ export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPa
     <div className="lp-theme relative h-full overflow-y-auto overflow-x-hidden bg-[radial-gradient(120%_90%_at_20%_10%,#ffd9c7_0%,#ff9a6b_38%,#ff5b23_70%,#c93b0c_100%)] font-sans text-[#141414] dark:bg-[radial-gradient(120%_90%_at_20%_10%,#6b3118_0%,#2e150a_45%,#0a0a0a_100%)]">
       <FloatingCards />
 
-      <main id="main" className="relative z-10 flex min-h-full items-center justify-center px-3 py-6 sm:px-6">
-        <div className="w-full max-w-[460px] rounded-[32px] bg-[var(--lp-card)] text-[var(--lp-ink)] p-7 shadow-[0_2px_4px_rgba(0,0,0,0.04),0_40px_80px_-24px_rgba(60,20,0,0.55)] sm:p-10">
-          <header className="flex items-center justify-between gap-4">
-            <button type="button" onClick={onHome} className={cn('flex items-center gap-2 rounded-full', FOCUS)} aria-label="Dabba home">
-              <img src={logo} alt="" width={30} height={30} className="h-[30px] w-[30px] object-contain" />
+      <main id="main" className="relative z-10 flex min-h-full items-start justify-center px-3 py-4 sm:items-center sm:px-6 sm:py-6">
+        <div className="w-full max-w-[460px] rounded-[32px] bg-[var(--lp-card)] px-4 py-5 text-[var(--lp-ink)] shadow-[0_2px_4px_rgba(0,0,0,0.04),0_40px_80px_-24px_rgba(60,20,0,0.55)] min-[360px]:px-6 sm:p-10">
+          <header className="flex items-center justify-between gap-2 sm:gap-4">
+            <button type="button" onClick={onHome} className={cn('flex min-h-11 shrink-0 items-center gap-2 rounded-full sm:min-h-0', FOCUS)} aria-label="Dabba home">
+              <img src={logo} alt="" width={30} height={30} className="h-[30px] w-[30px] shrink-0 object-contain" />
               <span className="font-display text-[20px] font-semibold tracking-[-0.03em]">Dabba</span>
             </button>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <a href="/try" className={cn('rounded-md px-1 text-[14.5px] font-medium text-[var(--lp-ink-2)] hover:text-[var(--lp-ink)]', FOCUS)}>Try Dabba</a>
+            <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+              <ThemeToggle className="size-11 sm:size-9" />
+              <a href="/try" className={cn('inline-flex min-h-11 items-center whitespace-nowrap rounded-md px-1 text-sm font-medium text-[var(--lp-ink-2)] hover:text-[var(--lp-ink)] sm:min-h-0 sm:text-[14.5px]', FOCUS)}>Try Dabba</a>
             </div>
           </header>
 
-          <h1 className="mt-10 font-display text-[44px] font-semibold leading-none tracking-[-0.05em] sm:text-[52px]">
+          <h1 className="mt-7 font-display text-[44px] font-semibold leading-none tracking-[-0.05em] sm:mt-10 sm:text-[52px]">
             {isSignup ? 'Create an account' : 'Log in'}
           </h1>
           <p className="mt-4 text-[15.5px] text-[var(--lp-muted)]">
@@ -113,7 +114,7 @@ export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPa
                 <label htmlFor="auth-name" className={labelClass}>Name</label>
                 <input
                   id="auth-name"
-                  autoFocus
+                  autoFocus={canAutoFocus}
                   required
                   autoComplete="name"
                   value={name}
@@ -131,7 +132,7 @@ export function AuthPage({ initialMode = 'login', onModeChange, onHome }: AuthPa
                 type="email"
                 required
                 autoComplete="email"
-                autoFocus={!isSignup}
+                autoFocus={canAutoFocus && !isSignup}
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 onBlur={() => setEmailTouched(true)}
