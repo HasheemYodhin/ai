@@ -281,6 +281,7 @@ export interface Conversation {
   customTitle?: boolean
   projectId?: string | null
   /** Number of messages on the server; set by the lightweight list. */
+  revision?: number
   messageCount?: number
   /**
    * False for sidebar entries whose messages haven't been fetched yet

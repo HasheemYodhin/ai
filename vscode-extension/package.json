@@ -74,6 +74,14 @@
         "icon": "$(checklist)"
       },
       {
+        "command": "dabba.signIn",
+        "title": "Dabba: Sign In"
+      },
+      {
+        "command": "dabba.signOut",
+        "title": "Dabba: Sign Out"
+      },
+      {
         "command": "dabba.setApiKey",
         "title": "dabba: Set API Key",
         "category": "dabba AI",

@@ -239,9 +239,18 @@
       </div>
 
       <div class="field">
-        <label for="apiKey">API Key (optional)</label>
+        <label for="apiKey">Dabba session or API key</label>
         <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off">
-        <p class="hint">Required if your server uses authentication</p>
+        <p class="hint">Sign in with your Dabba account, or enter a compatible server credential.</p>
+      </div>
+
+      <div class="field">
+        <label for="accountEmail">Dabba account email</label>
+        <input type="email" id="accountEmail" autocomplete="username">
+        <label for="accountPassword">Password</label>
+        <input type="password" id="accountPassword" autocomplete="current-password">
+        <button type="button" id="signInBtn">Sign in</button>
+        <button type="button" id="signOutBtn">Sign out</button>
       </div>
 
       <div class="field-row">

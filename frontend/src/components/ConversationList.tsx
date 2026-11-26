@@ -1,5 +1,6 @@
 import { Fragment, useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { Conversation, Project } from '@/types'
+import { apiClient } from '@/api/client'
 import { cn, truncate } from '@/lib/utils'
 
 const DAY_MS = 86_400_000
@@ -49,6 +50,19 @@ export function ConversationList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<{ query: string; matches: Map<string, string | null> } | null>(null)
+  const query = search.trim().toLowerCase()
+  useEffect(() => {
+    if (!query) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void apiClient.searchConversations(query.slice(0, 120), controller.signal).then(matches => {
+        if (!controller.signal.aborted) setSearchResults({ query, matches: new Map(matches.map(match => [match.id, match.snippet])) })
+      }).catch(() => {})
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [query])
+  const matches = searchResults?.query === query ? searchResults.matches : null
   const editInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -56,13 +70,12 @@ export function ConversationList({
   }, [editingId])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const base = q ? conversations.filter(c => c.title.toLowerCase().includes(q)) : conversations
+    const base = query ? conversations.filter(c => c.title.toLowerCase().includes(query) || matches?.has(c.id)) : conversations
     return [...base].sort((a, b) => {
       if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
       return b.updatedAt - a.updatedAt
     })
-  }, [conversations, search])
+  }, [conversations, query, matches])
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
@@ -154,9 +167,10 @@ export function ConversationList({
                           className="w-full text-[13px] font-medium bg-transparent border-b border-accent outline-none text-text-primary dark:text-text-dark-primary"
                         />
                       ) : (
-                        <p className="text-[13px] leading-5 font-medium truncate">
-                          {truncate(conv.title, 40)}
-                        </p>
+                        <>
+                          <p className="text-[13px] leading-5 font-medium truncate">{truncate(conv.title, 40)}</p>
+                          {matches?.get(conv.id) && <p className="truncate text-[11px] text-text-tertiary">{matches.get(conv.id)}</p>}
+                        </>
                       )}
                     </div>
 

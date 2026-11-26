@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from dabba.platform.core import get_platform_data_dir
@@ -37,6 +37,17 @@ def _get_db() -> sqlite3.Connection:
     )
     if conn.execute("PRAGMA user_version").fetchone()[0] < 1:
         _initialize_message_index(conn)
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+                conn.execute(
+                    "ALTER TABLE conversations ADD COLUMN revision INTEGER NOT NULL DEFAULT 1"
+                )
+                conn.execute("""CREATE TABLE conversation_deletions (
+                    user_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (user_id, id)
+                )""")
+                conn.execute("PRAGMA user_version = 2")
     return conn
 
 
@@ -114,6 +125,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "pinned": bool(row["pinned"]),
         "customTitle": bool(row["custom_title"]),
         "projectId": row["project_id"],
+        "revision": row["revision"],
     }
 
 
@@ -127,6 +139,7 @@ def _row_to_summary(row: sqlite3.Row) -> Dict[str, Any]:
         "pinned": bool(row["pinned"]),
         "customTitle": bool(row["custom_title"]),
         "projectId": row["project_id"],
+        "revision": row["revision"],
         "messageCount": row["message_count"],
     }
 
@@ -141,6 +154,7 @@ class ConversationUpsert(BaseModel):
     pinned: bool = False
     customTitle: bool = False
     projectId: Optional[str] = None
+    revision: Optional[int] = None
 
 
 def create_conversations_router() -> APIRouter:
@@ -184,12 +198,43 @@ def create_conversations_router() -> APIRouter:
             rows = conn.execute(
                 """
                 SELECT id, title, created_at, updated_at, pinned, custom_title,
-                       project_id, json_array_length(messages) AS message_count
+                       project_id, revision, json_array_length(messages) AS message_count
                 FROM conversations WHERE user_id = ? ORDER BY updated_at DESC
                 """,
                 (user_id,),
             ).fetchall()
             return {"conversations": [_row_to_summary(r) for r in rows]}
+        finally:
+            conn.close()
+
+    @router.get("/conversations/search")
+    def search_conversations(
+        q: str = Query(min_length=1, max_length=120),
+        limit: int = Query(default=30, ge=1, le=50),
+        offset: int = Query(default=0, ge=0, le=10_000),
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = authenticated_user(authorization)
+        needle = q.strip().lower()
+        if not needle:
+            return {"matches": []}
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                """WITH matches AS (
+                       SELECT c.id, c.title, c.updated_at,
+                              (SELECT substr(m.content, max(1, instr(lower(m.content), ?) - 45), 150)
+                               FROM messages m WHERE m.conversation_id = c.id
+                                 AND instr(lower(m.content), ?) > 0
+                               ORDER BY m.position DESC LIMIT 1) AS snippet
+                       FROM conversations c WHERE c.user_id = ?
+                   )
+                   SELECT id, snippet FROM matches
+                   WHERE snippet IS NOT NULL OR instr(lower(title), ?) > 0
+                   ORDER BY updated_at DESC, id LIMIT ? OFFSET ?""",
+                (needle, needle, user["id"], needle, limit, offset),
+            ).fetchall()
+            return {"matches": [dict(row) for row in rows]}
         finally:
             conn.close()
 
@@ -230,6 +275,31 @@ def create_conversations_router() -> APIRouter:
 
         conn = _get_db()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute(
+                "SELECT 1 FROM conversation_deletions WHERE user_id=? AND id=?",
+                (user["id"], conversation_id),
+            ).fetchone():
+                raise HTTPException(
+                    status_code=409, detail="Conversation was deleted on another device"
+                )
+            existing = conn.execute(
+                "SELECT user_id, revision FROM conversations WHERE id=?",
+                (conversation_id,),
+            ).fetchone()
+            if existing:
+                if existing["user_id"] != user["id"]:
+                    raise HTTPException(
+                        status_code=404, detail="Conversation not found"
+                    )
+                if body.revision != existing["revision"]:
+                    raise HTTPException(
+                        status_code=409, detail="Conversation changed on another device"
+                    )
+            elif body.revision:
+                raise HTTPException(
+                    status_code=409, detail="Conversation no longer exists"
+                )
             conn.execute(
                 """
                 INSERT INTO conversations
@@ -241,7 +311,8 @@ def create_conversations_router() -> APIRouter:
                     updated_at=excluded.updated_at,
                     pinned=excluded.pinned,
                     custom_title=excluded.custom_title,
-                    project_id=excluded.project_id
+                    project_id=excluded.project_id,
+                    revision=conversations.revision + 1
                 WHERE conversations.user_id = excluded.user_id
                 """,
                 (
@@ -257,7 +328,7 @@ def create_conversations_router() -> APIRouter:
                 ),
             )
             conn.commit()
-            return {"ok": True}
+            return {"ok": True, "revision": existing["revision"] + 1 if existing else 1}
         finally:
             conn.close()
 
@@ -278,9 +349,13 @@ def create_conversations_router() -> APIRouter:
                 "DELETE FROM conversations WHERE id = ? AND user_id = ?",
                 (conversation_id, user_id),
             )
-            conn.commit()
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Conversation not found")
+            conn.execute(
+                "INSERT OR IGNORE INTO conversation_deletions (user_id, id) VALUES (?, ?)",
+                (user_id, conversation_id),
+            )
+            conn.commit()
             return {"deleted": conversation_id}
         finally:
             conn.close()

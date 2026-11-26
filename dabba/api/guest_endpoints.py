@@ -55,7 +55,12 @@ def guest_ip_daily_limit() -> int:
 
 
 def guest_chat_enabled() -> bool:
-    return os.environ.get("DABBA_GUEST_CHAT", "1").strip().lower() not in {"0", "false", "no", "off"}
+    return os.environ.get("DABBA_GUEST_CHAT", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
 
 
 def client_ip(request: Request) -> str:
@@ -66,7 +71,11 @@ def client_ip(request: Request) -> str:
     further left are client-supplied and can't be trusted. Default: 1 hop.
     """
     hops = _int_env("DABBA_TRUSTED_PROXY_HOPS", 1)
-    forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    forwarded = [
+        part.strip()
+        for part in request.headers.get("x-forwarded-for", "").split(",")
+        if part.strip()
+    ]
     if hops and len(forwarded) >= hops:
         return forwarded[-hops]
     return request.client.host if request.client else "unknown"
@@ -106,7 +115,8 @@ class GuestUsage:
         ).fetchone()
         if row and (window_ms is None or now - row["window_start"] < window_ms):
             conn.execute(
-                "UPDATE guest_usage SET count=MAX(0, count + ?) WHERE key=?", (delta, key)
+                "UPDATE guest_usage SET count=MAX(0, count + ?) WHERE key=?",
+                (delta, key),
             )
         elif delta > 0:
             conn.execute(
@@ -119,7 +129,9 @@ class GuestUsage:
         with self.store.transaction() as conn:
             used_guest = self._count(conn, f"guest:{guest_id}", now, None)
             used_ip = self._count(conn, f"ip:{ip}", now, DAY_MS)
-        return max(0, min(guest_prompt_limit() - used_guest, guest_ip_daily_limit() - used_ip))
+        return max(
+            0, min(guest_prompt_limit() - used_guest, guest_ip_daily_limit() - used_ip)
+        )
 
     def consume(self, guest_id: str, ip: str) -> Optional[int]:
         """Count one prompt. Returns prompts left after it, or None if over the limit."""
@@ -131,7 +143,13 @@ class GuestUsage:
                 return None
             self._bump(conn, f"guest:{guest_id}", now, None, 1)
             self._bump(conn, f"ip:{ip}", now, DAY_MS, 1)
-        return max(0, min(guest_prompt_limit() - used_guest - 1, guest_ip_daily_limit() - used_ip - 1))
+        return max(
+            0,
+            min(
+                guest_prompt_limit() - used_guest - 1,
+                guest_ip_daily_limit() - used_ip - 1,
+            ),
+        )
 
     def refund(self, guest_id: str, ip: str) -> None:
         """Give a prompt back when the model call failed, so errors don't cost a turn."""
@@ -190,16 +208,28 @@ def create_guest_router(
 
         if not re.fullmatch(GUEST_ID_PATTERN, guestId):
             raise HTTPException(status_code=422, detail="Invalid guest id")
-        available = guest_chat_enabled() and bool(get_registry().resolve_api_key(GUEST_MODEL)[0])
-        remaining = await asyncio.to_thread(get_usage().remaining, guestId, client_ip(request))
-        return {"available": available, "remaining": remaining, "limit": guest_prompt_limit()}
+        available = guest_chat_enabled() and bool(
+            get_registry().resolve_api_key(GUEST_MODEL)[0]
+        )
+        remaining = await asyncio.to_thread(
+            get_usage().remaining, guestId, client_ip(request)
+        )
+        return {
+            "available": available,
+            "remaining": remaining,
+            "limit": guest_prompt_limit(),
+        }
 
     @router.post("/chat")
     async def guest_chat(request: Request, body: GuestChatRequest):
         if not guest_chat_enabled():
-            raise HTTPException(status_code=404, detail="Guest chat is turned off on this server")
+            raise HTTPException(
+                status_code=404, detail="Guest chat is turned off on this server"
+            )
         if body.messages[-1].role != "user":
-            raise HTTPException(status_code=422, detail="The last message must be from the user")
+            raise HTTPException(
+                status_code=422, detail="The last message must be from the user"
+            )
 
         registry = get_registry()
         if not registry.resolve_api_key(GUEST_MODEL)[0]:
@@ -269,9 +299,14 @@ def create_guest_router(
                         left = remaining
                         if not sent_text:
                             # Nothing reached the visitor: don't charge the prompt.
-                            await asyncio.to_thread(get_usage().refund, body.guestId, ip)
+                            await asyncio.to_thread(
+                                get_usage().refund, body.guestId, ip
+                            )
                             left = remaining + 1
-                        payload = {"error": "Dabba couldn't answer just now. Try again in a moment.", "remaining": left}
+                        payload = {
+                            "error": "Dabba couldn't answer just now. Try again in a moment.",
+                            "remaining": left,
+                        }
                         yield f"data: {json.dumps(payload)}\n\n"
                         return
             finally:

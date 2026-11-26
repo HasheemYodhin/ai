@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useCallback, useDeferredValue, useEffect } from 'react'
+import { memo, useMemo, useState, useCallback, useDeferredValue, useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { SyntaxHighlighter } from '@/lib/syntaxHighlighter'
 import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
@@ -14,6 +14,7 @@ import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/api/client'
 import { useAuth } from '@/hooks/useAuth'
+import { runBrowserPython, type BrowserCodeResult } from '@/lib/browserPython'
 
 // Blocks at or above this size open as a compact artifact card (see
 // ArtifactPanel) instead of rendering the full code inline — keeps long
@@ -166,19 +167,23 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [running, setRunning] = useState(false)
   const [stdinOpen, setStdinOpen] = useState(false)
   const [stdin, setStdin] = useState('')
-  const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated?: boolean; durationMs: number; phase?: string } | null>(null)
+  const [result, setResult] = useState<BrowserCodeResult | null>(null)
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
   const { isAdmin, currentUser } = useAuth()
   const [executionAccess, setExecutionAccess] = useState<{ userId: string; reason: string | null } | null>(null)
   const userId = currentUser?.id
   const isRunnableLanguage = RUNNABLE_LANGUAGES.has(language.toLowerCase())
+  const canRunInBrowser = ['python', 'py', 'python3'].includes(language.toLowerCase()) && typeof WebAssembly !== 'undefined'
+  const runController = useRef<AbortController | null>(null)
+  useEffect(() => () => runController.current?.abort(), [])
   const runDisabledReason = !isAdmin
     ? 'Only the workspace owner can run code'
     : executionAccess && executionAccess.userId === userId
       ? executionAccess.reason
       : 'Checking code execution availability'
-  const canRun = isRunnableLanguage && runDisabledReason === null
+  const useBrowserRunner = canRunInBrowser && runDisabledReason !== null
+  const canRun = useBrowserRunner || (isRunnableLanguage && runDisabledReason === null)
 
   useEffect(() => {
     if (!isAdmin || !userId || !isRunnableLanguage) return
@@ -210,25 +215,34 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   }, [openArtifact, code, language, title])
 
   const handleRun = useCallback(async () => {
-    if (!canRun) return
+    if (!canRun || runController.current) return
+    const controller = new AbortController()
+    runController.current = controller
     setRunning(true)
     setRunError('')
     setResult(null)
     try {
-      setResult(await apiClient.executeCode(language, code, stdin))
+      const result = useBrowserRunner
+        ? await runBrowserPython(code, stdin, controller.signal)
+        : await apiClient.executeCode(language, code, stdin, controller.signal)
+      if (!controller.signal.aborted) setResult(result)
     } catch (error) {
-      setRunError(error instanceof Error ? error.message : 'Execution failed')
+      if (!controller.signal.aborted) setRunError(error instanceof Error ? error.message : 'Execution failed')
     } finally {
-      setRunning(false)
+      runController.current = null
+      if (!controller.signal.aborted) setRunning(false)
     }
-  }, [canRun, language, code, stdin])
+  }, [canRun, useBrowserRunner, language, code, stdin])
 
-  const runner = isRunnableLanguage && runDisabledReason ? (
+  const [showRunReason, setShowRunReason] = useState(false)
+  const runner = isRunnableLanguage && !canRun && runDisabledReason ? (
     <button
-      disabled
+      type="button"
+      onClick={() => setShowRunReason(value => !value)}
+      aria-expanded={showRunReason}
       title={runDisabledReason}
-      aria-label={`Run unavailable: ${runDisabledReason}`}
-      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent text-white opacity-40 cursor-not-allowed"
+      aria-label={`Why Run is unavailable: ${runDisabledReason}`}
+      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent/10 text-accent"
     >
       <Lock className="w-3.5 h-3.5" aria-hidden="true" />
       Run
@@ -238,7 +252,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
       <button
         onClick={handleRun}
         disabled={running}
-        title={`Run ${language} locally`}
+        title={useBrowserRunner ? "Run Python in this browser" : `Run ${language} on the local server`}
         className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
       >
         {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
@@ -254,7 +268,11 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
     </>
   ) : null
 
-  const executionPanel = canRun && (stdinOpen || result || runError) && (
+  const executionPanel = !canRun && showRunReason ? (
+    <p role="status" className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
+      {runDisabledReason}. Python snippets can run in a supported browser. Other runtimes require the owner's local server.
+    </p>
+  ) : canRun && (stdinOpen || result || runError) && (
     <div className="border-t border-border dark:border-border-dark bg-gray-950 text-gray-100">
       {stdinOpen && (
         <div className="p-3 border-b border-gray-800">
@@ -264,7 +282,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
             onChange={e => setStdin(e.target.value)}
             placeholder="Input passed to the program…"
             rows={3}
-            className="w-full resize-y rounded border border-gray-700 bg-gray-900 px-2.5 py-2 font-mono text-xs outline-none focus:border-green-500"
+            className="w-full resize-y rounded border border-gray-700 bg-gray-900 px-2.5 py-2 font-mono text-xs outline-none focus:border-accent"
           />
         </div>
       )}

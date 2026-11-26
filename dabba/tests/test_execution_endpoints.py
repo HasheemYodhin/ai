@@ -29,7 +29,9 @@ def test_execution_availability_matches_execute_endpoint(enabled, host, reason):
 
     async def check():
         transport = httpx.ASGITransport(app=app, client=(host, 50000))
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
             availability = await client.get("/v1/code/languages")
             assert availability.status_code == 200
             assert availability.json()["unavailableReason"] == reason

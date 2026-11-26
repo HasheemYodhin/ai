@@ -122,3 +122,30 @@ Do not put OpenAI, Anthropic, or other private provider keys in Cloudflare's
 `VITE_*` variables; those values are public in the browser bundle. Enter
 provider keys through the authenticated app/backend or as secret Render
 environment variables supported by the backend.
+
+### Full backup and restore drill
+
+Litestream restores the two SQLite databases. Artifact binaries, imported
+documents, and other files under `DABBA_DATA_DIR` also need a backup. Keep the
+master key in your secret manager and verify it is available to the restore
+environment.
+
+For a consistent full snapshot, stop writes first. On a self-hosted instance,
+stop Dabba and archive the entire data directory to a protected location
+outside that directory:
+
+```sh
+bash deploy/backup-data.sh /path/to/dabba-data /protected/dabba-backup.tar.gz
+```
+
+On Render, use a consistent snapshot of the persistent
+disk or an equivalent file backup taken while writes are stopped. Record the
+release version and when the snapshot was taken.
+
+Restore into an empty staging disk using the same application version,
+absolute data directory path, and master key. Stored file records can contain
+absolute paths. Before enabling jobs or accepting traffic, check sign-in, recent
+conversations, downloads of an artifact and an original document, and
+decryption of a saved provider key. Record the oldest missing change and the
+time it took to restore. Keep the existing production disk available during
+a restore or rollback.

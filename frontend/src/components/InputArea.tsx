@@ -3,7 +3,7 @@ import { ArrowUp, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot,
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
 import { captureScreenshot } from '@/lib/screenshot'
-import { friendlyVoiceError, startRecording, voiceAvailable, VOICE_UNAVAILABLE, type VoiceRecorder } from '@/lib/voice'
+import { friendlyVoiceError, startVoiceInput, type VoiceInput } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
@@ -79,7 +79,12 @@ export function InputArea({
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const quickRecorderRef = useRef<VoiceRecorder | null>(null)
+  const quickRecorderRef = useRef<VoiceInput | null>(null)
+  const quickVoiceController = useRef<AbortController | null>(null)
+  useEffect(() => () => {
+    quickVoiceController.current?.abort()
+    quickRecorderRef.current?.cancel()
+  }, [])
   // Set whenever text comes in via mic/voice-mode — tells the reply to speak
   // itself back automatically. Cleared once the message is actually sent.
   const [pendingViaVoice, setPendingViaVoice] = useState(false)
@@ -95,32 +100,37 @@ export function InputArea({
     if (isQuickRecording) {
       // Second click: stop recording and transcribe what was captured.
       const recorder = quickRecorderRef.current
-      quickRecorderRef.current = null
+      const controller = quickVoiceController.current
       setIsQuickRecording(false)
       if (!recorder) return
       setIsTranscribing(true)
       try {
-        const blob = await recorder.stop()
-        const text = await apiClient.transcribeAudio(blob)
+        const text = await recorder.stop()
+        if (controller?.signal.aborted) return
         if (text) insertTranscript(text)
+        else setVoiceError('No speech detected. Try again.')
       } catch (err) {
-        setVoiceError(friendlyVoiceError((err as Error).message || 'Transcription failed').text)
+        if (!controller?.signal.aborted) setVoiceError(friendlyVoiceError((err as Error).message || 'Transcription failed').text)
       } finally {
-        setIsTranscribing(false)
+        quickRecorderRef.current = null
+        if (!controller?.signal.aborted) setIsTranscribing(false)
       }
       return
     }
 
     setVoiceError(null)
-    if (!(await voiceAvailable())) {
-      setVoiceError(VOICE_UNAVAILABLE)
-      return
-    }
+    setIsTranscribing(true)
+    const controller = new AbortController()
+    quickVoiceController.current = controller
     try {
-      quickRecorderRef.current = await startRecording()
+      const recorder = await startVoiceInput(controller.signal)
+      if (controller.signal.aborted) { recorder.cancel(); return }
+      quickRecorderRef.current = recorder
       setIsQuickRecording(true)
     } catch (err) {
-      setVoiceError((err as Error).message || 'Could not access the microphone')
+      if (!controller.signal.aborted) setVoiceError((err as Error).message || 'Could not access the microphone')
+    } finally {
+      if (!controller.signal.aborted) setIsTranscribing(false)
     }
   }, [isQuickRecording, insertTranscript])
 
@@ -434,7 +444,7 @@ export function InputArea({
             <button
               type="button"
               onClick={() => setVoiceModalOpen(true)}
-              disabled={isLoading || isExtractingDocuments || disabled}
+              disabled={isLoading || isExtractingDocuments || disabled || isTranscribing || isQuickRecording}
               title="Voice mode"
               aria-label="Open voice mode"
               className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"

@@ -751,7 +751,9 @@ def create_platform_router() -> APIRouter:
         """Executor for one run: uses the schedule's own model (not the server's
         tiny default) and a prompt that carries today's date and earlier results."""
         schedule = scheduled_skills.get(run["scheduleId"], run["userId"])
-        prompt = scheduled_skills.prompt_with_context(schedule, run["userId"], run["id"])
+        prompt = scheduled_skills.prompt_with_context(
+            schedule, run["userId"], run["id"]
+        )
         return lambda _instructions: execute_skill(prompt, schedule.get("model"))
 
     def execute_skill(instructions: str, model: Optional[str] = None) -> str:
@@ -766,14 +768,15 @@ def create_platform_router() -> APIRouter:
                     "role": "user",
                     "content": "Run this scheduled skill now and return its result.",
                 },
-            ]
+            ],
         )
 
     async def scheduler_loop() -> None:
         while True:
             try:
-                due_runs = await asyncio.to_thread(scheduled_skills.dispatch_due)
-                for run in due_runs:
+                await asyncio.to_thread(scheduled_skills.dispatch_due)
+                queued_runs = await asyncio.to_thread(scheduled_skills.queued_runs)
+                for run in queued_runs:
                     launch(
                         asyncio.to_thread(
                             scheduled_skills.execute,
@@ -1478,7 +1481,9 @@ def create_platform_router() -> APIRouter:
 
     @router.get("/identity/me")
     async def me(
-        request: Request, response: Response, authorization: Optional[str] = Header(default=None)
+        request: Request,
+        response: Response,
+        authorization: Optional[str] = Header(default=None),
     ):
         response.headers["Cache-Control"] = "no-store"
         return getattr(request.state, "dabba_user", None) or current_user(authorization)

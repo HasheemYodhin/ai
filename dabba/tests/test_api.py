@@ -29,7 +29,9 @@ def test_session_restore_accepts_expired_session_without_exposing_account_data(
 
     async def check():
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
             active = await client.get(restore_path, headers=headers)
             assert active.status_code == 200
             assert active.json() == session["user"]
@@ -42,7 +44,9 @@ def test_session_restore_accepts_expired_session_without_exposing_account_data(
             assert expired.json() is None
             assert expired.headers["Cache-Control"] == "no-store"
             assert (await client.get(path, headers=headers)).status_code == 401
-            protected = await client.get("/v1/platform/usage?restore=true", headers=headers)
+            protected = await client.get(
+                "/v1/platform/usage?restore=true", headers=headers
+            )
             assert protected.status_code == 401
 
     asyncio.run(check())

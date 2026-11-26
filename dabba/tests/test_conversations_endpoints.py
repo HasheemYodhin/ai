@@ -15,7 +15,9 @@ def client(tmp_path, monkeypatch):
     # Isolate both SQLite stores from the developer's real Dabba data.
     monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(platform_core, "_default_store", None)
-    monkeypatch.setattr(conversations_endpoints, "DB_PATH", tmp_path / "conversations.db")
+    monkeypatch.setattr(
+        conversations_endpoints, "DB_PATH", tmp_path / "conversations.db"
+    )
     with TestClient(create_app(model_engine=Mock())) as test_client:
         yield test_client
 
@@ -85,7 +87,10 @@ def test_get_one_conversation_only_for_its_owner(client):
 
     # Another user's chat looks exactly like a missing one.
     assert client.get("/v1/conversations/c1", headers=other_headers).status_code == 404
-    assert client.get("/v1/conversations/missing", headers=owner_headers).status_code == 404
+    assert (
+        client.get("/v1/conversations/missing", headers=owner_headers).status_code
+        == 404
+    )
     assert client.get("/v1/conversations/c1").status_code == 401
 
 
@@ -102,3 +107,32 @@ def test_security_headers_on_api_responses(client):
 def test_hsts_when_proxy_reports_https(client):
     response = client.get("/health", headers={"X-Forwarded-Proto": "https"})
     assert response.headers["strict-transport-security"].startswith("max-age=31536000")
+
+
+def test_stale_save_and_deleted_chat_cannot_overwrite_history(client):
+    user_id, headers = _signup(client, "revision@example.com")
+    _save(client, headers, user_id, "revision-chat", MESSAGES)
+    path = "/v1/conversations/revision-chat"
+    payload = {
+        **client.get(path, headers=headers).json(),
+        "userId": user_id,
+        "title": "Newer chat",
+        "updatedAt": 3,
+    }
+    assert client.put(path, headers=headers, json=payload).json()["revision"] == 2
+    assert client.put(path, headers=headers, json=payload).status_code == 409
+    assert client.get(path, headers=headers).json()["title"] == "Newer chat"
+    assert (
+        client.delete(f"{path}?user_id={user_id}", headers=headers).status_code == 200
+    )
+    assert client.put(path, headers=headers, json=payload).status_code == 409
+
+
+def test_search_matches_message_text_only_in_the_callers_account(client):
+    owner, owner_headers = _signup(client, "search-owner@example.com")
+    _, other_headers = _signup(client, "search-other@example.com")
+    _save(client, owner_headers, owner, "search-chat", MESSAGES)
+    path = "/v1/conversations/search?q=hello"
+    result = client.get(path, headers=owner_headers).json()["matches"]
+    assert result == [{"id": "search-chat", "snippet": "hello"}]
+    assert client.get(path, headers=other_headers).json()["matches"] == []

@@ -256,7 +256,9 @@ CI runs on every pull request: lint, unit tests, CodeQL, and PR metadata checks.
 | Render | [render.yaml](render.yaml) and [docs/cloudflare-render-deployment.md](docs/cloudflare-render-deployment.md). On the free plan, enable Litestream + Cloudflare R2 to keep data across restarts. |
 | Kubernetes | [helm/](helm/) |
 
-**Voice input.** By default, speech is turned into text on the server and needs both `ffmpeg` and the `openai-whisper` package (which brings in PyTorch, several GB). Neither is in the slim Docker image, so on Render and similar hosts the microphone buttons report "Voice input isn't set up on this server yet". You have two options: run Dabba where both are installed (`pip install openai-whisper`, then `sudo apt-get install ffmpeg` or `brew install ffmpeg`), or set `DABBA_HOSTED_TRANSCRIPTION=openai` and an OpenAI key, which sends each recording to OpenAI (small per-minute cost, and audio leaves your server). `GET /v1/audio/status` shows what is missing.
+**Voice input and read aloud.** When the server has Whisper and ffmpeg, it can transcribe recordings. You can also configure hosted transcription with `DABBA_HOSTED_TRANSCRIPTION=openai` and an OpenAI key. On the slim Docker image, supported browsers can handle dictation and read aloud when the server lacks Whisper or Piper. Browser dictation may use the browser vendor's speech service. `GET /v1/audio/status` shows what the server provides.
+
+**Run Python.** On hosted installs, Python code blocks run in a sandboxed browser worker and load Pyodide from jsDelivr. The runner supports standard input and output with a five-second execution timeout. Scripts that install software or need access to the host must be run in your own terminal. The owner can use local runtimes by setting `api.enable_local_code_execution: true` in the server YAML and connecting through loopback.
 
 The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check. It also bundles [Litestream](https://litestream.io): set `LITESTREAM_BUCKET` and the R2 variables to back up the SQLite databases to Cloudflare R2 and restore them on startup.
 

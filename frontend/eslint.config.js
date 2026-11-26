@@ -26,6 +26,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ["public/**/*.js"],
+    languageOptions: { globals: globals.browser },
+  },
+  {
+    files: ["public/code-runner.js"],
+    languageOptions: { globals: globals.worker },
+  },
+  {
     // Build scripts run in Node (scripts/prerender.mjs).
     files: ["scripts/**/*.mjs"],
     languageOptions: {

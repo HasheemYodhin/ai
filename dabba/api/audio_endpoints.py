@@ -55,8 +55,8 @@ def _hosted_api_key() -> str:
     """The OpenAI key saved in the app or set in the host's environment, or ''."""
     from dabba.api.agent_endpoints import _get_agent_proxy
 
-    key, _source = _get_agent_proxy()._get_provider_registry().resolve_api_key(
-        "gpt-transcribe"
+    key, _source = (
+        _get_agent_proxy()._get_provider_registry().resolve_api_key("gpt-transcribe")
     )
     return key
 
@@ -143,6 +143,8 @@ def ensure_ffmpeg_on_path() -> Optional[str]:
             return exe  # cannot alias; the caller may still run it by full path
     os.environ["PATH"] = _ffmpeg_alias_dir + os.pathsep + os.environ.get("PATH", "")
     return exe
+
+
 DEFAULT_VOICE = "en_US-lessac-medium"
 VOICE_DIR = Path.home() / ".local" / "share" / "piper-voices"
 
@@ -214,11 +216,17 @@ def create_audio_router() -> APIRouter:
         try:
             audio = base64.b64decode(req.audio_base64, validate=True)
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid audio data: {exc}") from exc
+            raise HTTPException(
+                status_code=400, detail=f"Invalid audio data: {exc}"
+            ) from exc
         if not audio:
-            raise HTTPException(status_code=400, detail="No audio recorded - check your microphone.")
+            raise HTTPException(
+                status_code=400, detail="No audio recorded - check your microphone."
+            )
         if len(audio) > MAX_HOSTED_AUDIO_BYTES:
-            raise HTTPException(status_code=413, detail="That recording is too long. Try a shorter one.")
+            raise HTTPException(
+                status_code=413, detail="That recording is too long. Try a shorter one."
+            )
         try:
             api_key = _hosted_api_key()
         except Exception:  # noqa: BLE001
@@ -231,10 +239,16 @@ def create_audio_router() -> APIRouter:
         try:
             return {"text": await asyncio.to_thread(_transcribe_hosted, audio, api_key)}
         except Exception as exc:  # noqa: BLE001
-            raise HTTPException(status_code=502, detail=f"Transcription failed: {exc}") from exc
+            raise HTTPException(
+                status_code=502, detail=f"Transcription failed: {exc}"
+            ) from exc
 
     @router.post("/transcribe")
     async def transcribe(req: TranscribeRequest):
+        if len(req.audio_base64) > 4 * ((MAX_HOSTED_AUDIO_BYTES + 2) // 3):
+            raise HTTPException(
+                status_code=413, detail="That recording is too long. Try a shorter one."
+            )
         whisper_installed = importlib.util.find_spec("whisper") is not None
         ffmpeg_found = ensure_ffmpeg_on_path() is not None
         # Only when the owner opted in, and only if this machine can't transcribe itself.
@@ -269,6 +283,10 @@ def create_audio_router() -> APIRouter:
                 status_code=400, detail=f"Invalid audio data: {exc}"
             ) from exc
 
+        if len(audio_bytes) > MAX_HOSTED_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=413, detail="That recording is too long. Try a shorter one."
+            )
         if len(audio_bytes) == 0:
             raise HTTPException(
                 status_code=400, detail="No audio recorded - check your microphone."

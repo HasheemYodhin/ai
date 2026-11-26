@@ -150,7 +150,7 @@ jobs:
         run: npx vitest run --reporter=default --reporter=junit --outputFile=frontend-test-results.xml
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e -- --project=chromium
+      - run: npm run test:e2e -- --project=chromium --project=mobile-chromium
       - name: Upload frontend test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -322,6 +322,24 @@ jobs:
           cache-to: type=gha,mode=max
       - id: tags
         run: echo "image_ref=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)" >> "$GITHUB_OUTPUT"
+      - name: Smoke-test the built image
+        env:
+          IMAGE_REF: ${{ steps.tags.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+          container=$(docker run -d -p 127.0.0.1::8080 "$IMAGE_REF")
+          trap 'docker rm -f "$container" >/dev/null' EXIT
+          base="http://$(docker port "$container" 8080/tcp)"
+          curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 "$base/ready"
+          home=$(curl --fail --silent "$base/")
+          grep -q '<div id="root">' <<< "$home"
+          curl --fail --silent "$base/code-runner.js" >/dev/null
+          curl --fail --silent -D /tmp/dabba-runner-headers "$base/code-runner.html" >/dev/null
+          grep -qi '^content-security-policy:.*sandbox allow-scripts' /tmp/dabba-runner-headers
+          restore=$(curl --fail --silent -H 'Authorization: Bearer expired-test-session' "$base/v1/platform/identity/me?restore=true")
+          test "$restore" = null
+          status=$(curl --silent -o /dev/null -w '%{http_code}' "$base/v1/platform/usage")
+          test "$status" = 401
       - name: Save image for the scan job
         run: docker save '${{ steps.tags.outputs.image_ref }}' -o image.tar
       - uses: actions/upload-artifact@v4

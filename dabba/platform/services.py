@@ -10,12 +10,13 @@ import mimetypes
 import os
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
 
@@ -130,18 +131,25 @@ class TaskOrchestrator:
         workspace_id: Optional[str] = None,
         model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        reject_duplicate: bool = False,
+        connection: Optional[sqlite3.Connection] = None,
     ) -> Dict[str, Any]:
-        if idempotency_key:
-            existing = self.store.fetchone(
-                "SELECT * FROM tasks WHERE user_id IS ? AND idempotency_key = ?",
-                (user_id, idempotency_key),
-            )
-            if existing:
-                return self._decode(existing)
-
         task_id = new_id("task")
         now = utc_ms()
-        with self.store.transaction() as conn:
+        with (
+            nullcontext(connection)
+            if connection is not None
+            else self.store.transaction()
+        ) as conn:
+            if idempotency_key:
+                existing = conn.execute(
+                    "SELECT * FROM tasks WHERE user_id IS ? AND idempotency_key = ?",
+                    (user_id, idempotency_key),
+                ).fetchone()
+                if existing:
+                    if reject_duplicate:
+                        raise FileExistsError("Task already exists")
+                    return self._decode(dict(existing))
             conn.execute(
                 """
                 INSERT INTO tasks
@@ -162,7 +170,8 @@ class TaskOrchestrator:
                 ),
             )
             self._insert_event(conn, task_id, "task.created", {"kind": kind}, now)
-        return self.get(task_id)
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            return self._decode(dict(row))
 
     def get(self, task_id: str) -> Dict[str, Any]:
         row = self.store.fetchone("SELECT * FROM tasks WHERE id = ?", (task_id,))
@@ -307,17 +316,35 @@ class TaskOrchestrator:
                )""",
             (cutoffs[0], cutoffs[1], user_id, cutoffs[2], now),
         )
-        return [
-            {
-                "label": label,
-                "windowHours": hours,
-                "usedTokens": totals[column],
-                "limitTokens": max(0, int(os.getenv(env_var, str(default)))),
-            }
-            for (label, hours, env_var, default), column in zip(
-                CHAT_USAGE_WINDOWS, ("five_hour", "daily", "weekly")
+        limits = []
+        for (label, hours, env_var, default), column, cutoff in zip(
+            CHAT_USAGE_WINDOWS, ("five_hour", "daily", "weekly"), cutoffs
+        ):
+            used = totals[column]
+            limit = max(0, int(os.getenv(env_var, str(default))))
+            retry_at = None
+            if limit and used >= limit:
+                row = self.store.fetchone(
+                    """SELECT created_at FROM (
+                        SELECT created_at, SUM(prompt_tokens + completion_tokens)
+                            OVER (ORDER BY created_at) AS expired_tokens
+                        FROM model_usage
+                        WHERE user_id=? AND created_at>? AND created_at<=?
+                    ) WHERE expired_tokens>? ORDER BY created_at LIMIT 1""",
+                    (user_id, cutoff, now, used - limit),
+                )
+                if row:
+                    retry_at = row["created_at"] + hours * 3_600_000
+            limits.append(
+                {
+                    "label": label,
+                    "windowHours": hours,
+                    "usedTokens": used,
+                    "limitTokens": limit,
+                    "retryAt": retry_at,
+                }
             )
-        ]
+        return limits
 
     def usage_summary(self, user_id: str) -> Dict[str, Any]:
         """Token totals for a user, from the usage recorded for each finished chat."""
@@ -429,12 +456,17 @@ class TaskOrchestrator:
         handler: Callable[
             [Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]
         ],
+        *,
+        already_claimed: bool = False,
     ) -> Dict[str, Any]:
         """Run a registered job handler while persisting progress and failure."""
         task = self.get(task_id)
-        if task["status"] not in {"queued", "retrying"}:
-            raise ValueError(f"Task {task_id} cannot run from {task['status']}")
-        self.transition(task_id, "running", current_step="Starting")
+        if not already_claimed:
+            if task["status"] not in {"queued", "retrying"}:
+                raise ValueError(f"Task {task_id} cannot run from {task['status']}")
+            self.transition(task_id, "running", current_step="Starting")
+        elif task["status"] != "running":
+            return task
 
         def progress(value: float, step: str) -> None:
             current = self.get(task_id)
@@ -3169,24 +3201,14 @@ class ScheduledSkillService:
             )
 
     def dispatch(
-        self, schedule_id: str, user_id: str, triggered_by: str = "manual"
+        self,
+        schedule_id: str,
+        user_id: str,
+        triggered_by: str = "manual",
+        *,
+        expected_at: Optional[int] = None,
     ) -> Dict[str, Any]:
         schedule = self.get(schedule_id, user_id)
-        task = self.tasks.create(
-            "scheduled_skill",
-            {
-                "scheduleId": schedule_id,
-                "skillName": schedule["skillName"],
-                "instructions": schedule["instructions"],
-                "triggeredBy": triggered_by,
-            },
-            user_id=user_id,
-            idempotency_key=(
-                f"schedule:{schedule_id}:{schedule['nextRunAt']}"
-                if triggered_by == "schedule"
-                else None
-            ),
-        )
         now, run_id = utc_ms(), new_id("run")
         next_at = self._next_run(
             schedule["cadence"],
@@ -3196,6 +3218,31 @@ class ScheduledSkillService:
             schedule["weekdays"],
         )
         with self.store.transaction() as conn:
+            row = conn.execute(
+                "SELECT enabled,next_run_at FROM scheduled_skills WHERE id=? AND user_id=?",
+                (schedule_id, user_id),
+            ).fetchone()
+            if not row or (
+                triggered_by == "schedule"
+                and (not row["enabled"] or row["next_run_at"] != expected_at)
+            ):
+                raise KeyError("Schedule occurrence is no longer due")
+            task = self.tasks.create(
+                "scheduled_skill",
+                {
+                    "scheduleId": schedule_id,
+                    "skillName": schedule["skillName"],
+                    "instructions": schedule["instructions"],
+                    "triggeredBy": triggered_by,
+                },
+                user_id=user_id,
+                connection=conn,
+                idempotency_key=(
+                    f"schedule:{schedule_id}:{schedule['nextRunAt']}"
+                    if triggered_by == "schedule"
+                    else None
+                ),
+            )
             conn.execute(
                 """INSERT INTO scheduled_skill_runs
                    (id,schedule_id,user_id,task_id,status,triggered_by,output_json,started_at,completed_at)
@@ -3221,10 +3268,32 @@ class ScheduledSkillService:
     def dispatch_due(self, limit: int = 25) -> list[Dict[str, Any]]:
         now = utc_ms()
         rows = self.store.fetchall(
-            "SELECT id,user_id FROM scheduled_skills WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at LIMIT ?",
+            "SELECT id,user_id,next_run_at FROM scheduled_skills WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at LIMIT ?",
             (now, max(1, min(limit, 100))),
         )
-        return [self.dispatch(row["id"], row["user_id"], "schedule") for row in rows]
+        dispatched = []
+        for row in rows:
+            try:
+                dispatched.append(
+                    self.dispatch(
+                        row["id"],
+                        row["user_id"],
+                        "schedule",
+                        expected_at=row["next_run_at"],
+                    )
+                )
+            except KeyError:
+                continue
+        return dispatched
+
+    def queued_runs(self, limit: int = 25) -> list[Dict[str, Any]]:
+        rows = self.store.fetchall(
+            """SELECT r.* FROM scheduled_skill_runs r JOIN tasks t ON t.id = r.task_id
+               WHERE r.status = 'queued' AND t.status = 'queued'
+               ORDER BY r.started_at, r.id LIMIT ?""",
+            (limit,),
+        )
+        return [self._decode_run(row) for row in rows]
 
     def prompt_with_context(
         self, schedule: Dict[str, Any], user_id: str, current_run_id: str
@@ -3261,6 +3330,34 @@ class ScheduledSkillService:
         run = self.get_run(run_id, user_id)
         schedule = self.get(run["scheduleId"], user_id)
 
+        now = utc_ms()
+        with self.store.transaction() as conn:
+            claimed = conn.execute(
+                """UPDATE tasks SET status='running', current_step='Starting', started_at=?, updated_at=?
+                   WHERE id=? AND status='queued'
+                     AND EXISTS (SELECT 1 FROM scheduled_skill_runs WHERE id=? AND status='queued')""",
+                (now, now, run["taskId"], run_id),
+            ).rowcount
+            if claimed:
+                conn.execute(
+                    "UPDATE scheduled_skill_runs SET status='running' WHERE id=?",
+                    (run_id,),
+                )
+                self.tasks._insert_event(
+                    conn,
+                    run["taskId"],
+                    "task.running",
+                    {
+                        "progress": 0,
+                        "current_step": "Starting",
+                        "result": None,
+                        "error": None,
+                    },
+                    now,
+                )
+        if not claimed:
+            return self.get_run(run_id, user_id)
+
         def handler(
             _request: Dict[str, Any], progress: Callable[[float, str], None]
         ) -> Dict[str, Any]:
@@ -3269,7 +3366,7 @@ class ScheduledSkillService:
             progress(0.9, "Saving result")
             return {"content": content, "scheduleId": schedule["id"]}
 
-        task = self.tasks.run(run["taskId"], handler)
+        task = self.tasks.run(run["taskId"], handler, already_claimed=True)
         status = task["status"]
         error = (task.get("error") or {}).get("message") if task.get("error") else None
         with self.store.transaction() as conn:

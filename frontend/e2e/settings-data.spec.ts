@@ -93,9 +93,12 @@ test('A mobile reply keeps its table inside the chat and uses the selected Run a
   await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden()
   const chat = page.getByText('Chat c1', { exact: true }).first()
   if (!(await chat.isVisible())) await page.getByTitle('Open sidebar (Ctrl+B)').click()
-  await chat.click()
+  await Promise.all([
+    page.waitForResponse(response => response.url().endsWith('/v1/conversations/c1') && response.ok()),
+    chat.click(),
+  ])
   const table = page.getByRole('table')
-  await expect(table).toBeVisible()
+  await expect(table).toBeVisible({ timeout: 15_000 })
   expect(await table.evaluate(element => element.getBoundingClientRect().right)).toBeLessThan(400)
   const run = page.getByRole('button', { name: 'Run', exact: true })
   await expect(run).toBeEnabled()

@@ -43,6 +43,8 @@ class OptionsApp {
   _setupEventListeners() {
     const els = this._getElements();
 
+    document.getElementById('signInBtn').addEventListener('click', () => this._accountAction(false));
+    document.getElementById('signOutBtn').addEventListener('click', () => this._accountAction(true));
     els.testConnectionBtn.addEventListener('click', () => this._testConnection());
     els.saveBtn.addEventListener('click', () => this._saveSettings());
     els.resetBtn.addEventListener('click', () => this._resetSettings());
@@ -51,6 +53,39 @@ class OptionsApp {
     els.importFileInput.addEventListener('change', (e) => this._importConfig(e));
 
     els.themeSelect.addEventListener('change', () => this._applyTheme());
+  }
+
+  async _accountAction(signOut) {
+    const els = this._getElements();
+    const password = document.getElementById('accountPassword');
+    try {
+      const saved = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      const endpoint = new URL(signOut ? saved.apiEndpoint : els.apiEndpoint.value.trim());
+      if (endpoint.protocol !== 'https:' &&
+          !(endpoint.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(endpoint.hostname))) {
+        throw new Error('Use HTTPS or a local Dabba server.');
+      }
+      const url = new URL(`/v1/platform/identity/${signOut ? 'logout' : 'login'}`, endpoint);
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(signOut && saved.apiKey ? { Authorization: `Bearer ${saved.apiKey}` } : {}) },
+        ...(!signOut ? { body: JSON.stringify({ email: document.getElementById('accountEmail').value.trim(), password: password.value }) } : {}),
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok && !(signOut && response.status === 401)) {
+        throw new Error(signOut ? 'Could not revoke the Dabba session.' : 'Dabba sign-in failed. Check your credentials.');
+      }
+      const apiKey = signOut ? '' : (await response.json()).token;
+      if (!signOut && !apiKey) throw new Error('The server did not return a Dabba session.');
+      await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { apiEndpoint: endpoint.origin, apiKey } });
+      els.apiKey.value = apiKey;
+      this._showStatus(signOut ? 'Signed out.' : 'Signed in to Dabba.', 'success');
+    } catch (error) {
+      this._showStatus(error.message, 'error');
+    } finally {
+      password.value = '';
+    }
   }
 
   async _testConnection() {
@@ -83,10 +118,9 @@ class OptionsApp {
       const modelsUrl = `${endpoint}/v1/models`;
       const modelsRes = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(5000) });
 
-      if (modelsRes.ok) {
-        const modelsData = await modelsRes.json();
-        this._populateModels(modelsData);
-      }
+      if (modelsRes.status === 401) throw new Error('Dabba session expired or missing. Sign in again with a Dabba session token.');
+      if (!modelsRes.ok) throw new Error(`Model list unavailable: ${modelsRes.status}`);
+      this._populateModels(await modelsRes.json());
 
       this._showStatus(
         `Connected successfully! API version: ${healthData.version || 'unknown'}, Model loaded: ${healthData.model_loaded || false}`,
@@ -110,9 +144,7 @@ class OptionsApp {
     }
 
     const currentValue = els.modelSelect.value;
-    els.modelSelect.innerHTML = models
-      .map((m) => `<option value="${m.id}">${m.id}</option>`)
-      .join('');
+    els.modelSelect.replaceChildren(...models.map(model => new Option(model.id, model.id)));
 
     if ([...els.modelSelect.options].some((o) => o.value === currentValue)) {
       els.modelSelect.value = currentValue;

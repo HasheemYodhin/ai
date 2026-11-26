@@ -58,6 +58,8 @@ function ChatApp() {
     isLoading: isHistoryLoading,
     hasUnsavedChanges,
     retrySaves,
+    saveConflictCopy,
+    deleteError,
     createConversation,
     saveConversation,
     loadConversationAsync,
@@ -372,6 +374,16 @@ function ChatApp() {
           </div>
         )}
 
+        {(saveConflictCopy || deleteError) && (
+          <div role="alert" className="px-4 py-2 text-xs text-text-secondary">
+            {deleteError}
+            {saveConflictCopy && (
+              <button className="text-accent underline" onClick={saveConflictCopy}>
+                Conversation changed elsewhere. Save your edits as a copy
+              </button>
+            )}
+          </div>
+        )}
         {(isOffline || hasUnsavedChanges) && (
           <div role="status" className="flex items-center gap-3 border-b border-border px-4 py-2 text-sm dark:border-border-dark">
             {isOffline && <span>You’re offline.</span>}

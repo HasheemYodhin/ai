@@ -39,11 +39,18 @@ def make_client(usage, registry):
 
 
 def send(client, text="hi", guest=GUEST):
-    return client.post("/v1/guest/chat", json={"guestId": guest, "messages": [{"role": "user", "content": text}]})
+    return client.post(
+        "/v1/guest/chat",
+        json={"guestId": guest, "messages": [{"role": "user", "content": text}]},
+    )
 
 
 def events(response):
-    return [json.loads(row[len("data: "):]) for row in response.text.splitlines() if row.startswith("data: ")]
+    return [
+        json.loads(row[len("data: ") :])
+        for row in response.text.splitlines()
+        if row.startswith("data: ")
+    ]
 
 
 def event(response):
@@ -58,7 +65,9 @@ def test_five_free_prompts_then_limit(usage):
         response = send(client)
         assert response.status_code == 200
         streamed = events(response)
-        assert "".join(e["delta"] for e in streamed if "delta" in e) == "Hello from Auto"
+        assert (
+            "".join(e["delta"] for e in streamed if "delta" in e) == "Hello from Auto"
+        )
         assert streamed[-1] == {"done": True, "remaining": expected_left}
     sixth = send(client)
     assert sixth.status_code == 429
@@ -93,15 +102,24 @@ def test_failed_reply_does_not_use_a_prompt(usage):
 def test_unavailable_without_server_key(usage):
     client = make_client(usage, FakeRegistry(key=""))
     assert send(client).status_code == 503
-    assert client.get("/v1/guest/status", params={"guestId": GUEST}).json()["available"] is False
+    assert (
+        client.get("/v1/guest/status", params={"guestId": GUEST}).json()["available"]
+        is False
+    )
 
 
 def test_rejects_bad_input(usage):
     client = make_client(usage, FakeRegistry())
     assert send(client, guest="bad id!").status_code == 422
-    bad_role = client.post("/v1/guest/chat", json={"guestId": GUEST, "messages": [{"role": "system", "content": "x"}]})
+    bad_role = client.post(
+        "/v1/guest/chat",
+        json={"guestId": GUEST, "messages": [{"role": "system", "content": "x"}]},
+    )
     assert bad_role.status_code == 422
-    last_assistant = client.post("/v1/guest/chat", json={"guestId": GUEST, "messages": [{"role": "assistant", "content": "x"}]})
+    last_assistant = client.post(
+        "/v1/guest/chat",
+        json={"guestId": GUEST, "messages": [{"role": "assistant", "content": "x"}]},
+    )
     assert last_assistant.status_code == 422
 
 

@@ -64,7 +64,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing])
 
-  const handleToggleSpeak = useCallback(async () => {
+  const handleToggleSpeak = useCallback(() => {
     if (isSpeaking) {
       stopSpeakingRef.current?.()
       setIsSpeaking(false)
@@ -72,13 +72,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
     }
     setSpeakError(null)
     setIsSpeaking(true)
-    try {
-      const controller = await speak(message.content, () => setIsSpeaking(false))
-      stopSpeakingRef.current = controller.stop
-    } catch (err) {
-      setSpeakError((err as Error).message || 'Speech failed')
-      setIsSpeaking(false)
-    }
+    stopSpeakingRef.current = speak(message.content, () => setIsSpeaking(false), setSpeakError).stop
   }, [isSpeaking, message.content])
 
   // Auto-speak replies to a voice-input turn — feels like an actual voice

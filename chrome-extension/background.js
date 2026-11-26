@@ -29,16 +29,27 @@ class StorageManager {
   }
 
   static async getSettings() {
-    const settings = await chrome.storage.sync.get(Object.values(STORAGE_KEYS));
-    return { ...DEFAULT_SETTINGS, ...settings };
+    const { apiKey: syncedKey, ...settings } = await chrome.storage.sync.get(Object.values(STORAGE_KEYS));
+    const { apiKey: localKey } = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
+    if (syncedKey !== undefined) {
+      if (localKey === undefined) await chrome.storage.local.set({ apiKey: syncedKey });
+      await chrome.storage.sync.remove(STORAGE_KEYS.API_KEY);
+    }
+    return { ...DEFAULT_SETTINGS, ...settings, apiKey: localKey ?? syncedKey ?? '' };
   }
 
   static async saveSettings(settings) {
-    await chrome.storage.sync.set(settings);
+    const { apiKey, ...preferences } = settings;
+    if (apiKey !== undefined) {
+      await chrome.storage.local.set({ apiKey });
+      await chrome.storage.sync.remove(STORAGE_KEYS.API_KEY);
+    }
+    await chrome.storage.sync.set(preferences);
   }
 
   static async resetSettings() {
     await chrome.storage.sync.clear();
+    await chrome.storage.local.remove(STORAGE_KEYS.API_KEY);
   }
 }
 
@@ -332,6 +343,8 @@ class MessageHandler {
     return null;
   }
 }
+
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   ContextMenuManager.createMenus();

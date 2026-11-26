@@ -44,6 +44,8 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   })
 }
 
+export class ConversationConflictError extends Error {}
+
 export class ApiClient {
   private baseUrl: string
   private apiKey: string
@@ -767,6 +769,15 @@ export class ApiClient {
     }))
   }
 
+  async searchConversations(query: string, signal: AbortSignal): Promise<{ id: string; snippet: string | null }[]> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations/search?q=${encodeURIComponent(query)}`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (!response.ok) throw await responseError(response, 'Conversation search failed')
+    return (await response.json()).matches ?? []
+  }
+
   /** Every conversation with all its messages, for exporting. */
   async fetchAllConversations(userId: string, signal?: AbortSignal): Promise<Conversation[]> {
     const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}&include_messages=true`, {
@@ -797,7 +808,7 @@ export class ApiClient {
   }
 
   /** Creates or updates one conversation server-side. */
-  async saveConversationRemote(userId: string, conv: Conversation, opts: { keepalive?: boolean } = {}): Promise<void> {
+  async saveConversationRemote(userId: string, conv: Conversation, opts: { keepalive?: boolean } = {}): Promise<number | undefined> {
     const body = JSON.stringify({
       id: conv.id,
       userId,
@@ -808,6 +819,7 @@ export class ApiClient {
       pinned: !!conv.pinned,
       customTitle: !!conv.customTitle,
       projectId: conv.projectId ?? null,
+      revision: conv.revision ?? 0,
     })
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(conv.id)}`, {
       method: 'PUT',
@@ -817,9 +829,11 @@ export class ApiClient {
       // keepalive bodies at 64 KB, so only use it for small payloads.
       keepalive: opts.keepalive && body.length < 60_000,
     })
-    if (!response.ok) {
-      throw new Error(`Failed to save conversation (status ${response.status})`)
+    if (response.status === 409) {
+      throw new ConversationConflictError((await responseError(response, 'Conversation changed on another device')).message)
     }
+    if (!response.ok) throw await responseError(response, 'Failed to save conversation')
+    return (await response.json().catch(() => ({}))).revision
   }
 
   async deleteConversationRemote(userId: string, id: string): Promise<void> {
@@ -839,7 +853,10 @@ export class ApiClient {
    * nominal filename, no client-side transcoding needed.
    */
   /** Whether the server can turn speech into text (needs whisper and ffmpeg installed on the server). */
-  async audioStatus(signal?: AbortSignal): Promise<{ transcription: { available: boolean; whisperInstalled: boolean; ffmpegInstalled: boolean } }> {
+  async audioStatus(signal?: AbortSignal): Promise<{
+    transcription: { available: boolean; whisperInstalled: boolean; ffmpegInstalled: boolean }
+    speech?: { available: boolean }
+  }> {
     const response = await fetch(`${this.baseUrl}/v1/audio/status`, { headers: this.getHeaders(), signal })
     if (!response.ok) throw await responseError(response, 'Could not check voice input')
     return response.json()
@@ -993,6 +1010,7 @@ export class ApiClient {
     messages: Message[],
     options?: {
       signal?: AbortSignal
+      requestId?: string
       onChunk?: (chunk: StreamChunk) => void
       model?: string
       temperature?: number
@@ -1018,25 +1036,26 @@ export class ApiClient {
     }
 
     if (options?.onChunk) {
-      return this.streamChat(body, options.onChunk, options.signal)
+      return this.streamChat(body, options.onChunk, options.signal, options.requestId)
     }
 
-    return this.nonStreamingChat(body, options?.signal)
+    return this.nonStreamingChat(body, options?.signal, options?.requestId)
   }
 
   private async nonStreamingChat(
     body: ChatCompletionRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestId?: string,
   ): Promise<string> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: { ...this.getHeaders(), ...(requestId ? { 'X-Idempotency-Key': requestId } : {}) },
       body: JSON.stringify({ ...body, stream: false }),
       signal,
     })
 
     if (!response.ok) {
-      if (response.status === 429) throw await responseError(response, 'Chat usage limit reached')
+      if (response.status === 429 || response.status === 409) throw await responseError(response, 'Chat usage limit reached')
       const errorText = await response.text().catch(() => 'Unknown error')
       throw new Error(`API error ${response.status}: ${errorText}`)
     }
@@ -1048,17 +1067,18 @@ export class ApiClient {
   private async streamChat(
     body: ChatCompletionRequest,
     onChunk: (chunk: StreamChunk) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestId?: string,
   ): Promise<string> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: { ...this.getHeaders(), ...(requestId ? { 'X-Idempotency-Key': requestId } : {}) },
       body: JSON.stringify({ ...body, stream: true }),
       signal,
     })
 
     if (!response.ok) {
-      if (response.status === 429) throw await responseError(response, 'Chat usage limit reached')
+      if (response.status === 429 || response.status === 409) throw await responseError(response, 'Chat usage limit reached')
       const errorText = await response.text().catch(() => 'Unknown error')
       throw new Error(`API error ${response.status}: ${errorText}`)
     }
@@ -1146,7 +1166,7 @@ export interface ServerUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
-  limits?: { label: string; windowHours: number; usedTokens: number; limitTokens: number }[]
+  limits?: { label: string; windowHours: number; usedTokens: number; limitTokens: number; retryAt?: number | null }[]
   byModel: { model: string; tokens: number; replies: number; promptTokens: number; completionTokens: number }[]
 }
 

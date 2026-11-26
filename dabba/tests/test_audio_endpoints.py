@@ -31,7 +31,9 @@ def test_find_ffmpeg_checks_common_folders_when_path_is_short(monkeypatch, tmp_p
     fake.chmod(0o755)
     monkeypatch.delenv("DABBA_FFMPEG", raising=False)
     monkeypatch.setattr(audio_endpoints.shutil, "which", lambda _: None)
-    monkeypatch.setitem(__import__("sys").modules, "imageio_ffmpeg", None)  # simulate not installed
+    monkeypatch.setitem(
+        __import__("sys").modules, "imageio_ffmpeg", None
+    )  # simulate not installed
     monkeypatch.setattr(audio_endpoints, "_FFMPEG_FALLBACK_DIRS", (str(tmp_path),))
 
     assert audio_endpoints.find_ffmpeg() == str(fake)
@@ -134,7 +136,11 @@ async def test_hosted_transcription_is_never_used_unless_the_owner_opts_in(monke
     monkeypatch.delenv("DABBA_HOSTED_TRANSCRIPTION", raising=False)
     monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
     called = []
-    monkeypatch.setattr(audio_endpoints, "_transcribe_hosted", lambda audio, key: called.append(1) or "x")
+    monkeypatch.setattr(
+        audio_endpoints,
+        "_transcribe_hosted",
+        lambda audio, key: called.append(1) or "x",
+    )
 
     with pytest.raises(HTTPException, match="ffmpeg is required") as error:
         await _endpoint("/v1/transcribe", "POST")(_FakeRequest())
@@ -147,7 +153,9 @@ async def test_hosted_transcription_is_never_used_unless_the_owner_opts_in(monke
 async def test_hosted_transcription_runs_when_enabled_and_local_cannot(monkeypatch):
     monkeypatch.setenv("DABBA_HOSTED_TRANSCRIPTION", "openai")
     monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
-    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+    monkeypatch.setattr(
+        audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder"
+    )
     seen = {}
     monkeypatch.setattr(
         audio_endpoints,
@@ -170,7 +178,9 @@ async def test_hosted_transcription_needs_a_key_and_a_reasonable_recording(monke
         await _endpoint("/v1/transcribe", "POST")(_FakeRequest())
     assert no_key.value.status_code == 503
 
-    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+    monkeypatch.setattr(
+        audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder"
+    )
     with pytest.raises(HTTPException) as empty:
         await _endpoint("/v1/transcribe", "POST")(_FakeRequest(b""))
     assert empty.value.status_code == 400
@@ -185,11 +195,17 @@ async def test_hosted_transcription_needs_a_key_and_a_reasonable_recording(monke
 async def test_status_reports_hosted_transcription_as_available(monkeypatch):
     monkeypatch.setenv("DABBA_HOSTED_TRANSCRIPTION", "openai")
     monkeypatch.setattr(audio_endpoints, "ensure_ffmpeg_on_path", lambda: None)
-    monkeypatch.setattr(audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder")
+    monkeypatch.setattr(
+        audio_endpoints, "_hosted_api_key", lambda: "sk-test-placeholder"
+    )
 
     status = (await _endpoint("/v1/audio/status", "GET")())["transcription"]
 
-    assert status["available"] is True and status["hostedReady"] is True and status["ffmpegInstalled"] is False
+    assert (
+        status["available"] is True
+        and status["hostedReady"] is True
+        and status["ffmpegInstalled"] is False
+    )
 
 
 def test_audio_suffix_recognises_what_browsers_record():
@@ -198,3 +214,15 @@ def test_audio_suffix_recognises_what_browsers_record():
     assert audio_endpoints._audio_suffix(b"RIFF\x00\x00\x00\x00WAVEfmt ") == ".wav"
     assert audio_endpoints._audio_suffix(b"\x00\x00\x00\x18ftypM4A ") == ".m4a"
     assert audio_endpoints._audio_suffix(b"unknown") == ".webm"
+
+
+@pytest.mark.asyncio
+async def test_local_transcription_rejects_oversized_audio(monkeypatch):
+    monkeypatch.delenv("DABBA_HOSTED_TRANSCRIPTION", raising=False)
+    monkeypatch.setattr(audio_endpoints, "MAX_HOSTED_AUDIO_BYTES", 4)
+    monkeypatch.setattr(
+        audio_endpoints, "ensure_ffmpeg_on_path", lambda: "/usr/bin/ffmpeg"
+    )
+    with pytest.raises(HTTPException) as too_long:
+        await _endpoint("/v1/transcribe", "POST")(_FakeRequest(b"123456"))
+    assert too_long.value.status_code == 413

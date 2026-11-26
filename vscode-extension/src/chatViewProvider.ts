@@ -879,11 +879,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       const apiKey = await this.settings.getApiKey();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (apiKey) { headers['Authorization'] = `Bearer ${apiKey}`; }
-      await fetch(`${settings.apiEndpoint}/v1/agent/approve`, {
+      const response = await fetch(`${settings.apiEndpoint}/v1/agent/approve`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ call_id: callId, approved }),
       });
+      if (response?.status === 410) throw new Error('Approval expired. Restart the agent turn to request approval again.');
+      if (response && !response.ok) throw new Error(`Dabba returned HTTP ${response.status}.`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error';
       this._postMessage({ type: 'agentError', content: `Could not send approval: ${msg}` });

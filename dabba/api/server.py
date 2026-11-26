@@ -660,7 +660,10 @@ class SecurityHeadersMiddleware:
 
         # Render and other proxies terminate TLS and forward the scheme.
         forwarded = dict(scope.get("headers") or []).get(b"x-forwarded-proto", b"")
-        is_https = scope.get("scheme") == "https" or forwarded.split(b",")[0].strip() == b"https"
+        is_https = (
+            scope.get("scheme") == "https"
+            or forwarded.split(b",")[0].strip() == b"https"
+        )
 
         async def send_with_headers(message):
             if message["type"] == "http.response.start":
@@ -674,17 +677,32 @@ class SecurityHeadersMiddleware:
 
                 setdefault(b"x-content-type-options", "nosniff")
                 setdefault(b"referrer-policy", "strict-origin-when-cross-origin")
-                setdefault(b"x-frame-options", "DENY")
+                is_code_runner = scope.get("path") == "/code-runner.html"
+                setdefault(
+                    b"x-frame-options", "SAMEORIGIN" if is_code_runner else "DENY"
+                )
                 if is_https:
                     setdefault(
-                        b"strict-transport-security", "max-age=31536000; includeSubDomains"
+                        b"strict-transport-security",
+                        "max-age=31536000; includeSubDomains",
                     )
                 content_type = dict(headers).get(b"content-type", b"")
                 # Routes with their own CSP (e.g. published artifacts, which are
                 # sandboxed) keep it as-is and get no report-only policy either.
-                if content_type.startswith(b"text/html") and b"content-security-policy" not in present:
-                    setdefault(b"content-security-policy", HTML_CSP)
-                    setdefault(b"content-security-policy-report-only", HTML_CSP_REPORT_ONLY)
+                if (
+                    content_type.startswith(b"text/html")
+                    and b"content-security-policy" not in present
+                ):
+                    if is_code_runner:
+                        setdefault(
+                            b"content-security-policy",
+                            "frame-ancestors 'self'; sandbox allow-scripts",
+                        )
+                    else:
+                        setdefault(b"content-security-policy", HTML_CSP)
+                        setdefault(
+                            b"content-security-policy-report-only", HTML_CSP_REPORT_ONLY
+                        )
                 message = {**message, "headers": headers}
             await send(message)
 
@@ -756,16 +774,21 @@ def create_app(
             return None
 
         public = (
-            request.method == "POST"
-            and path in {"/v1/platform/identity/signup", "/v1/platform/identity/login"}
-        ) or (
-            request.method in {"GET", "HEAD"}
-            and path.startswith("/v1/platform/public/artifacts/")
-        ) or (
-            # Free guest prompts for signed-out visitors; limits are enforced
-            # inside the endpoint (see dabba/api/guest_endpoints.py).
-            (request.method == "POST" and path == "/v1/guest/chat")
-            or (request.method in {"GET", "HEAD"} and path == "/v1/guest/status")
+            (
+                request.method == "POST"
+                and path
+                in {"/v1/platform/identity/signup", "/v1/platform/identity/login"}
+            )
+            or (
+                request.method in {"GET", "HEAD"}
+                and path.startswith("/v1/platform/public/artifacts/")
+            )
+            or (
+                # Free guest prompts for signed-out visitors; limits are enforced
+                # inside the endpoint (see dabba/api/guest_endpoints.py).
+                (request.method == "POST" and path == "/v1/guest/chat")
+                or (request.method in {"GET", "HEAD"} and path == "/v1/guest/status")
+            )
         )
 
         user = None
@@ -811,7 +834,8 @@ def create_app(
             )
             if admin_only and user["role"] != "admin":
                 return JSONResponse(
-                    {"detail": "Only the workspace owner can use this feature"}, status_code=403
+                    {"detail": "Only the workspace owner can use this feature"},
+                    status_code=403,
                 )
 
         if rate_limiter and (
@@ -941,6 +965,7 @@ def create_app(
         """Custom exception handler for HTTP errors."""
         return JSONResponse(
             status_code=exc.status_code,
+            headers=exc.headers,
             content={
                 "error": {
                     "message": exc.detail,
@@ -1081,7 +1106,9 @@ def create_app(
 
     frontend_dir = os.environ.get("DABBA_FRONTEND_DIR")
     if frontend_dir and Path(frontend_dir).is_dir():
-        app.mount("/", SPAStaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount(
+            "/", SPAStaticFiles(directory=frontend_dir, html=True), name="frontend"
+        )
     else:
 
         @app.get("/")

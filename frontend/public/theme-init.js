@@ -6,4 +6,4 @@ try {
   // Saved accent color (written by Settings), so there is no flash of the default.
   var a = JSON.parse(localStorage.getItem('dabba-accent') || 'null')
   if (a) for (var k in a) d.style.setProperty(k, a[k])
-} catch (e) {}
+} catch { /* Theme storage may be unavailable. */ }

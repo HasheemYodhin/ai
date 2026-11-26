@@ -318,12 +318,14 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
             signal: abortController.signal,
             ...chatParams,
             model: requestModel,
+          requestId: `${assistantId}:${requestModel}`,
           })
         }
         return apiClient.chat(apiMessages, {
           signal: abortController.signal,
           ...chatParams,
           model: requestModel,
+          requestId: `${assistantId}:${requestModel}`,
           onChunk: (chunk) => {
             if (chunk.usage) lastUsage = chunk.usage
             const hitCapacity = NVIDIA_CAPACITY_RE.test(chunk.content)

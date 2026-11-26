@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useReducer } from 'react'
 import { v4 as uuidv4 } from 'uuid'
-import { apiClient } from '@/api/client'
+import { apiClient, ConversationConflictError } from '@/api/client'
 import type { Conversation, Message } from '@/types'
 
 function generateTitle(messages: Message[]): string {
@@ -28,6 +28,8 @@ interface UseHistoryReturn {
   isLoading: boolean
   hasUnsavedChanges: boolean
   retrySaves: () => void
+  saveConflictCopy: (() => Promise<void>) | null
+  deleteError: string | null
   createConversation: (messages?: Message[]) => string
   saveConversation: (messages: Message[], id?: string) => string
   /** Sync lookup; `messages` is [] for a chat whose messages aren't loaded yet. */
@@ -87,6 +89,9 @@ export function useHistory(userId: string | null): UseHistoryReturn {
   const activeUser = useRef(userId)
   activeUser.current = userId
   const failedSaves = useRef(new Map<string, Conversation>())
+  const [conflict, setConflict] = useState<Conversation | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const savedRevisions = useRef(new Map<string, number>())
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const updateConversations = useCallback((update: (previous: Conversation[]) => Conversation[]) => {
     const next = update(conversationsRef.current)
@@ -115,6 +120,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     }
     // Each ref holds one Map for the hook's lifetime (never reassigned), so
     // capturing them here is equivalent and satisfies react-hooks lint.
+    const revisions = savedRevisions.current
     const timers = saveTimers.current
     const sends = pendingSends.current
     const draftMap = drafts.current
@@ -122,6 +128,8 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     const saves = pendingSaves.current
     const failed = failedSaves.current
     const controller = new AbortController()
+    setConflict(null)
+    setDeleteError(null)
     const restored = readSaveQueue(userId)
     for (const conversation of restored) {
       pendingSaves.current.set(conversation.id, conversation)
@@ -134,12 +142,10 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       const indexed = new Map(remote.map(conversation => [conversation.id, conversation]))
       for (const pending of pendingSaves.current.values()) {
         const saved = indexed.get(pending.id)
-        if (!saved || saved.updatedAt <= pending.updatedAt) {
-          indexed.set(pending.id, pending)
-        } else {
-          failedSaves.current.delete(pending.id)
-          pendingSaves.current.delete(pending.id)
+        if (saved?.revision !== undefined && saved.revision !== pending.revision) {
+          setConflict(current => current ?? pending)
         }
+        indexed.set(pending.id, pending)
       }
       storeSaveQueue(userId, pendingSaves.current)
       setHasUnsavedChanges(failedSaves.current.size > 0)
@@ -148,7 +154,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
         // carries metadata.
         for (const local of previous) {
           const remote = indexed.get(local.id)
-          if (remote && remote.messagesLoaded === false && hasLoadedMessages(local) && local.updatedAt >= remote.updatedAt) {
+          if (remote && remote.messagesLoaded === false && hasLoadedMessages(local) && (remote.revision === undefined ? local.updatedAt >= remote.updatedAt : local.revision === remote.revision)) {
             indexed.set(local.id, { ...remote, messages: local.messages, messagesLoaded: true })
           }
         }
@@ -166,7 +172,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       try {
         const full = await apiClient.fetchConversation(remote[index].id, controller.signal)
         const next = [...remote]
-        next[index] = { ...remote[index], messages: full.messages, messagesLoaded: true }
+        next[index] = full
         return next
       } catch {
         return remote
@@ -192,6 +198,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       sends.clear()
       draftMap.clear()
       loadMap.clear()
+      revisions.clear()
       saves.clear()
       failed.clear()
       setHasUnsavedChanges(false)
@@ -212,23 +219,29 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       const write = previous.then(async () => {
         if (activeUser.current !== userId || pendingSaves.current.get(conv.id) !== conv) return
         try {
-          let toSave = conv
+          const revision = Math.max(conv.revision ?? 0, savedRevisions.current.get(conv.id) ?? 0)
+          let toSave = { ...conv, revision }
           if (!hasLoadedMessages(conv)) {
             // Metadata change (rename/pin/project) on a chat never opened:
             // its `messages` is a placeholder [], and a PUT would erase the
             // real history. Fetch the stored messages and save those.
             const stored = await apiClient.fetchConversation(conv.id)
-            toSave = { ...conv, messages: stored.messages, messagesLoaded: true }
+            toSave = { ...toSave, messages: stored.messages, messagesLoaded: true }
           }
-          await apiClient.saveConversationRemote(userId, toSave, opts)
+          const savedRevision = await apiClient.saveConversationRemote(userId, toSave, opts)
           if (activeUser.current !== userId) return
+          if (savedRevision !== undefined) savedRevisions.current.set(conv.id, savedRevision)
           if (pendingSaves.current.get(conv.id) === conv) {
             pendingSaves.current.delete(conv.id)
             failedSaves.current.delete(conv.id)
             storeSaveQueue(userId, pendingSaves.current)
           }
-        } catch {
+        } catch (error) {
           if (activeUser.current !== userId) return
+          if (error instanceof ConversationConflictError) {
+            setConflict(pendingSaves.current.get(conv.id) ?? conv)
+            return
+          }
           if (pendingSaves.current.has(conv.id)) failedSaves.current.set(conv.id, conv)
         }
         setHasUnsavedChanges(failedSaves.current.size > 0)
@@ -271,9 +284,9 @@ export function useHistory(userId: string | null): UseHistoryReturn {
 
   const retrySaves = useCallback(() => {
     for (const conversation of conversationsRef.current) {
-      if (failedSaves.current.has(conversation.id)) persist(conversation, true)
+      if (conversation.id !== conflict?.id && failedSaves.current.has(conversation.id)) persist(conversation, true)
     }
-  }, [persist])
+  }, [persist, conflict])
 
   useEffect(() => {
     if (!hasUnsavedChanges) return
@@ -415,7 +428,40 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     return load
   }, [currentId, flushSaves, getConversation, updateConversations])
 
+  const saveConflictCopy = conflict ? async () => {
+    if (!userId) return
+    const pending = pendingSaves.current.get(conflict.id) ?? conflict
+    const stored = await apiClient.fetchConversation(conflict.id).catch(() => null)
+    if (activeUser.current !== userId) return
+    if (!hasLoadedMessages(pending) && !stored) {
+      setDeleteError('Could not load the original messages. Your pending edit is still saved on this device.')
+      return
+    }
+    const copy: Conversation = {
+      ...pending,
+      id: uuidv4(),
+      revision: 0,
+      title: `${pending.title} (recovered copy)`,
+      messages: hasLoadedMessages(pending) ? pending.messages : stored!.messages,
+      messagesLoaded: true,
+      updatedAt: Date.now(),
+    }
+    pendingSaves.current.delete(conflict.id)
+    failedSaves.current.delete(conflict.id)
+    setConflict(null)
+    setDeleteError(null)
+    updateConversations(previous => [copy, ...previous.flatMap(item =>
+      item.id === conflict.id ? (stored ? [stored] : []) : [item]
+    )])
+    if (currentId === conflict.id) setCurrentId(null)
+    persist(copy, true)
+  } : null
+
   const deleteConversation = useCallback((id: string) => {
+    const removed = conversationsRef.current.find(item => item.id === id)
+    if (conflict?.id === id) setConflict(null)
+    const unsaved = pendingSaves.current.get(id)
+    setDeleteError(null)
     const pending = saveTimers.current.get(id)
     if (pending) { clearTimeout(pending); saveTimers.current.delete(id) }
 
@@ -434,9 +480,14 @@ export function useHistory(userId: string | null): UseHistoryReturn {
         failedSaves.current.delete(id)
         setHasUnsavedChanges(failedSaves.current.size > 0)
         return apiClient.deleteConversationRemote(userId, id)
-      }).catch(err => console.error('Failed to delete conversation:', err))
+      }).catch(() => {
+        if (activeUser.current !== userId) return
+        if (removed) updateConversations(previous => previous.some(item => item.id === id) ? previous : [removed, ...previous])
+        if (unsaved) persist(unsaved)
+        setDeleteError('Could not delete the conversation. It was restored to the sidebar.')
+      })
     }
-  }, [currentId, userId, updateConversations])
+  }, [currentId, userId, updateConversations, persist, conflict])
 
   /** Apply a metadata change to an unsent draft. Returns true if `id` was a draft. */
   const updateDraft = useCallback((id: string, change: (draft: Conversation) => Conversation): boolean => {
@@ -528,6 +579,8 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     isLoading,
     hasUnsavedChanges,
     retrySaves,
+    saveConflictCopy,
+    deleteError,
     createConversation,
     saveConversation,
     loadConversation,

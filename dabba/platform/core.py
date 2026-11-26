@@ -504,7 +504,9 @@ class PlatformStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
             for table, column, sql_type in self._ADDED_COLUMNS:
-                existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                existing = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
                 if column not in existing:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
 

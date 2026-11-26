@@ -368,7 +368,9 @@ async def _handle_streaming_chat(
                                 "chat first output: model=%s after=%.1fs kind=%s",
                                 req.model,
                                 time.monotonic() - started,
-                                "reasoning" if isinstance(token, ReasoningDelta) else "text",
+                                "reasoning"
+                                if isinstance(token, ReasoningDelta)
+                                else "text",
                             )
                         if isinstance(token, ReasoningDelta):
                             yield handler.create_chunk("", reasoning=token)
@@ -510,12 +512,28 @@ def _create_chat_task(request: Request, req: ChatCompletionRequest):
     from dabba.platform.services import TaskOrchestrator
 
     tasks = TaskOrchestrator()
-    for limit in tasks.chat_usage_limits(user["id"]):
-        if limit["limitTokens"] and limit["usedTokens"] >= limit["limitTokens"]:
-            raise HTTPException(
-                status_code=429,
-                detail=f'{limit["label"]} chat token limit reached. Try again when older usage expires.',
-            )
+    idempotency_key = request.headers.get("x-idempotency-key")
+    if idempotency_key and len(idempotency_key) > 128:
+        raise HTTPException(
+            status_code=400, detail="Chat request identifier is too long"
+        )
+    exhausted = [
+        limit
+        for limit in tasks.chat_usage_limits(user["id"])
+        if limit["limitTokens"] and limit["usedTokens"] >= limit["limitTokens"]
+    ]
+    if exhausted:
+        blocking = max(exhausted, key=lambda limit: limit.get("retryAt") or 0)
+        retry_at = blocking.get("retryAt")
+        headers = None
+        if retry_at:
+            seconds = max(1, (retry_at - int(time.time() * 1000) + 999) // 1000)
+            headers = {"Retry-After": str(seconds)}
+        raise HTTPException(
+            status_code=429,
+            detail=f"{blocking['label']} chat token limit reached. Try again when older usage expires.",
+            headers=headers,
+        )
     try:
         task = tasks.create(
             "chat",
@@ -525,10 +543,18 @@ def _create_chat_task(request: Request, req: ChatCompletionRequest):
             },
             user_id=user["id"],
             model=req.model,
-            idempotency_key=request.headers.get("x-idempotency-key"),
+            idempotency_key=idempotency_key,
+            reject_duplicate=bool(idempotency_key),
         )
         return tasks, task["id"]
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This chat request was already submitted. Open the existing turn or regenerate it.",
+        ) from exc
     except Exception:
+        if idempotency_key:
+            raise
         # Durable tracking must never make a previously valid chat unavailable.
         return None
 

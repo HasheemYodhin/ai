@@ -143,7 +143,7 @@ def _requires_approval(tool_name: str) -> bool:
 # A tool call genuinely pauses server-side execution until this resolves —
 # the client can no longer just cosmetically delay showing the result after
 # the command has already run.
-_pending_approvals: Dict[str, "asyncio.Future[bool]"] = {}
+_pending_approvals: Dict[str, tuple[Optional[str], "asyncio.Future[bool]"]] = {}
 
 # One shared proxy per server process — keeps conversation context between requests
 _agent_proxy = None
@@ -388,6 +388,7 @@ def create_agent_router() -> APIRouter:
 
     @router.post("/v1/agent")
     async def agent_stream(req: AgentRequest, request: Request):
+        approval_user = getattr(request.state, "dabba_user", {}).get("id")
         proxy = _get_agent_proxy(req.conversation_id)
 
         if req.reset:
@@ -995,14 +996,14 @@ def create_agent_router() -> APIRouter:
                     if chunk.get("type", "") == "plan_approval_required":
                         content = chunk.get("content", {}) or {}
                         plan_id = content.get("plan_id", "")
-                        if not client_gone:
-                            yield f"data: {json.dumps(chunk)}\n\n"
                         if plan_id:
                             fut: asyncio.Future = (
                                 asyncio.get_event_loop().create_future()
                             )
-                            _pending_approvals[plan_id] = fut
+                            _pending_approvals[plan_id] = (approval_user, fut)
                             try:
+                                if not client_gone:
+                                    yield f"data: {json.dumps(chunk)}\n\n"
                                 approved = await asyncio.wait_for(
                                     fut, timeout=APPROVAL_TIMEOUT_SECONDS
                                 )
@@ -1011,6 +1012,8 @@ def create_agent_router() -> APIRouter:
                             finally:
                                 _pending_approvals.pop(plan_id, None)
                             to_send = approved
+                        elif not client_gone:
+                            yield f"data: {json.dumps(chunk)}\n\n"
                         continue
 
                     if not client_gone and await _client_disconnected(
@@ -1040,7 +1043,7 @@ def create_agent_router() -> APIRouter:
                             fut: asyncio.Future = (
                                 asyncio.get_event_loop().create_future()
                             )
-                            _pending_approvals[call_id] = fut
+                            _pending_approvals[call_id] = (approval_user, fut)
                             try:
                                 if not client_gone:
                                     yield f"data: {json.dumps({'type': 'approval_required', 'content': {'call_id': call_id, 'name': tool_name, 'arguments': content.get('arguments', {})}})}\n\n"
@@ -1100,15 +1103,20 @@ def create_agent_router() -> APIRouter:
         return {"released": proxy is not None}
 
     @router.post("/v1/agent/approve")
-    async def agent_approve(req: ApprovalRequest):
+    async def agent_approve(req: ApprovalRequest, request: Request):
         """
         Resolve a pending tool-call approval. The matching /v1/agent request
         is genuinely blocked (its async generator hasn't advanced) until this
         arrives — a click here really does gate execution, not just display.
         """
-        fut = _pending_approvals.get(req.call_id)
-        if fut is None:
-            return {"status": "not_found"}
+        pending = _pending_approvals.get(req.call_id)
+        user_id = getattr(request.state, "dabba_user", {}).get("id")
+        if pending is None or pending[0] != user_id:
+            raise HTTPException(
+                status_code=410,
+                detail="This approval expired. Restart the agent turn to request approval again.",
+            )
+        _, fut = pending
         if not fut.done():
             fut.set_result(req.approved)
         return {"status": "ok"}

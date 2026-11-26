@@ -1037,7 +1037,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 {usageStats.limits.length > 0 && (
                   <section aria-labelledby="chat-usage-limits" className="space-y-3">
                     <h4 id="chat-usage-limits" className="text-sm font-semibold">Chat usage limits</h4>
-                    {usageStats.limits.map(({ label, windowHours, usedTokens, limitTokens }) => (
+                    {usageStats.limits.map(({ label, windowHours, usedTokens, limitTokens, retryAt }) => (
                       <div key={windowHours} className="space-y-2 rounded-xl border border-border bg-surface-secondary p-3 dark:border-border-dark dark:bg-surface-dark-tertiary">
                         <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-1 text-xs">
                           <span className="font-semibold">{label}</span>
@@ -1045,6 +1045,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             {usedTokens.toLocaleString()}{limitTokens > 0 ? ` / ${limitTokens.toLocaleString()} tokens` : ' tokens · Unlimited'}
                           </span>
                         </div>
+                        {limitTokens > 0 && (
+                          <p className="text-xs text-text-tertiary">
+                            {retryAt ? `Capacity returns ${new Date(retryAt).toLocaleString()}` : `${Math.max(0, limitTokens - usedTokens).toLocaleString()} tokens remaining`}
+                          </p>
+                        )}
                         {limitTokens > 0 && (
                           <progress aria-label={`${label} chat token usage`} value={Math.min(usedTokens, limitTokens)} max={limitTokens}
                             className="block h-2 w-full appearance-none overflow-hidden rounded-full bg-surface-tertiary [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:bg-accent [&::-moz-progress-bar]:bg-accent dark:bg-surface-dark-secondary" />
