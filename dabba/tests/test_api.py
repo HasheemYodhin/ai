@@ -10,6 +10,31 @@ from dabba.api.chat_endpoints import ChatEndpoint, _generate_response
 from dabba.api.streaming_handler import StreamingHandler
 
 
+def test_local_stream_emits_fast_reply_without_waiting_for_heartbeat(monkeypatch):
+    from dabba.api.chat_endpoints import _handle_streaming_chat
+    from dabba.api.openai_compat import ChatCompletionRequest
+
+    monkeypatch.setattr(
+        "dabba.api.chat_endpoints._generate_response", lambda *_: "Hello"
+    )
+
+    async def run_generation(fn, *args):
+        return fn(*args)
+
+    monkeypatch.setattr("dabba.api.chat_endpoints.asyncio.to_thread", run_generation)
+
+    async def check():
+        request = ChatCompletionRequest(model="dabba", messages=[], stream=True)
+        response = await _handle_streaming_chat(request, None)
+        try:
+            first = await asyncio.wait_for(anext(response.body_iterator), timeout=2)
+            assert "Hello" in first
+        finally:
+            await response.body_iterator.aclose()
+
+    asyncio.run(check())
+
+
 def test_session_restore_accepts_expired_session_without_exposing_account_data(
     tmp_path, monkeypatch
 ):

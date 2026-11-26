@@ -432,12 +432,17 @@ async def _handle_streaming_chat(
                 usage_holder,
             )
         )
-        while not response_task.done():
-            yield ": keepalive\n\n"
-            await asyncio.sleep(10)
-
         try:
+            while not response_task.done():
+                done, _ = await asyncio.wait({response_task}, timeout=10)
+                if not done:
+                    yield ": keepalive\n\n"
             response_text = await response_task
+        except (asyncio.CancelledError, GeneratorExit):
+            response_task.cancel()
+            if tasks:
+                tasks.cancel(task_id)
+            raise
         except Exception as exc:
             if tasks:
                 from dabba.platform.provider_gateway import normalize_provider_error
@@ -460,7 +465,7 @@ async def _handle_streaming_chat(
             for token in tokens:
                 yield handler.create_chunk(token, index=0)
                 await asyncio.sleep(0.01)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, GeneratorExit):
             if tasks:
                 tasks.cancel(task_id)
             raise
