@@ -50,7 +50,7 @@ export interface AppSettings {
   contextCompactionKeepRecent: number
 }
 
-const DEFAULT_SETTINGS: AppSettings = {
+export const DEFAULT_SETTINGS: AppSettings = {
   accentColor: DEFAULT_ACCENT,
   // Relative URLs work locally; Cloudflare Pages injects the Render URL at build time.
   baseUrl: DEFAULT_API_URL,
@@ -80,12 +80,14 @@ interface SettingsContextType {
   settings: AppSettings
   updateSettings: (newSettings: Partial<AppSettings>) => void
   resetSettings: () => void
+  replaceSettings: (settings: AppSettings) => void
 }
 
 const SettingsContext = createContext<SettingsContextType>({
   settings: DEFAULT_SETTINGS,
   updateSettings: () => {},
   resetSettings: () => {},
+  replaceSettings: () => {},
 })
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -154,7 +156,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, resetSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, resetSettings, replaceSettings: setSettingsState }}>
       {children}
     </SettingsContext.Provider>
   )

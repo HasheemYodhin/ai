@@ -836,6 +836,15 @@ export class ApiClient {
     return (await response.json().catch(() => ({}))).revision
   }
 
+  async clearConversations(): Promise<{ deleted: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations`, {
+      method: 'DELETE',
+      headers: this.getPlatformHeaders(),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not clear conversation history')
+    return response.json()
+  }
+
   async deleteConversationRemote(userId: string, id: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(id)}?user_id=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
@@ -933,6 +942,7 @@ export class ApiClient {
       allowedTools?: string[]
       contextCompactionThreshold?: number
       contextCompactionKeepRecent?: number
+      systemPrompt?: string
       onApproval?: (request: { callId: string; name: string; arguments: unknown }) => Promise<boolean>
       onPlanApproval?: (request: { planId: string; objective: string; steps: Array<{ step_id: string; tool: string; description: string }> }) => Promise<boolean>
       onEvent: (event: { type: string; content: unknown }) => void
@@ -954,6 +964,7 @@ export class ApiClient {
         allowed_tools: options.allowedTools,
         context_compaction_threshold: options.contextCompactionThreshold,
         context_compaction_keep_recent: options.contextCompactionKeepRecent,
+        system_prompt: options.systemPrompt,
       }),
       signal: options.signal,
     })
@@ -969,19 +980,24 @@ export class ApiClient {
     const decoder = new TextDecoder()
     let buffer = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
 
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-        try {
-          const event = JSON.parse(trimmed.slice(6)) as { type: string; content: unknown }
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data: ')) continue
+          let event: { type: string; content: unknown }
+          try {
+            event = JSON.parse(trimmed.slice(6))
+          } catch {
+            continue
+          }
           if (event.type === 'approval_required') {
             const content = event.content as { call_id?: string; name?: string; arguments?: unknown }
             const callId = content.call_id ?? ''
@@ -999,10 +1015,11 @@ export class ApiClient {
             if (planId) await this.approveAgentCall(planId, !!approved)
           }
           options.onEvent(event)
-        } catch {
-          // skip malformed SSE payloads
         }
       }
+    } finally {
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
     }
   }
 

@@ -550,6 +550,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         conversationId,
         requirePlanApproval: !!(opts.planMode || settings.planModeDefault),
         permissionMode: settings.defaultPermissionMode,
+        systemPrompt: settings.systemPrompt,
         useToolSearch: settings.useToolSearch,
         maxSteps: settings.maxSteps,
         allowedTools: opts.allowedTools,
@@ -637,7 +638,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model, settings.effort, settings.planModeDefault, settings.defaultPermissionMode, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
+  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model, settings.effort, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
 
   // Generates images from a prompt via /v1/images/generations (proxies to
   // whichever image-capable provider has a key configured — currently OpenAI).

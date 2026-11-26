@@ -22,11 +22,10 @@ async function openSettings(page: Page, deletes: string[]) {
         ],
       } })
     }
-    if (url.includes('/v1/conversations/') && request.method() === 'DELETE') {
-      const id = url.split('/v1/conversations/')[1].split('?')[0]
-      deletes.push(id)
-      remaining = remaining.filter(item => item !== id)
-      return route.fulfill({ status: 204, body: '' })
+    if (url.endsWith('/v1/conversations') && request.method() === 'DELETE') {
+      deletes.push(...remaining)
+      remaining = []
+      return route.fulfill({ json: { deleted: deletes.length } })
     }
     if (url.endsWith('/v1/conversations/c1')) {
       return route.fulfill({ json: {
@@ -115,16 +114,29 @@ test('Export downloads the conversations stored on the server', async ({ page })
   expect(download.suggestedFilename()).toMatch(/^dabba-conversations-export-/)
 })
 
+test('Cancel keeps the saved accent after previewing Reset Defaults', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('dabba-settings', JSON.stringify({ accentColor: '#0f7c8a' })))
+  await openSettings(page, [])
+  const closeNavigation = page.getByRole('button', { name: 'Close settings navigation' })
+  if (await closeNavigation.isVisible()) await closeNavigation.click()
+  await expect(page.getByRole('radio', { name: 'Teal' })).toBeChecked()
+  await page.getByTitle('Reset to factory defaults').filter({ visible: true }).click()
+  await expect(page.getByRole('radio', { name: 'Teal' })).not.toBeChecked()
+  await page.getByRole('button', { name: 'Cancel' }).click()
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('dabba-settings') ?? '{}').accentColor))
+    .toBe('#0f7c8a')
+})
+
 test('Clear History deletes the conversations on the server, and only after confirmation', async ({ page }) => {
   const deletes: string[] = []
   await openSettings(page, deletes)
   await page.getByRole('button', { name: 'Data Controls' }).click()
 
   page.once('dialog', dialog => dialog.dismiss())
-  await page.getByRole('button', { name: /Clear History/ }).click()
+  await page.getByRole('button', { name: /Clear Conversation History/ }).click()
   expect(deletes).toEqual([])
 
   page.once('dialog', dialog => dialog.accept())
-  await page.getByRole('button', { name: /Clear History/ }).click()
+  await page.getByRole('button', { name: /Clear Conversation History/ }).click()
   await expect.poll(() => [...deletes].sort()).toEqual(['c1', 'c2', 'c3'])
 })

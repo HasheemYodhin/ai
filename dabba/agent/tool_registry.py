@@ -12,8 +12,9 @@ import inspect
 import pkgutil
 import time
 import traceback
+from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from dabba.agent.tool_schema import (
     HandlerFn,
@@ -38,6 +39,11 @@ class _ToolList(list):
                 if getattr(entry, "name", None) == item:
                     return True
         return False
+
+
+tool_execution_policy: ContextVar[Optional[Callable[[str, str], bool]]] = ContextVar(
+    "tool_execution_policy", default=None
+)
 
 
 @dataclass
@@ -236,6 +242,11 @@ class ToolRegistry:
             args = arguments or {}
             # Try plain function registry first
             if name in self._fn_tools:
+                policy = tool_execution_policy.get()
+                if policy and not policy(name, ""):
+                    raise PermissionError(
+                        f"Tool '{name}' is blocked by the current permission mode."
+                    )
                 return self._fn_tools[name](**args)
             if name not in self.tools:
                 raise ValueError(f"Unknown tool: '{name}'")
@@ -264,6 +275,14 @@ class ToolRegistry:
             ToolResult with execution output or error details.
         """
         start = time.monotonic()
+        policy = tool_execution_policy.get()
+        if policy and not policy(call.tool_name, call.call_id):
+            return ToolResult(
+                tool_name=call.tool_name,
+                call_id=call.call_id,
+                success=False,
+                error=f"Tool '{call.tool_name}' is blocked by the current permission mode.",
+            )
         definition = self.get(call.tool_name) if hasattr(call, "tool_name") else None
         if definition is None:
             elapsed = (time.monotonic() - start) * 1000

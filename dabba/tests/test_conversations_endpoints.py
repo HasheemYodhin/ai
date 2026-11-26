@@ -136,3 +136,20 @@ def test_search_matches_message_text_only_in_the_callers_account(client):
     result = client.get(path, headers=owner_headers).json()["matches"]
     assert result == [{"id": "search-chat", "snippet": "hello"}]
     assert client.get(path, headers=other_headers).json()["matches"] == []
+
+
+def test_clear_conversations_is_account_scoped_and_preserves_deletion_markers(client):
+    owner, owner_headers = _signup(client, "clear-owner@example.com")
+    other, other_headers = _signup(client, "clear-other@example.com")
+    _save(client, owner_headers, owner, "owner-chat", MESSAGES)
+    _save(client, other_headers, other, "other-chat", MESSAGES)
+    path = "/v1/conversations/owner-chat"
+    stale = {**client.get(path, headers=owner_headers).json(), "userId": owner}
+    assert client.delete("/v1/conversations", headers=owner_headers).json() == {
+        "deleted": 1
+    }
+    assert client.put(path, headers=owner_headers, json=stale).status_code == 409
+    assert (
+        client.get("/v1/conversations/other-chat", headers=other_headers).status_code
+        == 200
+    )

@@ -332,6 +332,25 @@ def create_conversations_router() -> APIRouter:
         finally:
             conn.close()
 
+    @router.delete("/conversations")
+    def clear_conversations(authorization: Optional[str] = Header(default=None)):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    """INSERT OR IGNORE INTO conversation_deletions (user_id, id)
+                       SELECT user_id, id FROM conversations WHERE user_id=?""",
+                    (user_id,),
+                )
+                deleted = conn.execute(
+                    "DELETE FROM conversations WHERE user_id=?", (user_id,)
+                ).rowcount
+            return {"deleted": deleted}
+        finally:
+            conn.close()
+
     @router.delete("/conversations/{conversation_id}")
     async def delete_conversation(
         conversation_id: str,

@@ -1,6 +1,6 @@
 import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { useSettings, type AppSettings } from '@/hooks/useSettings'
+import { DEFAULT_SETTINGS, useSettings, type AppSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
 import { useModels } from '@/hooks/useModels'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
@@ -65,7 +65,7 @@ const TIER_STYLES: Record<string, string> = {
 }
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { settings, updateSettings, resetSettings } = useSettings()
+  const { settings, replaceSettings } = useSettings()
   const { theme, setTheme } = useTheme()
   const { models, isLoading: modelsLoading, reload: reloadModels } = useModels()
   const [activeTab, setActiveTab] = useState<TabType>('general')
@@ -77,6 +77,10 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (isOpen && navigationOpen) navigationClose.current?.focus()
   }, [isOpen, navigationOpen])
   const [localSettings, setLocalSettings] = useState<AppSettings>(settings)
+  const selectedModel = models.find(model => model.id === localSettings.model)
+  const outputLimit = Math.min(32768, selectedModel?.maxOutputTokens ?? 32768)
+  const [connectionCheck, setConnectionCheck] = useState<{ url: string; message: string } | null>(null)
+  const [checkingConnection, setCheckingConnection] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isSavedAlert, setIsSavedAlert] = useState(false)
   const [modelSearch, setModelSearch] = useState('')
@@ -212,7 +216,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const handleSave = () => {
     themeOnOpenRef.current = theme
     const stop = stopInput.split(',').map(s => s.trim()).filter(Boolean)
-    updateSettings({ ...localSettings, stop })
+    replaceSettings({ ...localSettings, stop, maxTokens: Math.min(localSettings.maxTokens, outputLimit) })
     setIsSavedAlert(true)
     setTimeout(() => {
       setIsSavedAlert(false)
@@ -221,15 +225,59 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }
 
   const handleReset = () => {
-    resetSettings()
-    setTimeout(() => {
-      const stored = localStorage.getItem('dabba-settings')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        setLocalSettings(parsed)
-        setStopInput((parsed.stop ?? []).join(', '))
+    setLocalSettings(DEFAULT_SETTINGS)
+    setStopInput(DEFAULT_SETTINGS.stop.join(', '))
+    setTheme(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+  }
+
+  const checkConnection = async () => {
+    const draftUrl = localSettings.baseUrl
+    setCheckingConnection(true)
+    setConnectionCheck(null)
+    try {
+      const url = new URL(draftUrl.trim() || window.location.origin, window.location.origin)
+      if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+        throw new Error('Enter an HTTP or HTTPS server URL.')
       }
-    }, 50)
+      const response = await fetch(`${url.href.replace(/\/+$/, '')}/ready`, {
+        credentials: 'omit',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
+      })
+      const readiness = await response.json()
+      if (!response.ok || readiness.status !== 'ready') throw new Error('The Dabba server is reachable but not ready.')
+      let message = 'Dabba is reachable and storage is ready.'
+      if (draftUrl === settings.baseUrl && currentUser) {
+        const [audio, execution] = await Promise.allSettled([
+          apiClient.audioStatus(AbortSignal.timeout(5000)),
+          isAdmin ? apiClient.getCodeExecutionUnavailableReason(AbortSignal.timeout(5000)) : Promise.resolve('Owner access required'),
+        ])
+        if (audio.status === 'fulfilled') {
+          message += audio.value.transcription.available ? ' Server transcription is available.' : ' Voice input depends on browser dictation.'
+          message += audio.value.speech?.available ? ' Server read aloud is available.' : ' Read aloud depends on browser voices.'
+        }
+        if (execution.status === 'fulfilled') {
+          message += execution.value ? ` Server code execution: ${execution.value}.` : ' Local server code execution is available.'
+        }
+      }
+      setConnectionCheck({ url: draftUrl, message })
+    } catch (error) {
+      const message = error instanceof TypeError || error instanceof SyntaxError
+        ? 'Could not reach a Dabba readiness endpoint. Check the URL and the server’s allowed origins.'
+        : error instanceof Error ? error.message : 'Connection check failed.'
+      setConnectionCheck({ url: draftUrl, message })
+    } finally {
+      setCheckingConnection(false)
+    }
+  }
+
+  const selectModel = (model: ModelInfo) => {
+    setLocalSettings(previous => {
+      if (previous.model === model.id) return previous
+      const { temperature, maxTokens, effort, topP } = previous
+      const modelDefaults = { ...previous.modelDefaults, [previous.model]: { temperature, maxTokens, effort, topP } }
+      return { ...previous, ...modelDefaults[model.id], modelDefaults, model: model.id }
+    })
   }
 
   // Chats are stored on the server (not in this browser), so export and
@@ -259,19 +307,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     if (!confirm('Delete all conversations in this account? They are removed from the Dabba server and from every device you use. This cannot be undone.')) return
     setDataBusy('clear'); setDataError(null)
     try {
-      const conversations = await apiClient.fetchConversations(currentUser.id)
-      let failed = 0
-      // A few at a time, so a long history doesn't open dozens of requests at once.
-      for (let i = 0; i < conversations.length; i += 4) {
-        const results = await Promise.allSettled(
-          conversations.slice(i, i + 4).map(conv => apiClient.deleteConversationRemote(currentUser.id, conv.id)),
-        )
-        failed += results.filter(result => result.status === 'rejected').length
-      }
-      if (failed) {
-        setDataError(`${failed} of ${conversations.length} conversations could not be deleted. Try again.`)
-        return
-      }
+      await apiClient.clearConversations()
       // Forget the copies this browser keeps (older versions saved chats here).
       localStorage.removeItem('dabba-conversations')
       localStorage.removeItem(`dabba-pending-conversations:${currentUser.id}`)
@@ -542,6 +578,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       placeholder="Same server (recommended)"
                       className="w-full px-3.5 py-2.5 text-sm rounded-xl glass-input border border-border dark:border-border-dark outline-none focus:border-accent/40 transition-colors font-medium"
                     />
+                    <button type="button" onClick={() => void checkConnection()} disabled={checkingConnection}
+                      className="text-xs font-semibold text-accent underline disabled:opacity-50">
+                      {checkingConnection ? 'Checking…' : 'Test connection'}
+                    </button>
+                    {connectionCheck?.url === localSettings.baseUrl && <p role="status" className="text-xs text-text-secondary">{connectionCheck.message}</p>}
                   </div>
 
                   <div className="space-y-1.5">
@@ -620,7 +661,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           {items.map(m => (
                             <button
                               key={m.id}
-                              onClick={() => m.has_key ? setLocalSettings(prev => ({ ...prev, model: m.id })) : setKeyPromptModel(m)}
+                              onClick={() => m.has_key ? selectModel(m) : setKeyPromptModel(m)}
                               title={m.has_key ? m.description : `Click to add a ${providerLabel(m.provider)} API key`}
                               className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors ${
                                 !m.has_key ? 'opacity-80 hover:opacity-100 hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary' : localSettings.model === m.id ? 'bg-accent/10' : 'hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -662,14 +703,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   </select>
                 </div>
 
+                <p className="text-xs text-text-tertiary">
+                  {selectedModel?.supportsVision ? 'This model accepts images. ' : ''}
+                  {selectedModel?.supportsThinking && ['high', 'xhigh', 'max'].includes(localSettings.effort) ? 'Higher reasoning effort can increase the time before the first reply. ' : ''}
+                  Sampling settings apply where supported by the provider.
+                </p>
                 <div className="space-y-4 pt-3 border-t border-border dark:border-border-dark">
                   <Slider label="Temperature" value={localSettings.temperature} min={0} max={1.5} step={0.1}
                     onChange={v => setLocalSettings(prev => ({ ...prev, temperature: v }))}
                     marks={['Deterministic (0.0)', 'Balanced (0.7)', 'Creative (1.5)']} />
 
-                  <Slider label="Max Completion Output" value={localSettings.maxTokens} min={256} max={32768} step={256} unit=" tokens"
+                  <Slider label="Max Completion Output" value={Math.min(localSettings.maxTokens, outputLimit)} min={1} max={outputLimit} step={1} unit=" tokens"
                     onChange={v => setLocalSettings(prev => ({ ...prev, maxTokens: v }))}
-                    marks={['Short (256)', 'Standard (8192)', 'Extended (32768)']} />
+                    marks={['1 token', Math.ceil(outputLimit / 2).toLocaleString(), `Model limit ${outputLimit.toLocaleString()}`]} />
 
                   <Slider label="Top P (nucleus sampling)" value={localSettings.topP} min={0} max={1} step={0.05}
                     onChange={v => setLocalSettings(prev => ({ ...prev, topP: v }))}
@@ -701,12 +747,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* System Prompts Tab */}
             {activeTab === 'prompt' && (
               <div className="space-y-4 animate-fade-in">
+                <p className="text-xs text-text-secondary">
+                  Chat and Agent send these instructions with new turns. When a skill overrides the chat instructions, its own prompt takes precedence. Scheduled skills use their saved instructions.
+                </p>
                 <div className="space-y-1.5">
                   <label className="block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
                     Model Persona Instructions
                   </label>
                   <textarea
                     value={localSettings.systemPrompt}
+                    maxLength={16000}
                     onChange={e => setLocalSettings(prev => ({ ...prev, systemPrompt: e.target.value }))}
                     placeholder="Provide system instructions that format and direct assistant behavior..."
                     rows={6}
@@ -764,7 +814,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             'text-xs font-semibold px-1.5 py-0.5 rounded uppercase',
                             hasKey ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-surface-tertiary dark:bg-surface-dark text-text-tertiary'
                           )}>
-                            {hasKey ? 'Set' : 'Not set'}
+                            {hasKey ? 'Configured · unverified' : 'Not configured'}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -889,9 +939,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             <span className={`w-1.5 h-1.5 rounded-full ${s.connected ? 'bg-green-500' : 'bg-gray-400'}`} />
                             <span className="text-xs font-semibold text-text-primary dark:text-text-dark-primary">{s.name}</span>
                           </div>
-                          <span className="text-xs text-text-tertiary">{s.connected ? 'connected' : 'disconnected'}</span>
+                          <span className="text-xs text-text-tertiary">{(s.processRunning ?? s.connected) ? 'Process running' : 'Process stopped'}</span>
                         </div>
                         <p className="text-xs font-mono text-text-tertiary mt-1 truncate">{s.command} {s.args?.join(' ')}</p>
+                        <p className="mt-1 text-xs text-text-tertiary">
+                          {s.tools?.length ?? 0} tools discovered · {s.authenticationStatus === 'configured' ? 'Credential configured' : s.authenticationStatus === 'missing' ? 'Credential missing' : 'Account authentication unverified'}
+                          {s.checkedAt ? ` · Checked ${new Date(s.checkedAt).toLocaleTimeString()}` : ''}
+                        </p>
+                        {s.message && <p className="mt-1 text-xs text-text-secondary">{s.message}</p>}
                         {s.tools?.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
                             {s.tools.map(t => (
@@ -932,7 +987,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     ))}
                   </div>
                   <p className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary leading-relaxed">
-                    "Ask" pauses for your approval before dangerous tool calls (shell commands, file writes). "Allow" runs everything automatically. "Deny" blocks dangerous tools outright. Cowork and scheduled runs always run with tools enabled regardless of this setting.
+                    Ask requires approval for sensitive built-in tools and MCP tools. Allow runs them under the server’s existing restrictions. Deny blocks both groups. Cowork and scheduled runs use their own policy.
                   </p>
                 </div>
 
@@ -1056,7 +1111,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         )}
                       </div>
                     ))}
-                    <p className="text-xs text-text-tertiary">Budgets use rolling windows and count tokens reported by completed chat requests.</p>
+                    <p className="text-xs text-text-tertiary">Each budget counts tokens reported by completed chat requests, including title generation. Agent runs, in-flight replies, and replies without reported usage are excluded. A reached budget blocks new chat requests until capacity returns.</p>
                   </section>
                 )}
                 <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
@@ -1110,7 +1165,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     Export Conversations
                   </h4>
                   <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-                    Download all the conversations in this account as a single JSON file, as a backup or to use elsewhere.
+                    Download this account’s conversations and messages as JSON. Separate memory, artifacts, and usage records aren’t included.
                   </p>
                   <button
                     onClick={() => void handleExportAll()}
@@ -1128,7 +1183,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     Danger Zone
                   </h4>
                   <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-                    Permanently delete every conversation in this account. They are removed from the Dabba server, so they disappear on all your devices too. This cannot be undone.
+                    Permanently delete this account’s conversation history across devices. Saved memories, artifacts, usage records, and settings are kept.
                   </p>
                   <button
                     onClick={() => void handleClearHistory()}
@@ -1136,7 +1191,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     className="flex items-center gap-2 mt-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 text-red-500 hover:text-white transition-all active:scale-[0.98]"
                   >
                     {dataBusy === 'clear' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                    Clear History & Reset
+                    Clear Conversation History
                   </button>
                 </div>
               </div>
@@ -1185,7 +1240,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           modelName={keyPromptModel.name}
           onClose={() => setKeyPromptModel(null)}
           onSaved={() => {
-            setLocalSettings(prev => ({ ...prev, model: keyPromptModel.id }))
+            selectModel(keyPromptModel)
             reloadModels()
             if (activeTab === 'keys') {
               reloadKeys()
@@ -1269,7 +1324,7 @@ function MemoryTabContent() {
   return (
     <div className="space-y-5 animate-fade-in">
       <p className="text-xs text-text-secondary dark:text-text-dark-secondary leading-relaxed">
-        Facts you've asked Dabba to remember — persisted across sessions and automatically included in every agent prompt.
+        Account preferences carry across sessions and apply to signed-in agent prompts. Delete a preference to stop using it in future prompts.
       </p>
       <div className="flex items-center gap-2">
         <input

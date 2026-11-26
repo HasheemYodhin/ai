@@ -630,16 +630,8 @@ class InteractiveSession:
 
         if args[0] == "delete" and len(args) >= 2:
             provider = args[1]
-            api_keys = getattr(self.config, "api_keys", {}) or {}
-            found_key = None
-            for k in list(api_keys.keys()):
-                if k == provider or k.lower() == provider.lower():
-                    del api_keys[k]
-                    found_key = k
-            if found_key:
-                self.config.api_keys = api_keys
-                self.config.save()
-                self.output.info(f"API key removed for {found_key}")
+            if self.config.remove_provider_key(provider):
+                self.output.info(f"API key removed for {provider}")
             else:
                 self.output.error(f"No key set for {provider}")
             return

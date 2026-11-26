@@ -1,5 +1,5 @@
 import { useDialogFocus } from '@/hooks/useDialogFocus'
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, useLayoutEffect } from 'react'
 import { ChevronDown, Check, Search, KeyRound, RefreshCw, Loader2 } from 'lucide-react'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
@@ -25,7 +25,7 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
   // Open on the preferred side, but never let the menu run off the page: it
   // is capped to the room available, and flips to the other side when that
   // side has clearly more space (e.g. a composer near the top of a short window).
-  const measureFit = () => {
+  const measureFit = useCallback(() => {
     const rect = ref.current?.getBoundingClientRect()
     if (!rect) return
     const HEADER = 72 // keep clear of the page header
@@ -37,8 +37,22 @@ export function ModelSwitcher({ placement = 'down' }: { placement?: 'down' | 'up
     const flip = preferred < 260 && other > preferred
     const side: 'up' | 'down' = flip ? (preferUp ? 'down' : 'up') : placement
     const room = side === 'up' ? above : below
-    setFit({ side, maxHeight: Math.max(160, Math.min(420, Math.floor(room) - 8)) })
-  }
+    const maxHeight = Math.max(0, Math.min(420, Math.floor(room) - 8))
+    setFit(current => current.side === side && current.maxHeight === maxHeight ? current : { side, maxHeight })
+  }, [placement])
+  useLayoutEffect(() => {
+    if (!openMenu) return
+    measureFit()
+    const observer = new ResizeObserver(measureFit)
+    for (let element: HTMLElement | null = ref.current; element; element = element.parentElement) {
+      observer.observe(element)
+    }
+    window.addEventListener('resize', measureFit)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', measureFit)
+    }
+  }, [openMenu, measureFit])
   const toggleMenu = (menu: 'model' | 'effort') => {
     if (openMenu !== menu) measureFit()
     setOpenMenu(openMenu === menu ? null : menu)

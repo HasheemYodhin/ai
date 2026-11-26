@@ -247,6 +247,7 @@ export interface ModelInfo {
   has_key: boolean
   keySource?: string | null
   contextWindow?: number
+  maxOutputTokens?: number
   supportsThinking?: boolean
   supportsVision?: boolean
   fallbackModels?: string[]
@@ -265,6 +266,8 @@ export interface McpServer {
   connected: boolean
   processRunning?: boolean
   authenticated?: boolean
+  authenticationStatus?: 'configured' | 'missing' | 'unverified'
+  checkedAt?: number
   verifiedStatus?: 'connected' | 'degraded' | 'authentication_required' | 'stopped' | 'unknown'
   message?: string | null
   tools: string[]

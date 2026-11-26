@@ -28,10 +28,10 @@ for (const height of [923, 560, 420]) {
     await page.getByRole('button', { name: /Change model/ }).click()
     const menu = page.getByRole('dialog', { name: 'Choose model' })
     await expect(menu).toBeVisible()
-    const box = await menu.boundingBox()
-    // Clear of the page header (60px) and inside the window.
-    expect(box!.y).toBeGreaterThanOrEqual(60)
-    expect(box!.y + box!.height).toBeLessThanOrEqual(height)
+    await expect.poll(async () => {
+      const box = await menu.boundingBox()
+      return !!box && box.y >= 60 && box.y + box.height <= height
+    }).toBe(true)
   })
 }
 
