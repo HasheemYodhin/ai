@@ -4,12 +4,17 @@ import { expect, test, type Page } from '@playwright/test'
 // Clear History must all go through the server. The API is mocked.
 async function openSettings(page: Page, deletes: string[]) {
   let remaining = ['c1', 'c2', 'c3']
+  let user = { id: 'u1', name: 'Test User', email: 'user@example.com', role: 'admin', createdAt: 0, updatedAt: 0, bio: '' }
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   await page.route('**/v1/**', async route => {
     const request = route.request()
     const url = request.url()
     if (url.includes('/identity/me')) {
-      return route.fulfill({ json: { id: 'u1', name: 'Test User', email: 'user@example.com', role: 'admin', createdAt: 0, updatedAt: 0 } })
+      if (request.method() === 'PATCH') {
+        const { name, bio } = request.postDataJSON()
+        user = { ...user, name, bio }
+      }
+      return route.fulfill({ json: user })
     }
     if (url.includes('/platform/usage')) {
       return route.fulfill({ json: {
@@ -58,7 +63,11 @@ async function openSettings(page: Page, deletes: string[]) {
     return route.fulfill({ json: [] })
   })
   await page.goto('/')
-  const profile = page.locator('button:has-text("Test User")').first()
+  await openSettingsFromAccount(page, user.name)
+}
+
+async function openSettingsFromAccount(page: Page, name: string) {
+  const profile = page.getByRole('button', { name: `Account menu for ${name}` })
   const sidebar = page.getByTitle('Open sidebar (Ctrl+B)')
   await expect(sidebar.or(profile).filter({ visible: true })).toBeVisible()
   if (await sidebar.isVisible()) await sidebar.click()
@@ -67,6 +76,25 @@ async function openSettings(page: Page, deletes: string[]) {
   const navigation = page.getByRole('button', { name: 'Open settings navigation' })
   if (await navigation.isVisible()) await navigation.click()
 }
+
+test('Profile saves the display name and bio and restores them after a reload', async ({ page }) => {
+  await openSettings(page, [])
+  await page.getByRole('button', { name: 'Profile', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await expect(dialog.getByText('user@example.com')).toBeVisible()
+  await expect(dialog.getByText('Workspace owner')).toBeVisible()
+  const save = dialog.getByRole('button', { name: 'Save profile' })
+  await expect(save).toBeDisabled()
+  await dialog.getByLabel('Display name').fill('Updated User')
+  await dialog.getByLabel('Bio (optional)').fill('Building with Dabba')
+  await save.click()
+  await expect(dialog.getByRole('status')).toHaveText('Profile saved')
+  await page.reload()
+  await openSettingsFromAccount(page, 'Updated User')
+  await page.getByRole('button', { name: 'Profile', exact: true }).click()
+  await expect(dialog.getByLabel('Display name')).toHaveValue('Updated User')
+  await expect(dialog.getByLabel('Bio (optional)')).toHaveValue('Building with Dabba')
+})
 
 test('Usage shows what the server recorded, not an empty browser copy', async ({ page }) => {
   await openSettings(page, [])

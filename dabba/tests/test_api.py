@@ -77,6 +77,51 @@ def test_session_restore_accepts_expired_session_without_exposing_account_data(
     asyncio.run(check())
 
 
+def test_profile_update_is_persisted_and_scoped_to_the_signed_in_user(
+    tmp_path, monkeypatch
+):
+    import dabba.platform.core as platform_core
+    from dabba.platform.services import IdentityService
+
+    monkeypatch.setenv("DABBA_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(platform_core, "_default_store", None)
+    identity = IdentityService()
+    owner = identity.signup("Owner", "owner@example.com", "a-secure-password")
+    member = identity.signup("Member", "member@example.com", "a-secure-password")
+    token = identity.login(member["email"], "a-secure-password")["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    path = "/v1/platform/identity/me"
+    profile = {"name": "  New Name  ", "bio": "  I build things.  "}
+
+    async def check():
+        transport = httpx.ASGITransport(app=create_app(model_engine=Mock()))
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test"
+        ) as client:
+            assert (await client.patch(path, json=profile)).status_code == 401
+            for invalid in (
+                {**profile, "name": " "},
+                {**profile, "bio": "x" * 281},
+                {**profile, "role": "admin", "id": owner["id"]},
+            ):
+                response = await client.patch(path, headers=headers, json=invalid)
+                assert response.status_code in (400, 422)
+            response = await client.patch(path, headers=headers, json=profile)
+            assert response.status_code == 200
+            assert response.headers["Cache-Control"] == "no-store"
+            expected = {
+                **member,
+                "name": "New Name",
+                "bio": "I build things.",
+                "updatedAt": response.json()["updatedAt"],
+            }
+            assert response.json() == expected
+            assert (await client.get(path, headers=headers)).json() == expected
+            assert identity.get_user(owner["id"]) == owner
+
+    asyncio.run(check())
+
+
 class TestAuth:
     def test_authenticate_valid_token(self):
         auth = Mock(spec=authenticate_request)

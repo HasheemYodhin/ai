@@ -1,11 +1,11 @@
 import { useDialogFocus } from '@/hooks/useDialogFocus'
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef, type FormEvent } from 'react'
 import { DEFAULT_SETTINGS, useSettings, type AppSettings } from '@/hooks/useSettings'
 import { useTheme } from '@/hooks/useTheme'
 import { useModels } from '@/hooks/useModels'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
 import { useProviderKeys } from '@/hooks/useProviderKeys'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth, type UserProfile } from '@/hooks/useAuth'
 import { apiClient } from '@/api/client'
 import { ACCENT_PRESETS, applyAccent, normalizeAccent } from '@/lib/accent'
 import { EFFORT_TIERS, modelDisplayName, providerLabel } from '@/lib/models'
@@ -39,6 +39,7 @@ import {
   BrainCircuit,
   Bell,
   PanelLeft,
+  UserRound,
 } from 'lucide-react'
 
 interface SettingsModalProps {
@@ -46,7 +47,7 @@ interface SettingsModalProps {
   onClose: () => void
 }
 
-type TabType = 'general' | 'model' | 'prompt' | 'keys' | 'tools' | 'usage' | 'data' | 'permissions' | 'agent' | 'memory'
+type TabType = 'profile' | 'general' | 'model' | 'prompt' | 'keys' | 'tools' | 'usage' | 'data' | 'permissions' | 'agent' | 'memory'
 
 const KEY_PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic',
@@ -439,6 +440,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </div>
 
             <nav aria-label="Settings sections" className="space-y-1">
+              {currentUser && navItem('profile', <UserRound className="w-4 h-4" />, 'Profile')}
               {navItem('general', <Globe className="w-4 h-4" />, 'General')}
               {navItem('model', <Sliders className="w-4 h-4" />, 'Model & Params')}
               {navItem('prompt', <MessageSquareCode className="w-4 h-4" />, 'System Prompts')}
@@ -452,14 +454,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </nav>
           </div>
 
-          <button
+          {activeTab !== 'profile' && <button
             onClick={handleReset}
             className="hidden items-center justify-center gap-2 text-[11px] text-text-tertiary hover:text-text-secondary px-3 py-2.5 rounded-xl hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors border border-transparent md:flex"
             title="Reset to factory defaults"
           >
             <RefreshCw className="w-3.5 h-3.5" />
             Reset Defaults
-          </button>
+          </button>}
         </aside>
 
         {/* Right Column: Tab View Content */}
@@ -478,7 +480,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <PanelLeft className="h-5 w-5" />
               </button>
               <h3 className="font-semibold text-sm text-text-primary dark:text-text-dark-primary capitalize">
-                {activeTab === 'model' ? 'Model & Parameters'
+                {activeTab === 'profile' ? 'Profile'
+                  : activeTab === 'model' ? 'Model & Parameters'
                   : activeTab === 'prompt' ? 'System Instructions'
                   : activeTab === 'keys' ? 'Provider API Keys'
                   : activeTab === 'tools' ? 'MCP Servers & Tools'
@@ -500,6 +503,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
 
           {/* Content Pane */}
           <div className="flex-1 overflow-y-auto scrollbar-thin p-4 sm:p-6 space-y-6">
+
+            {activeTab === 'profile' && currentUser && <ProfileTab key={currentUser.id} user={currentUser} />}
 
             {/* General Tab */}
             {activeTab === 'general' && (
@@ -1269,7 +1274,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
           </div>
 
           {/* Footer Controls */}
-          <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-border dark:border-border-dark flex items-center justify-end gap-2 bg-surface-secondary dark:bg-surface-dark-tertiary">
+          {activeTab !== 'profile' && <div className="px-4 py-3 sm:px-6 sm:py-4 border-t border-border dark:border-border-dark flex items-center justify-end gap-2 bg-surface-secondary dark:bg-surface-dark-tertiary">
             <button
               onClick={handleReset}
               title="Reset to factory defaults"
@@ -1297,7 +1302,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             >
               Save Settings
             </button>
-          </div>
+          </div>}
         </div>
 
       </div>
@@ -1318,6 +1323,76 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         />
       )}
     </div>
+  )
+}
+
+function ProfileTab({ user }: { user: UserProfile }) {
+  const { updateProfile } = useAuth()
+  const [name, setName] = useState(user.name)
+  const [bio, setBio] = useState(user.bio)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  const dirty = name.trim() !== user.name || bio.trim() !== user.bio
+  const fieldClass = 'w-full rounded-xl border border-border bg-surface-secondary px-3 py-2.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent dark:border-border-dark dark:bg-surface-dark-tertiary dark:text-text-dark-primary'
+  const labelClass = 'block text-xs font-semibold text-text-secondary dark:text-text-dark-secondary'
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!dirty || !name.trim() || saving) return
+    setSaving(true)
+    setError('')
+    setSaved(false)
+    try {
+      await updateProfile({ name: name.trim(), bio: bio.trim() })
+      setSaved(true)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not save your profile')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="flex min-w-0 items-center gap-3">
+        <div aria-hidden="true" className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white" style={{ backgroundColor: user.avatarColor }}>
+          <UserRound className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="break-words text-sm font-semibold">{user.name}</p>
+          <p className="break-all text-xs text-text-secondary dark:text-text-dark-secondary">{user.email}</p>
+        </div>
+      </div>
+      <div className="space-y-1.5">
+        <label htmlFor="profile-name" className={labelClass}>Display name</label>
+        <input id="profile-name" autoComplete="name" required maxLength={100} className={fieldClass}
+          value={name} disabled={saving} onChange={event => { setName(event.currentTarget.value); setSaved(false) }} />
+      </div>
+      <div className="space-y-1.5">
+        <label htmlFor="profile-bio" className={labelClass}>Bio (optional)</label>
+        <textarea id="profile-bio" rows={3} maxLength={280} className={fieldClass}
+          value={bio} disabled={saving} onChange={event => { setBio(event.currentTarget.value); setSaved(false) }} />
+      </div>
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <div>
+          <dt className={labelClass}>Account role</dt>
+          <dd className="mt-1">{user.role === 'admin' ? 'Workspace owner' : 'Member'}</dd>
+        </div>
+        <div>
+          <dt className={labelClass}>Member since</dt>
+          <dd className="mt-1">{new Date(user.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}</dd>
+        </div>
+      </dl>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={!dirty || !name.trim() || saving}
+          className="rounded-xl bg-accent px-5 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
+          {saving ? 'Saving…' : 'Save profile'}
+        </button>
+        {saved && <span role="status" className="text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">Profile saved</span>}
+        {error && <span role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</span>}
+      </div>
+    </form>
   )
 }
 

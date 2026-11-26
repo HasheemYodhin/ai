@@ -234,6 +234,13 @@ export class ApiClient {
     this.setSessionToken('')
   }
 
+  updateProfile(profile: ProfileDetails): Promise<PlatformUser> {
+    return this.platformRequest('/identity/me', {
+      method: 'PATCH',
+      body: JSON.stringify(profile),
+    })
+  }
+
   private async platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response
     try {
@@ -1213,9 +1220,12 @@ export interface PlatformUser {
   id: string
   name: string
   email: string
+  bio?: string
   role: string
   createdAt: number
   updatedAt: number
 }
+
+export type ProfileDetails = { name: string; bio: string }
 
 export const apiClient = new ApiClient()

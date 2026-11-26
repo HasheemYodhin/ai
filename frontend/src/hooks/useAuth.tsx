@@ -1,10 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
-import { apiClient, type PlatformUser } from '@/api/client'
+import { apiClient, type PlatformUser, type ProfileDetails } from '@/api/client'
 
 export interface UserProfile {
   id: string
   name: string
   email: string
+  bio: string
   avatarColor: string
   createdAt: number
   role: string
@@ -14,7 +15,7 @@ const AVATAR_COLORS = ['#c96442', '#2f9e5c', '#3b82f6', '#8b5cf6', '#eab308', '#
 
 function toProfile(user: PlatformUser): UserProfile {
   const colorIndex = [...user.id].reduce((total, char) => total + char.charCodeAt(0), 0) % AVATAR_COLORS.length
-  return { ...user, avatarColor: AVATAR_COLORS[colorIndex] }
+  return { ...user, bio: user.bio ?? '', avatarColor: AVATAR_COLORS[colorIndex] }
 }
 
 interface AuthContextType {
@@ -26,6 +27,7 @@ interface AuthContextType {
   isReady: boolean
   signup: (name: string, email: string, password: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
+  updateProfile: (profile: ProfileDetails) => Promise<void>
   logout: () => void
 }
 
@@ -35,6 +37,7 @@ const AuthContext = createContext<AuthContextType>({
   isReady: false,
   signup: async () => {},
   login: async () => {},
+  updateProfile: async () => {},
   logout: () => {},
 })
 
@@ -69,8 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null)
   }, [])
 
+  const updateProfile = useCallback(async (profile: ProfileDetails) => {
+    const user = await apiClient.updateProfile(profile)
+    setCurrentUser(current => current?.id === user.id ? toProfile(user) : current)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ currentUser, isAdmin: currentUser?.role === 'admin', isReady, signup, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, isAdmin: currentUser?.role === 'admin', isReady, signup, login, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   )

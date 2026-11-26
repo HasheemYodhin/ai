@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dabba.platform import (
     AgentDefinitionService,
@@ -50,6 +50,13 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    bio: str = Field(max_length=280)
 
 
 class TaskCreateRequest(BaseModel):
@@ -1515,6 +1522,23 @@ def create_platform_router() -> APIRouter:
     ):
         response.headers["Cache-Control"] = "no-store"
         return getattr(request.state, "dabba_user", None) or current_user(authorization)
+
+    @router.patch("/identity/me")
+    async def update_profile(
+        body: ProfileUpdateRequest,
+        request: Request,
+        response: Response,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = getattr(request.state, "dabba_user", None) or current_user(authorization)
+        try:
+            profile = await asyncio.to_thread(
+                identity.update_profile, user["id"], body.name, body.bio
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        response.headers["Cache-Control"] = "no-store"
+        return profile
 
     @router.post("/identity/logout")
     async def logout(authorization: Optional[str] = Header(default=None)):

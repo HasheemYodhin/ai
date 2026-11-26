@@ -856,6 +856,17 @@ class IdentityService:
                 (utc_ms(), token_hash),
             )
 
+    def update_profile(self, user_id: str, name: str, bio: str) -> Dict[str, Any]:
+        name, bio = name.strip(), bio.strip()
+        if not name:
+            raise ValueError("Display name is required")
+        with self.store.transaction() as conn:
+            conn.execute(
+                "UPDATE users SET name=?, bio=?, updated_at=? WHERE id=?",
+                (name, bio, utc_ms(), user_id),
+            )
+        return self.get_user(user_id)
+
     def get_user(self, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone("SELECT * FROM users WHERE id=?", (user_id,))
         if not row:
@@ -864,6 +875,7 @@ class IdentityService:
             "id": row["id"],
             "email": row["email"],
             "name": row["name"],
+            "bio": row["bio"],
             "role": row["role"],
             "disabled": bool(row["disabled"]),
             "createdAt": row["created_at"],

@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
+    bio TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'member',
     disabled INTEGER NOT NULL DEFAULT 0,
@@ -499,6 +500,7 @@ class PlatformStore:
     # not touch a table that already exists, so databases created earlier get
     # these added here. (table, column, SQL type); names are constants.
     _ADDED_COLUMNS = (
+        ("users", "bio", "TEXT NOT NULL DEFAULT ''"),
         ("scheduled_skills", "model", "TEXT"),
         ("scheduled_skills", "time_zone", "TEXT NOT NULL DEFAULT 'UTC'"),
     )
