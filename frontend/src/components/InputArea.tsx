@@ -75,6 +75,8 @@ export function InputArea({
   const [isQuickRecording, setIsQuickRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isExtractingDocuments, setIsExtractingDocuments] = useState(false)
+  const [extractingFile, setExtractingFile] = useState<string | null>(null)
+  const extractedFiles = useRef(new Map<string, ExtractedDocument>())
   const [voiceModalOpen, setVoiceModalOpen] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -215,6 +217,7 @@ export function InputArea({
   }, [])
 
   const removeFile = useCallback((id: string) => {
+    extractedFiles.current.delete(id)
     setFiles(prev => prev.filter(f => f.id !== id))
   }, [])
 
@@ -243,13 +246,32 @@ export function InputArea({
         setIsExtractingDocuments(true)
         setFileError(null)
         try {
-          documents = await apiClient.extractDocuments(otherFiles)
+          documents = []
+          let remainingCharacters = 500_000
+          for (const [index, file] of otherFiles.entries()) {
+            setExtractingFile(`Reading file ${index + 1} of ${otherFiles.length} · ${file.name}`)
+            let document = extractedFiles.current.get(file.id)
+            if (!document) {
+              const [result] = await apiClient.extractDocuments([file]).catch(error => {
+                throw new Error(`${file.name} · ${error instanceof Error ? error.message : 'Could not read the file'}. Send again to retry.`)
+              })
+              if (!result) throw new Error(`No document was returned for ${file.name}.`)
+              extractedFiles.current.set(file.id, result)
+              document = result
+            }
+            if (remainingCharacters < document.text.length) {
+              throw new Error('The combined document text is too large for one message. Remove a file or send the documents in separate messages.')
+            }
+            remainingCharacters -= document.text.length
+            documents.push(document)
+          }
         } catch (err) {
           setFileError((err as Error).message || 'Could not read the attached document')
-          setIsExtractingDocuments(false)
           return
+        } finally {
+          setIsExtractingDocuments(false)
+          setExtractingFile(null)
         }
-        setIsExtractingDocuments(false)
       }
       const systemPromptOverride = mode.kind === 'skill'
         ? skills.find(s => s.id === mode.skillId)?.instructions
@@ -269,6 +291,7 @@ export function InputArea({
     }
 
     setValue('')
+    extractedFiles.current.clear()
     setFiles([])
     setPendingViaVoice(false)
     if (textareaRef.current) {
@@ -370,6 +393,7 @@ export function InputArea({
           </div>
         )}
 
+        {extractingFile && <p role="status" className="mb-2 text-xs text-text-secondary">{extractingFile}</p>}
         {fileError && (
           <p className="text-xs text-red-500 mb-2">{fileError}</p>
         )}

@@ -6,6 +6,7 @@ import base64
 import binascii
 import asyncio
 import contextlib
+import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -305,6 +306,7 @@ class ScheduledSkillCreateRequest(BaseModel):
     cadence: str = "daily"
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = "09:00"
+    timeZone: str = Field(default="UTC", max_length=64)
     weekdays: List[int] = Field(default_factory=list)
     enabled: bool = True
     nextRunAt: Optional[int] = None
@@ -318,6 +320,7 @@ class ScheduledSkillUpdateRequest(BaseModel):
     cadence: Optional[str] = None
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = None
+    timeZone: Optional[str] = Field(default=None, max_length=64)
     weekdays: Optional[List[int]] = None
     enabled: Optional[bool] = None
     nextRunAt: Optional[int] = None
@@ -361,6 +364,7 @@ def create_platform_router() -> APIRouter:
     skill_packages = SkillPackageService()
     scheduler_task: Optional[asyncio.Task[Any]] = None
     background_tasks: set[asyncio.Task[Any]] = set()
+    low_memory = os.getenv("DABBA_LOW_MEMORY", "").lower() in {"1", "true"}
 
     def launch(coro: Any) -> None:
         task = asyncio.create_task(coro)
@@ -773,9 +777,14 @@ def create_platform_router() -> APIRouter:
 
     async def scheduler_loop() -> None:
         while True:
+            if low_memory and background_tasks:
+                await asyncio.sleep(30)
+                continue
             try:
                 await asyncio.to_thread(scheduled_skills.dispatch_due)
-                queued_runs = await asyncio.to_thread(scheduled_skills.queued_runs)
+                queued_runs = await asyncio.to_thread(
+                    scheduled_skills.queued_runs, 1 if low_memory else 25
+                )
                 for run in queued_runs:
                     launch(
                         asyncio.to_thread(
@@ -790,7 +799,13 @@ def create_platform_router() -> APIRouter:
                 # the scheduler itself must stay alive for later schedules.
                 pass
             try:
-                due_cowork = await asyncio.to_thread(cowork.dispatch_due_schedules)
+                due_cowork = (
+                    []
+                    if low_memory and background_tasks
+                    else await asyncio.to_thread(
+                        cowork.dispatch_due_schedules, 1 if low_memory else 25
+                    )
+                )
                 for run in due_cowork:
                     launch(
                         asyncio.to_thread(
@@ -1089,6 +1104,12 @@ def create_platform_router() -> APIRouter:
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
+        if low_memory and background_tasks:
+            raise HTTPException(
+                status_code=429,
+                detail="Another background job is running. Try again when it finishes.",
+                headers={"Retry-After": "10"},
+            )
         try:
             run = cowork.dispatch(
                 item_id,
@@ -1386,6 +1407,7 @@ def create_platform_router() -> APIRouter:
                 cadence=body.cadence,
                 interval_minutes=body.intervalMinutes,
                 time_of_day=body.timeOfDay,
+                time_zone=body.timeZone,
                 weekdays=body.weekdays,
                 enabled=body.enabled,
                 next_run_at=body.nextRunAt,
@@ -1427,6 +1449,12 @@ def create_platform_router() -> APIRouter:
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
+        if low_memory and background_tasks:
+            raise HTTPException(
+                status_code=429,
+                detail="Another background job is running. Try again when it finishes.",
+                headers={"Retry-After": "10"},
+            )
         try:
             run = scheduled_skills.dispatch(schedule_id, user["id"])
             launch(

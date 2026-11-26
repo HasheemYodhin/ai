@@ -895,3 +895,26 @@ def test_stale_scheduler_poll_does_not_dispatch_same_occurrence_twice(store):
         ]
         == "completed"
     )
+
+
+def test_scheduled_skills_keep_wall_time_across_daylight_saving(store):
+    from datetime import datetime, timezone
+
+    def epoch(iso):
+        return int(
+            datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).timestamp() * 1000
+        )
+
+    schedules = ScheduledSkillService(store)
+    winter = schedules._next_run(
+        "daily", epoch("2026-01-01T00:00"), None, "08:00", None, "America/New_York"
+    )
+    summer = schedules._next_run(
+        "daily", epoch("2026-07-01T00:00"), None, "08:00", None, "America/New_York"
+    )
+    assert winter == epoch("2026-01-01T13:00")
+    assert summer == epoch("2026-07-01T12:00")
+    monday = schedules._next_run(
+        "weekly", epoch("2026-11-29T00:00"), None, "08:00", [0], "Asia/Kolkata"
+    )
+    assert monday == epoch("2026-11-30T02:30")

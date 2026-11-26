@@ -154,7 +154,7 @@ def _parse_zip_document_member(
             return "", bytes_read
         sections = DocumentParser(
             max_file_size_mb=MAX_ZIP_MEMBER_BYTES // (1024 * 1024),
-        ).parse_file(tmp_path)
+        ).parse_file(tmp_path, label_pdf_pages=True)
         pieces: list[str] = []
         remaining = char_limit
         for section in sections:
@@ -281,7 +281,9 @@ def extract_document_bytes(name: str, content: bytes) -> str:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
-        sections = DocumentParser(max_file_size_mb=10).parse_file(tmp_path)
+        sections = DocumentParser(max_file_size_mb=10).parse_file(
+            tmp_path, label_pdf_pages=True
+        )
     except Exception as exc:
         raise ValueError(f'Could not read "{name}": {exc}') from exc
     finally:
@@ -350,7 +352,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
             raise ValueError(
                 f'Unsupported document type for "{name}". Supported: {supported}.'
             )
-        sections = DocumentParser(max_file_size_mb=100).parse_file(tmp_path)
+        sections = DocumentParser(max_file_size_mb=100).parse_file(
+            tmp_path, label_pdf_pages=True
+        )
     except ValueError:
         raise
     except Exception as exc:

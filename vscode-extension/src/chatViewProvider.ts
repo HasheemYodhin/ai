@@ -1067,14 +1067,16 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
       if (response.status === 401) {
         vscode.window.showWarningMessage(
-          'Dabba: API key was rejected (401). Set a new key?',
-          'Set API Key',
+          'Dabba: your session or API key is missing or expired.',
+          'Sign in', 'Set API Key',
         ).then((choice) => {
-          if (choice === 'Set API Key') {
+          if (choice === 'Sign in') {
+            vscode.commands.executeCommand('dabba.signIn');
+          } else if (choice === 'Set API Key') {
             vscode.commands.executeCommand('dabba.setApiKey');
           }
         });
-        return { kind: 'http', message: 'Authentication failed (401) — API key was rejected or missing.' };
+        return { kind: 'http', message: 'Dabba sign-in is missing or expired. Sign in again to continue.' };
       }
       if (!response.ok || !response.body) {
         return { kind: 'http', message: `Server error ${response.status}.` };

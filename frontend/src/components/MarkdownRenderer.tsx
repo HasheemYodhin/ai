@@ -270,7 +270,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
 
   const executionPanel = !canRun && showRunReason ? (
     <p role="status" className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
-      {runDisabledReason}. Python snippets can run in a supported browser. Other runtimes require the owner's local server.
+      {runDisabledReason}. Python snippets can run in a supported browser. Scripts that install software or access local files need your own terminal. Other runtimes require the owner's local server.
     </p>
   ) : canRun && (stdinOpen || result || runError) && (
     <div className="border-t border-border dark:border-border-dark bg-gray-950 text-gray-100">

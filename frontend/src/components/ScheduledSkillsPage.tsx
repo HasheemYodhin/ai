@@ -6,16 +6,14 @@ import { useSettings } from '@/hooks/useSettings'
 import { useSkills } from '@/hooks/useSkills'
 import { dailyWordsInstructions, WORD_COUNTS, WORD_LEVELS, type WordLevel } from '@/lib/dailyWords'
 import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
-import { localTimeToUtc, utcTimeToLocal } from '@/lib/localTime'
 import { cn } from '@/lib/utils'
 import type { ScheduleCadence, ScheduledSkill, ScheduledSkillRun } from '@/types'
 
 const MarkdownRenderer = lazy(loadMarkdownRenderer)
 
-// The server stores times in UTC; show and take them in the person's own time.
 function cadenceLabel(schedule: ScheduledSkill) {
   if (schedule.cadence === 'interval') return `Every ${schedule.intervalMinutes} minutes`
-  const local = utcTimeToLocal(schedule.timeOfDay ?? '09:00').time
+  const local = `${schedule.timeOfDay ?? '09:00'} ${schedule.timeZone ?? 'UTC'}`
   if (schedule.cadence === 'daily') return `Daily at ${local}`
   return `Weekly at ${local}`
 }
@@ -42,6 +40,7 @@ export function ScheduledSkillsPage() {
   const [model, setModel] = useState('')
   const [cadence, setCadence] = useState<ScheduleCadence>('daily')
   const [time, setTime] = useState('09:00')
+  const [timeZone, setTimeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC')
   const [interval, setIntervalValue] = useState(60)
   const [error, setError] = useState('')
   const [busyId, setBusyId] = useState('')
@@ -107,14 +106,13 @@ export function ScheduledSkillsPage() {
     if (!name.trim() || !instructions.trim()) return
     setBusyId('create'); setError('')
     try {
-      const utc = cadence === 'interval' ? null : localTimeToUtc(time)
       const created = await apiClient.createScheduledSkill({
         name: name.trim(), skillName: selectedSkill?.name ?? name.trim(), instructions: instructions.trim(),
         model: model || null,
         cadence, intervalMinutes: cadence === 'interval' ? interval : null,
-        timeOfDay: utc?.time ?? null,
-        // Weekly runs on Monday in the person's time, which can be Sunday or Tuesday in UTC.
-        weekdays: cadence === 'weekly' ? [(((utc?.dayShift ?? 0) % 7) + 7) % 7] : [],
+        timeOfDay: cadence === 'interval' ? null : time,
+        timeZone: cadence === 'interval' ? 'UTC' : timeZone.trim(),
+        weekdays: cadence === 'weekly' ? [0] : [],
         enabled: true,
       })
       setSchedules(previous => [created, ...previous]); setName(''); setInstructions(''); setSkillId('')
@@ -190,7 +188,13 @@ export function ScheduledSkillsPage() {
             <select value={cadence} onChange={event => setCadence(event.target.value as ScheduleCadence)} aria-label="How often" className="glass-input rounded-lg px-2 py-2 text-xs text-text-primary dark:text-text-dark-primary"><option value="interval">Interval</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select>
             {cadence === 'interval' ? <input type="number" min={5} value={interval} onChange={event => setIntervalValue(Number(event.target.value))} aria-label="Minutes" className="glass-input rounded-lg px-3 py-2 text-xs text-text-primary dark:text-text-dark-primary" /> : <input type="time" value={time} onChange={event => setTime(event.target.value)} aria-label="Time of day" className="glass-input rounded-lg px-3 py-2 text-xs text-text-primary dark:text-text-dark-primary" />}
           </div>
-          {cadence !== 'interval' && <p className="-mt-1 text-[10px] text-text-tertiary">Your local time.</p>}
+          {cadence !== 'interval' && (
+            <label className="block text-xs">
+              Time zone
+              <input aria-label="Schedule time zone" value={timeZone} onChange={event => setTimeZone(event.target.value)} className={fieldClass} placeholder="Asia/Kolkata" />
+            </label>
+          )}
+          <p className="text-[10px] text-text-tertiary">After downtime, Dabba runs a missed schedule once, then resumes its regular cadence.</p>
           <button disabled={!name.trim() || !instructions.trim() || busyId === 'create'} onClick={() => void create()} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"><Plus className="h-3.5 w-3.5" /> Create schedule</button>
           {error && <p role="alert" className="text-xs text-red-500">{error}</p>}
         </div>

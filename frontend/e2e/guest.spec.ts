@@ -66,3 +66,49 @@ test('a failed reply can be retried without repeating the question', async ({ pa
   await expect(page.getByText('Recovered answer')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText('Hello there', { exact: true })).toHaveCount(1)
 })
+
+test('guest transcript is saved only after accepting the import', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('dabba-guest-chat')) {
+      localStorage.setItem('dabba-guest-chat', JSON.stringify([
+        { role: 'user', content: 'Guest question' },
+        { role: 'assistant', content: 'Guest answer' },
+      ]))
+    }
+  })
+  const saved: unknown[] = []
+  await page.route('**/v1/**', async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path === '/v1/guest/status') return route.fulfill({ json: { available: true, limit: 5, remaining: 4 } })
+    if (path === '/v1/platform/identity/signup') {
+      return route.fulfill({ status: 201, json: {
+        token: 'fixture-session',
+        user: { id: 'u1', name: 'Guest Test', email: 'guest@example.test', role: 'member', createdAt: 1, updatedAt: 1 },
+      } })
+    }
+    if (path === '/v1/conversations') return route.fulfill({ json: { conversations: [] } })
+    if (path.startsWith('/v1/conversations/') && request.method() === 'PUT') {
+      saved.push(request.postDataJSON())
+      return route.fulfill({ json: { ok: true, revision: 1 } })
+    }
+    return route.fulfill({ json: {} })
+  })
+  await page.goto('/try')
+  await page.getByRole('button', { name: 'Sign up', exact: true }).click()
+  await page.getByLabel('Name', { exact: true }).fill('Guest Test')
+  await page.getByLabel('Email', { exact: true }).fill('guest@example.test')
+  await page.getByLabel('Password', { exact: true }).fill('test-password')
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+  const importChat = page.getByRole('button', { name: 'Import guest chat' })
+  await expect(importChat).toBeEnabled()
+  expect(saved).toHaveLength(0)
+  await importChat.click()
+  await expect.poll(() => saved).toEqual([expect.objectContaining({
+    userId: 'u1',
+    messages: [
+      expect.objectContaining({ role: 'user', content: 'Guest question' }),
+      expect.objectContaining({ role: 'assistant', content: 'Guest answer' }),
+    ],
+  })])
+})

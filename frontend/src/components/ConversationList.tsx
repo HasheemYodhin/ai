@@ -27,7 +27,7 @@ interface ConversationListProps {
   runningConversationIds: string[]
   /** Controlled from the sidebar — its search box sits right under "New Chat" now, not in this list. */
   search: string
-  onSelect: (id: string) => void
+  onSelect: (id: string, messageId?: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onTogglePin: (id: string) => void
@@ -50,14 +50,14 @@ export function ConversationList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null)
-  const [searchResults, setSearchResults] = useState<{ query: string; matches: Map<string, string | null> } | null>(null)
+  const [searchResults, setSearchResults] = useState<{ query: string; matches: Map<string, { snippet: string | null; messageId?: string | null }> } | null>(null)
   const query = search.trim().toLowerCase()
   useEffect(() => {
     if (!query) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
       void apiClient.searchConversations(query.slice(0, 120), controller.signal).then(matches => {
-        if (!controller.signal.aborted) setSearchResults({ query, matches: new Map(matches.map(match => [match.id, match.snippet])) })
+        if (!controller.signal.aborted) setSearchResults({ query, matches: new Map(matches.map(match => [match.id, match])) })
       }).catch(() => {})
     }, 250)
     return () => { window.clearTimeout(timer); controller.abort() }
@@ -89,8 +89,8 @@ export function ConversationList({
 
   const handleSelect = useCallback((id: string) => {
     setConfirmDelete(null)
-    onSelect(id)
-  }, [onSelect])
+    onSelect(id, matches?.get(id)?.messageId ?? undefined)
+  }, [onSelect, matches])
 
   const startRename = useCallback((e: React.MouseEvent, conv: Conversation) => {
     e.stopPropagation()
@@ -169,7 +169,7 @@ export function ConversationList({
                       ) : (
                         <>
                           <p className="text-[13px] leading-5 font-medium truncate">{truncate(conv.title, 40)}</p>
-                          {matches?.get(conv.id) && <p className="truncate text-[11px] text-text-tertiary">{matches.get(conv.id)}</p>}
+                          {matches?.get(conv.id)?.snippet && <p className="truncate text-[11px] text-text-tertiary">{matches.get(conv.id)?.snippet}</p>}
                         </>
                       )}
                     </div>

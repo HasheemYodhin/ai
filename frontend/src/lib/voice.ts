@@ -21,7 +21,15 @@ export async function startRecording(): Promise<VoiceRecorder> {
 
   if (typeof MediaRecorder === 'undefined') throw new Error('Audio recording is not supported in this browser')
 
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(error => {
+    if (error instanceof DOMException && error.name === 'NotAllowedError') {
+      throw new Error('Allow microphone access in your browser, then try again.')
+    }
+    if (error instanceof DOMException && error.name === 'NotFoundError') {
+      throw new Error('Connect or enable a microphone, then try again.')
+    }
+    throw error
+  })
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : MediaRecorder.isTypeSupported('audio/webm')

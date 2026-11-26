@@ -447,6 +447,7 @@ CREATE TABLE IF NOT EXISTS scheduled_skills (
     cadence TEXT NOT NULL,
     interval_minutes INTEGER,
     time_of_day TEXT,
+    time_zone TEXT NOT NULL DEFAULT 'UTC',
     weekdays_json TEXT NOT NULL DEFAULT '[]',
     enabled INTEGER NOT NULL DEFAULT 1,
     next_run_at INTEGER,
@@ -497,7 +498,10 @@ class PlatformStore:
     # Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS does
     # not touch a table that already exists, so databases created earlier get
     # these added here. (table, column, SQL type); names are constants.
-    _ADDED_COLUMNS = (("scheduled_skills", "model", "TEXT"),)
+    _ADDED_COLUMNS = (
+        ("scheduled_skills", "model", "TEXT"),
+        ("scheduled_skills", "time_zone", "TEXT NOT NULL DEFAULT 'UTC'"),
+    )
 
     def initialize(self) -> None:
         with self._lock, self.connect() as conn:

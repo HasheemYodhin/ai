@@ -149,3 +149,20 @@ conversations, downloads of an artifact and an original document, and
 decryption of a saved provider key. Record the oldest missing change and the
 time it took to restore. Keep the existing production disk available during
 a restore or rollback.
+
+
+### 512 MB Render services
+
+Set `DABBA_LOW_MEMORY=true` on an existing Render service. The Blueprint includes
+it for services created or synchronized from `render.yaml`. Keep one API worker
+and use hosted models or the built-in rule-based model. Browser Python and
+browser speech fallbacks avoid loading local interpreter and speech models in the
+API process.
+
+This profile admits two interactive generation requests at a time, with one
+active generation per signed-in account. It also admits one document or audio
+request at a time and runs background jobs one at a time. An occupied slot returns
+HTTP 429 with a retry hint. The profile accepts multipart uploads up to 26 MiB
+including request overhead and transcription request bodies up to 9 MiB.
+The profile reduces concurrency and payload pressure. Check memory in the Render
+dashboard under your actual workbook, PDF, and connector workloads.

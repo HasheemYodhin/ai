@@ -134,7 +134,7 @@ def test_search_matches_message_text_only_in_the_callers_account(client):
     _save(client, owner_headers, owner, "search-chat", MESSAGES)
     path = "/v1/conversations/search?q=hello"
     result = client.get(path, headers=owner_headers).json()["matches"]
-    assert result == [{"id": "search-chat", "snippet": "hello"}]
+    assert result == [{"id": "search-chat", "snippet": "hello", "messageId": "m2"}]
     assert client.get(path, headers=other_headers).json()["matches"] == []
 
 

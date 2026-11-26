@@ -80,6 +80,8 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const selectedModel = models.find(model => model.id === localSettings.model)
   const outputLimit = Math.min(32768, selectedModel?.maxOutputTokens ?? 32768)
   const [connectionCheck, setConnectionCheck] = useState<{ url: string; message: string } | null>(null)
+  const [connectorChecks, setConnectorChecks] = useState<Record<string, string>>({})
+  const [connectorBeingTested, setConnectorBeingTested] = useState<string | null>(null)
   const [checkingConnection, setCheckingConnection] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [isSavedAlert, setIsSavedAlert] = useState(false)
@@ -102,6 +104,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   }
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
   const [revealedKeys, setRevealedKeys] = useState<Record<string, boolean>>({})
+  const [keyChecks, setKeyChecks] = useState<Record<string, string>>({})
   const [keyBusy, setKeyBusy] = useState<string | null>(null)
   const [keySaveError, setKeySaveError] = useState<string | null>(null)
   const [keyPromptModel, setKeyPromptModel] = useState<ModelInfo | null>(null)
@@ -127,7 +130,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Usage and chats live on the server, so load them when the tab is opened.
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
   const [usageError, setUsageError] = useState<string | null>(null)
-  const [dataBusy, setDataBusy] = useState<'export' | 'clear' | null>(null)
+  const [dataBusy, setDataBusy] = useState<'export' | 'profile-export' | 'clear' | null>(null)
   const [dataError, setDataError] = useState<string | null>(null)
   useEffect(() => {
     if (!isOpen || activeTab !== 'usage' || !currentUser) return
@@ -190,10 +193,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setKeySaveError(null)
     try {
       await apiClient.setProviderKey(provider, value)
+      setKeyChecks(previous => ({ ...previous, [provider]: '' }))
       setKeyInputs(prev => ({ ...prev, [provider]: '' }))
       reloadKeys()
     } catch (err) {
       setKeySaveError((err as Error).message || 'Failed to save key')
+    } finally {
+      setKeyBusy(null)
+    }
+  }
+
+  const handleTestKey = async (provider: string) => {
+    setKeyBusy(provider)
+    setKeySaveError(null)
+    try {
+      const result = await apiClient.testProviderKey(provider)
+      setKeyChecks(previous => ({ ...previous, [provider]: `Verified with ${modelDisplayName(result.model)} · ${new Date(result.verifiedAt).toLocaleString()}` }))
+    } catch (error) {
+      setKeySaveError(error instanceof Error ? error.message : 'Key check failed')
     } finally {
       setKeyBusy(null)
     }
@@ -205,6 +222,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     setKeySaveError(null)
     try {
       await apiClient.deleteProviderKey(provider)
+      setKeyChecks(previous => ({ ...previous, [provider]: '' }))
       reloadKeys()
     } catch (err) {
       setKeySaveError((err as Error).message || 'Failed to remove key')
@@ -271,6 +289,18 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }
 
+  const checkConnector = async (name: string) => {
+    setConnectorBeingTested(name)
+    try {
+      const result = await apiClient.testMcpConnection(name)
+      setConnectorChecks(previous => ({ ...previous, [name]: `Responded ${new Date(result.verifiedAt).toLocaleString()}` }))
+    } catch (error) {
+      setConnectorChecks(previous => ({ ...previous, [name]: error instanceof Error ? error.message : 'Connector check failed.' }))
+    } finally {
+      setConnectorBeingTested(null)
+    }
+  }
+
   const selectModel = (model: ModelInfo) => {
     setLocalSettings(previous => {
       if (previous.model === model.id) return previous
@@ -297,6 +327,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       URL.revokeObjectURL(url)
     } catch (err) {
       setDataError((err as Error).message || 'Export failed')
+    } finally {
+      setDataBusy(null)
+    }
+  }
+
+  const handleExportProfile = async () => {
+    setDataBusy('profile-export')
+    setDataError(null)
+    try {
+      const [preferences, usage] = await Promise.all([apiClient.listMemories('preference'), apiClient.fetchUsage()])
+      const url = URL.createObjectURL(new Blob([JSON.stringify({ preferences, usage }, null, 2)], { type: 'application/json' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `dabba-preferences-usage-${Date.now()}.json`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : 'Could not export preferences and usage')
     } finally {
       setDataBusy(null)
     }
@@ -814,9 +862,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             'text-xs font-semibold px-1.5 py-0.5 rounded uppercase',
                             hasKey ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-surface-tertiary dark:bg-surface-dark text-text-tertiary'
                           )}>
-                            {hasKey ? 'Configured · unverified' : 'Not configured'}
+                            {hasKey ? (keyChecks[provider] ? 'Verified' : 'Configured · unverified') : 'Not configured'}
                           </span>
                         </div>
+                        {hasKey && (
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-text-tertiary">
+                            <button type="button" onClick={() => void handleTestKey(provider)} disabled={keyBusy !== null}
+                              title="Uses one short model request" className="font-semibold text-accent underline disabled:opacity-50">Test key</button>
+                            {keyChecks[provider] && <span role="status">{keyChecks[provider]}</span>}
+                          </div>
+                        )}
                         <div className="flex items-center gap-1.5">
                           <div className="relative flex-1">
                             <input
@@ -947,6 +1002,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           {s.checkedAt ? ` · Checked ${new Date(s.checkedAt).toLocaleTimeString()}` : ''}
                         </p>
                         {s.message && <p className="mt-1 text-xs text-text-secondary">{s.message}</p>}
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                          <button type="button" onClick={() => void checkConnector(s.name)} disabled={connectorBeingTested !== null || !(s.processRunning ?? s.connected)}
+                            className="font-semibold text-accent underline disabled:opacity-50">Test connection</button>
+                          {connectorChecks[s.name] && <span role="status">{connectorChecks[s.name]}</span>}
+                        </div>
                         {s.tools?.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
                             {s.tools.map(t => (
@@ -1174,6 +1234,15 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   >
                     {dataBusy === 'export' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                     Export Conversations (.json)
+                  </button>
+                </div>
+
+                <div className="space-y-2 rounded-2xl border border-border bg-surface-secondary p-4 dark:border-border-dark dark:bg-surface-dark-tertiary">
+                  <h4 className="text-xs font-semibold">Preferences and usage</h4>
+                  <p className="text-xs text-text-secondary">Download saved account preferences and the current chat usage summary as JSON.</p>
+                  <button type="button" onClick={() => void handleExportProfile()} disabled={dataBusy !== null}
+                    className="text-xs font-semibold text-accent underline disabled:opacity-50">
+                    {dataBusy === 'profile-export' ? 'Exporting…' : 'Export preferences and usage'}
                   </button>
                 </div>
 

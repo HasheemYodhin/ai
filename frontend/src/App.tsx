@@ -11,7 +11,7 @@ import { ChatWindow } from '@/components/ChatWindow'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
 import { LegalPage, NotFoundPage } from '@/components/PublicPages'
-import { GuestChatPage } from '@/components/GuestChatPage'
+import { GuestChatPage, dismissGuestImport, readPendingGuestImport } from '@/components/GuestChatPage'
 import { LandingPage } from '@/components/LandingPage'
 import { ProjectsPage } from '@/components/ProjectsPage'
 import { AgentsPage } from '@/components/AgentsPage'
@@ -205,8 +205,36 @@ function ChatApp() {
     setView('chat')
   }, [setCurrentId, setMessages])
 
-  const handleSelectConversation = useCallback((id: string) => {
-    if (id === currentId) return
+  const [pendingGuestImport, setPendingGuestImport] = useState(readPendingGuestImport)
+  const closeGuestImport = () => {
+    dismissGuestImport()
+    setPendingGuestImport([])
+  }
+
+  const importGuestChat = () => {
+    if (!pendingGuestImport.length || isHistoryLoading) return
+    if (currentId && messages.length && !isTemporaryChat) saveConversation(messages, currentId)
+    const imported = pendingGuestImport.map(message => ({
+      id: crypto.randomUUID(),
+      role: message.role,
+      content: message.content,
+      timestamp: Date.now(),
+    }))
+    const id = createConversation(imported)
+    setMessages(imported, id)
+    setIsTemporaryChat(false)
+    setView('chat')
+    closeGuestImport()
+  }
+
+  const [messageJump, setMessageJump] = useState<{ id: string } | null>(null)
+  const clearMessageJump = useCallback(() => setMessageJump(null), [])
+  const handleSelectConversation = useCallback((id: string, messageId?: string) => {
+    if (id === currentId) {
+      if (messageId) setMessageJump({ id: messageId })
+      return
+    }
+    setMessageJump(null)
 
     if (currentId && messages.length > 0 && !isTemporaryChat) {
       saveConversation(messages, currentId)
@@ -218,6 +246,7 @@ function ChatApp() {
       // Copy the array so React always commits the selected conversation,
       // even if its message array was previously used by the chat view.
       setMessages([...conv.messages], id)
+      if (messageId) setMessageJump({ id: messageId })
       setIsTemporaryChat(false)
     })
   }, [currentId, isTemporaryChat, loadConversationAsync, messages, saveConversation, setMessages])
@@ -322,8 +351,8 @@ function ChatApp() {
         view={view}
         onChangeView={setView}
         onToggle={toggleSidebar}
-        onSelect={(id) => {
-          handleSelectConversation(id)
+        onSelect={(id, messageId) => {
+          handleSelectConversation(id, messageId)
           setView('chat')
           closeMobileSidebar()
         }}
@@ -374,6 +403,13 @@ function ChatApp() {
           </div>
         )}
 
+        {pendingGuestImport.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-xs dark:border-border-dark">
+            <span>Save the guest conversation from this browser to your account?</span>
+            <button type="button" onClick={importGuestChat} disabled={isHistoryLoading} className="text-accent underline disabled:opacity-50">Import guest chat</button>
+            <button type="button" onClick={closeGuestImport} className="text-text-secondary">Dismiss</button>
+          </div>
+        )}
         {(saveConflictCopy || deleteError) && (
           <div role="alert" className="px-4 py-2 text-xs text-text-secondary">
             {deleteError}
@@ -418,6 +454,8 @@ function ChatApp() {
             onApprovalDecision={respondToApproval}
             pendingPlanApproval={pendingPlanApproval}
             onPlanApprovalDecision={respondToPlanApproval}
+            messageJump={messageJump}
+            onMessageJumpComplete={clearMessageJump}
             conversationTitle={isTemporaryChat ? undefined : getConversation(currentId)?.title}
           />
         </div>

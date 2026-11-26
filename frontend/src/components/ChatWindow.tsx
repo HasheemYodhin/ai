@@ -35,6 +35,8 @@ interface ChatWindowProps {
   onPlanApprovalDecision: (approved: boolean) => void
   /** The conversation's saved title, the same one the sidebar shows. */
   conversationTitle?: string
+  messageJump?: { id: string } | null
+  onMessageJumpComplete?: () => void
 }
 
 const FOLLOW_UPS: { label: string; icon: LucideIcon; prompt: string }[] = [
@@ -58,7 +60,7 @@ export function ChatWindow({
   messages, isLoading, onSend, onRunAgentMode, onGenerateImage, onStop, onClear, onEdit, onRegenerate,
   projects, currentProjectId, onAddToProject, initialMode, onInitialModeConsumed, isTemporary,
   pendingApproval, onApprovalDecision, pendingPlanApproval, onPlanApprovalDecision,
-  conversationTitle,
+  conversationTitle, messageJump, onMessageJumpComplete,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -84,10 +86,10 @@ export function ChatWindow({
   // Keep pinned to the bottom as tokens stream in. rAF coalesces the many
   // rapid message updates into one instant scroll per frame.
   useEffect(() => {
-    if (!isAutoScroll) return
+    if (!isAutoScroll || (messageJump && messages.some(message => message.id === messageJump.id))) return
     const id = requestAnimationFrame(() => scrollToBottom(false))
     return () => cancelAnimationFrame(id)
-  }, [messages, isAutoScroll, scrollToBottom])
+  }, [messages, isAutoScroll, scrollToBottom, messageJump])
 
   const handleScroll = useCallback(() => {
     const el = containerRef.current
@@ -126,7 +128,20 @@ export function ChatWindow({
   )
 
   const [visibleCount, setVisibleCount] = useState(100)
-  const hiddenCount = Math.max(0, messages.length - visibleCount)
+  const jumpIndex = messageJump ? messages.findIndex(message => message.id === messageJump.id) : -1
+  const hiddenCount = Math.max(0, Math.min(messages.length - visibleCount, jumpIndex < 0 ? messages.length : jumpIndex))
+  useEffect(() => {
+    if (!messageJump || jumpIndex < 0) return
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(`message-${messageJump.id}`)
+      target?.scrollIntoView({ block: 'center' })
+      target?.focus({ preventScroll: true })
+      setVisibleCount(current => Math.max(current, messages.length - jumpIndex))
+      setIsAutoScroll(false)
+      onMessageJumpComplete?.()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [messageJump, jumpIndex, messages.length, onMessageJumpComplete])
   const [revealingId, setRevealingId] = useState<string | null>(null)
   const handleRevealChange = useCallback((id: string, revealing: boolean) => {
     setRevealingId(current => revealing ? id : current === id ? null : current)
@@ -215,14 +230,15 @@ export function ChatWindow({
             </button>
           )}
           {messages.slice(hiddenCount).map((msg) => (
+            <div key={msg.id} id={`message-${msg.id}`} tabIndex={-1} className="rounded-lg focus-visible:outline focus-visible:outline-accent">
             <MessageBubble
-              key={msg.id}
               message={msg}
               isStreaming={isStreaming && msg.id === messages[messages.length - 1].id}
               onRevealChange={handleRevealChange}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
             />
+            </div>
           ))}
           {followUpRow}
           {lastMessage?.interrupted && !isLoading && (

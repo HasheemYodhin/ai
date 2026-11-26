@@ -90,9 +90,17 @@ class ApprovalRequest(BaseModel):
 VALID_KEY_PROVIDERS = {"anthropic", "openai", "google", "nvidia", "huggingface"}
 
 
+class VerifyApiKeyRequest(BaseModel):
+    provider: str = Field(min_length=1, max_length=180)
+
+
 class SetApiKeyRequest(BaseModel):
     provider: str
     key: str
+
+
+class VerifyMcpRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
 
 
 class AddMcpServerRequest(BaseModel):
@@ -1336,6 +1344,67 @@ def create_agent_router() -> APIRouter:
         proxy.cli_config.save()
         return {"provider": provider, "hasKey": True}
 
+    @router.post("/v1/agent/keys/test")
+    async def test_api_key(req: VerifyApiKeyRequest):
+        registry = _get_agent_proxy()._get_provider_registry()
+        configured = registry.config.api_keys or {}
+        provider = req.provider.casefold()
+        key_name = next(
+            (name for name in configured if name.casefold() == provider), None
+        )
+        if not key_name or not configured[key_name]:
+            raise HTTPException(
+                status_code=400, detail="Save a provider key before testing it."
+            )
+        model = next(
+            (
+                item
+                for item in registry.list_all_models()
+                if (
+                    item.provider.casefold() == provider
+                    or item.id.casefold() == provider
+                )
+                and item.requires_key
+                and not item.supports_vision
+                and registry.resolve_api_key(item.id)[0] == configured[key_name]
+            ),
+            None,
+        )
+        if model is None:
+            model = next(
+                (
+                    item
+                    for item in registry.list_all_models()
+                    if (
+                        item.provider.casefold() == provider
+                        or item.id.casefold() == provider
+                    )
+                    and item.requires_key
+                    and registry.resolve_api_key(item.id)[0] == configured[key_name]
+                ),
+                None,
+            )
+        if model is None:
+            raise HTTPException(
+                status_code=422, detail="No catalog model can test this saved key."
+            )
+        try:
+            reply = await asyncio.to_thread(
+                registry._chat_once,
+                [{"role": "user", "content": "Reply OK."}],
+                model.id,
+                effort="low",
+                max_tokens=16,
+            )
+            if not reply or not reply.strip():
+                raise ValueError("No text returned")
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail="The model could not answer the test. Check the key, provider access, or availability.",
+            ) from None
+        return {"model": model.id, "verifiedAt": int(time.time() * 1000)}
+
     @router.delete("/v1/agent/keys/{provider:path}")
     async def delete_api_key(provider: str):
         provider = provider.strip()
@@ -1399,6 +1468,23 @@ def create_agent_router() -> APIRouter:
                 }
             )
         return {"servers": servers}
+
+    @router.post("/v1/mcp/test")
+    async def test_mcp_connection(req: VerifyMcpRequest):
+        proxy = _get_agent_proxy()
+        proxy._get_registry()
+        if req.name not in proxy.mcp_manager.status()["servers"]:
+            raise HTTPException(
+                status_code=404, detail="This connector has no active MCP session."
+            )
+        try:
+            await asyncio.to_thread(proxy.mcp_manager.ping, req.name)
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail="The connector did not respond to the connection test.",
+            ) from None
+        return {"verifiedAt": int(time.time() * 1000)}
 
     @router.post("/v1/mcp/reload")
     async def mcp_reload():

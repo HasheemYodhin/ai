@@ -862,6 +862,24 @@ def create_app(
     except Exception:
         telemetry = None
 
+    low_memory = os.getenv("DABBA_LOW_MEMORY", "").lower() in {"1", "true"}
+    active_work = {"generation": 0, "upload": 0}
+    active_generation_users: set[str] = set()
+    generation_paths = {
+        "/v1/chat/completions",
+        "/v1/chat/completions/stream",
+        "/v1/guest/chat",
+        "/v1/agent",
+        "/v1/images/generations",
+        "/v1/agent/keys/test",
+    }
+    upload_limits = {
+        "/v1/documents/extract": 36 * 1024 * 1024,
+        "/v1/documents/extract-upload": 26 * 1024 * 1024,
+        "/v1/transcribe": 9 * 1024 * 1024,
+        "/v1/speech": 64 * 1024,
+    }
+
     class ApiMiddleware:
         def __init__(self, app):
             self.app = app
@@ -919,8 +937,74 @@ def create_app(
                 rejected = await protect_api(request)
                 if rejected is not None:
                     await rejected(scope, receive, trace_response)
-                else:
+                    return
+                path = scope["path"].rstrip("/")
+                group = None
+                if low_memory and request.method == "POST":
+                    if path in generation_paths:
+                        group = "generation"
+                    elif path in upload_limits:
+                        group = "upload"
+                if not group:
                     await self.app(scope, receive, trace_response)
+                    return
+
+                user_id = getattr(request.state, "dabba_user", {}).get("id")
+                generation_user = user_id if group == "generation" else None
+                limit = 2 if group == "generation" else 1
+                if (
+                    active_work[group] >= limit
+                    or generation_user in active_generation_users
+                ):
+                    busy = JSONResponse(
+                        {
+                            "detail": "Dabba is busy. Wait for the current request to finish and retry."
+                        },
+                        status_code=429,
+                        headers={"Retry-After": "3"},
+                    )
+                    await busy(scope, receive, trace_response)
+                    return
+
+                body_limit = upload_limits.get(path)
+                content_length = request.headers.get("content-length", "")
+                if (
+                    body_limit
+                    and content_length.isdecimal()
+                    and int(content_length) > body_limit
+                ):
+                    too_large = JSONResponse(
+                        {
+                            "detail": "The upload exceeds this server's size limit. Try a smaller file or shorter recording."
+                        },
+                        status_code=413,
+                    )
+                    await too_large(scope, receive, trace_response)
+                    return
+
+                read_bytes = 0
+
+                async def receive_bounded():
+                    nonlocal read_bytes
+                    message = await receive()
+                    if body_limit and message["type"] == "http.request":
+                        read_bytes += len(message.get("body", b""))
+                        if read_bytes > body_limit:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="The upload exceeds this server's size limit.",
+                            )
+                    return message
+
+                active_work[group] += 1
+                if generation_user:
+                    active_generation_users.add(generation_user)
+                try:
+                    await self.app(scope, receive_bounded, trace_response)
+                finally:
+                    active_work[group] -= 1
+                    if generation_user:
+                        active_generation_users.discard(generation_user)
 
     app.add_middleware(ApiMiddleware)
     app.add_middleware(

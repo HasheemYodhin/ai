@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
 
-// India is UTC+5:30, so a local time and the UTC time sent to the server differ.
+// Store the wall-clock time with its named zone.
 test.use({ timezoneId: 'Asia/Kolkata' })
 
-test('the daily new words quick start creates a schedule in UTC and shows each run\'s result', async ({ page }) => {
+test('the daily new words quick start creates a timezone-aware schedule and shows each run\'s result', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   const models = [{ id: 'm-1', name: 'Test model', provider: 'nvidia', tier: 'low', description: '', has_key: true }]
   let schedules: Record<string, unknown>[] = []
@@ -45,13 +45,14 @@ test('the daily new words quick start creates a schedule in UTC and shows each r
   await page.getByLabel('Words per day').selectOption('5')
   await page.getByRole('button', { name: 'Use this template' }).click()
   await expect(page.getByLabel('Time of day')).toHaveValue('08:00')
+  await page.getByRole('textbox', { name: 'Schedule time zone' }).fill('Asia/Kolkata')
   await page.getByRole('button', { name: 'Create schedule' }).click()
 
-  // 08:00 in India is 02:30 UTC, which is what the server schedules by.
-  await expect.poll(() => created.timeOfDay).toBe('02:30')
+  await expect.poll(() => created.timeOfDay).toBe('08:00')
+  expect(created.timeZone).toBe('Asia/Kolkata')
   expect(created.cadence).toBe('daily')
   expect(String(created.instructions)).toContain('5 new English vocabulary words')
-  await expect(page.getByText('Daily at 08:00')).toBeVisible()
+  await expect(page.getByText(/Daily at 08:00 Asia\/Kolkata/)).toBeVisible()
 
   await page.getByRole('button', { name: /Run now/ }).click()
   await expect(page.getByText(/Working on it/)).toBeVisible()

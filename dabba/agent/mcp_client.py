@@ -267,6 +267,11 @@ class McpClientManager:
                         result = await self._do_connect(exit_stack, payload)
                     elif kind == "call":
                         result = await self._do_call(payload)
+                    elif kind == "ping":
+                        session = self._sessions.get(payload)
+                        if session is None:
+                            raise ValueError("Connector is not connected.")
+                        result = await asyncio.wait_for(session.send_ping(), timeout=5)
                     else:
                         raise ValueError(f"Unknown supervisor request kind: {kind}")
                     result_future.set_result(result)
@@ -410,6 +415,10 @@ class McpClientManager:
     def list_tools(self) -> Dict[str, Dict[str, Any]]:
         """Namespaced tool name -> {server, tool, description, input_schema}."""
         return dict(self._connected_tools)
+
+    def ping(self, name: str) -> None:
+        """Check an existing session without invoking a connector tool."""
+        self._submit("ping", name).result(timeout=6)
 
     def status(self) -> Dict[str, Any]:
         """Summary for display in /mcp — connected servers and their tool counts."""

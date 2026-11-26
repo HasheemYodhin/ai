@@ -125,6 +125,7 @@ export interface ScheduledSkill {
   cadence: ScheduleCadence
   intervalMinutes?: number | null
   timeOfDay?: string | null
+  timeZone?: string
   weekdays: number[]
   enabled: boolean
   nextRunAt?: number | null

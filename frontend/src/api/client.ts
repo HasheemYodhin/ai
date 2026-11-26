@@ -673,6 +673,17 @@ export class ApiClient {
   }
 
   /** Fetch connected MCP servers and their tools. */
+  async testMcpConnection(name: string): Promise<{ verifiedAt: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/mcp/test`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not test the connector')
+    return response.json()
+  }
+
   async fetchMcpStatus(signal?: AbortSignal): Promise<{ servers: McpServer[] }> {
     const response = await fetch(`${this.baseUrl}/v1/mcp/status`, {
       headers: this.getHeaders(),
@@ -722,6 +733,17 @@ export class ApiClient {
     return data.providers ?? []
   }
 
+  async testProviderKey(provider: string): Promise<{ model: string; verifiedAt: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/agent/keys/test`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ provider }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not verify the provider key')
+    return response.json()
+  }
+
   /** Sets a provider API key server-side — same effect as the CLI's `/keys set <provider> <key>`. */
   async setProviderKey(provider: string, key: string): Promise<void> {
     const response = await fetch(`${this.baseUrl}/v1/agent/keys`, {
@@ -769,7 +791,7 @@ export class ApiClient {
     }))
   }
 
-  async searchConversations(query: string, signal: AbortSignal): Promise<{ id: string; snippet: string | null }[]> {
+  async searchConversations(query: string, signal: AbortSignal): Promise<{ id: string; snippet: string | null; messageId?: string | null }[]> {
     const response = await fetch(`${this.baseUrl}/v1/conversations/search?q=${encodeURIComponent(query)}`, {
       headers: this.getPlatformHeaders(),
       signal,

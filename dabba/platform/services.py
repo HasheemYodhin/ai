@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dabba.platform.core import (
     PlatformStore,
@@ -3078,6 +3079,7 @@ class ScheduledSkillService:
         cadence: str = "daily",
         interval_minutes: Optional[int] = None,
         time_of_day: Optional[str] = None,
+        time_zone: str = "UTC",
         weekdays: Optional[list[int]] = None,
         enabled: bool = True,
         next_run_at: Optional[int] = None,
@@ -3086,16 +3088,17 @@ class ScheduledSkillService:
         self._validate(
             name, instructions, cadence, interval_minutes, time_of_day, weekdays
         )
+        self._time_zone(time_zone)
         now, schedule_id = utc_ms(), new_id("schedule")
         next_at = next_run_at or self._next_run(
-            cadence, now, interval_minutes, time_of_day, weekdays
+            cadence, now, interval_minutes, time_of_day, weekdays, time_zone
         )
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO scheduled_skills
                    (id,user_id,name,skill_name,instructions,model,cadence,interval_minutes,
-                    time_of_day,weekdays_json,enabled,next_run_at,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    time_of_day,time_zone,weekdays_json,enabled,next_run_at,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     schedule_id,
                     user_id,
@@ -3106,6 +3109,7 @@ class ScheduledSkillService:
                     cadence,
                     interval_minutes,
                     time_of_day,
+                    time_zone,
                     json_dumps(weekdays or []),
                     int(enabled),
                     next_at,
@@ -3143,6 +3147,7 @@ class ScheduledSkillService:
             "cadence",
             "intervalMinutes",
             "timeOfDay",
+            "timeZone",
             "weekdays",
             "enabled",
             "nextRunAt",
@@ -3158,9 +3163,16 @@ class ScheduledSkillService:
             values["timeOfDay"],
             values["weekdays"],
         )
+        self._time_zone(values["timeZone"])
         if any(
             key in changes
-            for key in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")
+            for key in (
+                "cadence",
+                "intervalMinutes",
+                "timeOfDay",
+                "timeZone",
+                "weekdays",
+            )
         ):
             values["nextRunAt"] = self._next_run(
                 values["cadence"],
@@ -3168,11 +3180,12 @@ class ScheduledSkillService:
                 values["intervalMinutes"],
                 values["timeOfDay"],
                 values["weekdays"],
+                values["timeZone"],
             )
         with self.store.transaction() as conn:
             conn.execute(
                 """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,model=?,cadence=?,
-                   interval_minutes=?,time_of_day=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
+                   interval_minutes=?,time_of_day=?,time_zone=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
                    WHERE id=? AND user_id=?""",
                 (
                     str(values["name"]).strip(),
@@ -3182,6 +3195,7 @@ class ScheduledSkillService:
                     values["cadence"],
                     values["intervalMinutes"],
                     values["timeOfDay"],
+                    values["timeZone"],
                     json_dumps(values["weekdays"] or []),
                     int(values["enabled"]),
                     values["nextRunAt"],
@@ -3216,6 +3230,7 @@ class ScheduledSkillService:
             schedule["intervalMinutes"],
             schedule["timeOfDay"],
             schedule["weekdays"],
+            schedule["timeZone"],
         )
         with self.store.transaction() as conn:
             row = conn.execute(
@@ -3443,21 +3458,32 @@ class ScheduledSkillService:
             raise ValueError("Weekdays must be between 0 and 6")
 
     @staticmethod
+    def _time_zone(name: str) -> ZoneInfo:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, TypeError, ValueError) as exc:
+            raise ValueError("Choose a valid timezone such as Asia/Kolkata") from exc
+
+    @staticmethod
     def _next_run(
         cadence: str,
         after_ms: int,
         interval_minutes: Optional[int],
         time_of_day: Optional[str],
         weekdays: Optional[list[int]],
+        time_zone: str = "UTC",
     ) -> int:
         after = datetime.fromtimestamp(after_ms / 1000, tz=timezone.utc)
         if cadence == "interval":
             return int(
                 (after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000
             )
+        after = after.astimezone(ScheduledSkillService._time_zone(time_zone))
         hour, minute = map(int, (time_of_day or "09:00").split(":"))
-        candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if candidate <= after:
+        candidate = after.replace(
+            hour=hour, minute=minute, second=0, microsecond=0, fold=0
+        )
+        if candidate.timestamp() * 1000 <= after_ms:
             candidate += timedelta(days=1)
         if cadence == "weekly":
             valid = set(weekdays or [0])
@@ -3476,6 +3502,7 @@ class ScheduledSkillService:
             "cadence": row["cadence"],
             "intervalMinutes": row["interval_minutes"],
             "timeOfDay": row["time_of_day"],
+            "timeZone": row["time_zone"],
             "weekdays": json_loads(row["weekdays_json"], []),
             "enabled": bool(row["enabled"]),
             "nextRunAt": row["next_run_at"],

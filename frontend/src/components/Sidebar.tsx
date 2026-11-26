@@ -26,7 +26,7 @@ interface SidebarProps {
   view: SidebarView
   onChangeView: (view: SidebarView) => void
   onToggle: () => void
-  onSelect: (id: string) => void
+  onSelect: (id: string, messageId?: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onTogglePin: (id: string) => void

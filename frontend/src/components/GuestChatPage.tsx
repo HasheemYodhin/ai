@@ -54,6 +54,20 @@ function loadSavedChat(): GuestMessage[] {
   }
 }
 
+const GUEST_IMPORT_KEY = 'dabba-offer-guest-import'
+
+export function readPendingGuestImport(): GuestMessage[] {
+  try {
+    return sessionStorage.getItem(GUEST_IMPORT_KEY) === '1' ? loadSavedChat() : []
+  } catch {
+    return []
+  }
+}
+
+export function dismissGuestImport() {
+  try { sessionStorage.removeItem(GUEST_IMPORT_KEY) } catch { /* browser storage unavailable */ }
+}
+
 interface GuestChatPageProps {
   onLogin: () => void
   onSignup: () => void
@@ -65,6 +79,7 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
   const [messages, setMessages] = useState<GuestMessage[]>(loadSavedChat)
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [copyStatus, setCopyStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [remaining, setRemaining] = useState<number | null>(null)
   const [limit, setLimit] = useState(5)
@@ -149,6 +164,24 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
     void send(prompt, messages.slice(0, lastUser))
   }
 
+  const continueToAccount = (navigate: () => void) => {
+    if (messages.length && !sending) {
+      try { sessionStorage.setItem(GUEST_IMPORT_KEY, '1') } catch { /* browser storage unavailable */ }
+    }
+    navigate()
+  }
+
+  const copyTranscript = async () => {
+    try {
+      await navigator.clipboard.writeText(messages.map(message =>
+        `${message.role === 'user' ? 'You' : 'Dabba'}\n${message.content}`
+      ).join('\n\n'))
+      setCopyStatus('Conversation copied.')
+    } catch {
+      setCopyStatus('Could not copy the conversation. You can select and copy the messages.')
+    }
+  }
+
   const outOfPrompts = remaining === 0
 
   return (
@@ -166,15 +199,20 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={onLogin} className={cn('rounded-lg px-3 py-2 button-sm text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
+          {messages.length > 0 && (
+            <button type="button" disabled={sending} onClick={() => void copyTranscript()}
+              className="rounded-lg px-2 py-2 text-xs text-accent disabled:opacity-50">Copy chat</button>
+          )}
+          <button onClick={() => continueToAccount(onLogin)} className={cn('rounded-lg px-3 py-2 button-sm text-text-secondary hover:text-text-primary dark:text-text-dark-secondary dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
             Log in
           </button>
-          <button onClick={onSignup} className={cn('rounded-lg bg-accent px-3 py-2 button-sm text-white hover:bg-accent-hover active:scale-[0.98] transition-[background-color,transform] duration-300', EASE)}>
+          <button onClick={() => continueToAccount(onSignup)} className={cn('rounded-lg bg-accent px-3 py-2 button-sm text-white hover:bg-accent-hover active:scale-[0.98] transition-[background-color,transform] duration-300', EASE)}>
             Sign up
           </button>
         </div>
       </header>
 
+      {copyStatus && <p role="status" className="px-4 py-1 text-xs text-text-secondary">{copyStatus}</p>}
       {/* Messages */}
       <main id="main" ref={listRef} className="flex-1 overflow-y-auto px-4 py-8 sm:px-6">
         <div className="mx-auto max-w-3xl space-y-6">
@@ -237,7 +275,7 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
         <form onSubmit={handleSubmit} className="mx-auto max-w-3xl">
           {!available ? (
             <p className="rounded-xl border border-border px-4 py-3 text-center body-6 text-text-secondary dark:border-[#272727] dark:text-text-dark-secondary">
-              Free prompts aren't available right now. <button type="button" onClick={onSignup} className="body-4 text-accent">Sign up</button> or <button type="button" onClick={onLogin} className="body-4 text-accent">log in</button> to chat.
+              Free prompts aren't available right now. <button type="button" onClick={() => continueToAccount(onSignup)} className="body-4 text-accent">Sign up</button> or <button type="button" onClick={() => continueToAccount(onLogin)} className="body-4 text-accent">log in</button> to chat.
             </p>
           ) : (
             <div className="flex items-end gap-2 rounded-2xl border border-border bg-surface p-2 focus-within:border-accent dark:border-[#313131] dark:bg-[#181818]">
@@ -279,10 +317,10 @@ export function GuestChatPage({ onLogin, onSignup, onHome }: GuestChatPageProps)
               Create a free account or log in to keep chatting, choose your own models and save your chats.
             </p>
             <div className="mt-6 flex flex-col gap-2">
-              <button onClick={onSignup} className={cn('rounded-lg bg-accent px-3 py-2 button-md text-white hover:bg-accent-hover active:scale-[0.98] transition-[background-color,transform] duration-300', EASE)}>
+              <button onClick={() => continueToAccount(onSignup)} className={cn('rounded-lg bg-accent px-3 py-2 button-md text-white hover:bg-accent-hover active:scale-[0.98] transition-[background-color,transform] duration-300', EASE)}>
                 Create your account
               </button>
-              <button onClick={onLogin} className={cn('rounded-lg px-3 py-2 button-md text-text-secondary hover:bg-surface-tertiary hover:text-text-primary dark:text-text-dark-secondary dark:hover:bg-[#272727] dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
+              <button onClick={() => continueToAccount(onLogin)} className={cn('rounded-lg px-3 py-2 button-md text-text-secondary hover:bg-surface-tertiary hover:text-text-primary dark:text-text-dark-secondary dark:hover:bg-[#272727] dark:hover:text-text-dark-primary transition-colors duration-300', EASE)}>
                 Log in
               </button>
             </div>

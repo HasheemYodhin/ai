@@ -6,6 +6,7 @@ httpx>=0.25,<1
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 PyYAML>=6,<7
+tzdata>=2025.2
 numpy>=1.24,<3
 openai>=1.66,<3  # Responses API
 anthropic>=0.112,<1  # output_config.effort + refusal fallbacks

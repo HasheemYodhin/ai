@@ -223,18 +223,33 @@ def create_conversations_router() -> APIRouter:
             rows = conn.execute(
                 """WITH matches AS (
                        SELECT c.id, c.title, c.updated_at,
-                              (SELECT substr(m.content, max(1, instr(lower(m.content), ?) - 45), 150)
+                              (SELECT json_object(
+                                   'snippet', substr(m.content, max(1, instr(lower(m.content), ?) - 45), 150),
+                                   'messageId', json_extract(c.messages, '$[' || m.position || '].id')
+                               )
                                FROM messages m WHERE m.conversation_id = c.id
                                  AND instr(lower(m.content), ?) > 0
-                               ORDER BY m.position DESC LIMIT 1) AS snippet
+                               ORDER BY m.position DESC LIMIT 1) AS hit
                        FROM conversations c WHERE c.user_id = ?
                    )
-                   SELECT id, snippet FROM matches
-                   WHERE snippet IS NOT NULL OR instr(lower(title), ?) > 0
+                   SELECT id, hit FROM matches
+                   WHERE hit IS NOT NULL OR instr(lower(title), ?) > 0
                    ORDER BY updated_at DESC, id LIMIT ? OFFSET ?""",
                 (needle, needle, user["id"], needle, limit, offset),
             ).fetchall()
-            return {"matches": [dict(row) for row in rows]}
+            return {
+                "matches": [
+                    {
+                        "id": row["id"],
+                        **(
+                            json.loads(row["hit"])
+                            if row["hit"]
+                            else {"snippet": None, "messageId": None}
+                        ),
+                    }
+                    for row in rows
+                ]
+            }
         finally:
             conn.close()
 
