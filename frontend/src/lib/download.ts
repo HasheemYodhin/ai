@@ -1,3 +1,5 @@
+import type { DocumentTemplate } from './documents/templates'
+
 /**
  * Export helpers for chat content.
  *
@@ -119,8 +121,8 @@ export async function downloadPdf(content: string, baseName: string) {
 }
 
 /** A laid out PDF: title, headings, lists, tables, code and page numbers (see documents/pdf.ts). */
-export async function createPdfBlob(content: string, fallbackTitle = ''): Promise<Blob> {
-  return (await import('./documents/pdf')).createPdfBlob(content, fallbackTitle)
+export async function createPdfBlob(content: string, fallbackTitle = '', template?: DocumentTemplate): Promise<Blob> {
+  return (await import('./documents/pdf')).createPdfBlob(content, fallbackTitle, template)
 }
 
 export async function downloadDocx(content: string, baseName: string) {
@@ -129,8 +131,8 @@ export async function downloadDocx(content: string, baseName: string) {
 }
 
 /** A styled Word document: Title, Heading styles, real lists and tables, page numbers (see documents/docx.ts). */
-export async function createDocxBlob(content: string, fallbackTitle = ''): Promise<Blob> {
-  return (await import('./documents/docx')).createDocxBlob(content, fallbackTitle)
+export async function createDocxBlob(content: string, fallbackTitle = '', template?: DocumentTemplate): Promise<Blob> {
+  return (await import('./documents/docx')).createDocxBlob(content, fallbackTitle, template)
 }
 
 /**
@@ -262,10 +264,11 @@ export async function createGeneratedDocument(
   content: string,
   baseName: string,
   format: DocumentFormat,
+  template?: DocumentTemplate,
 ) {
   const creators: Record<DocumentFormat, () => Promise<Blob>> = {
-    pdf: () => createPdfBlob(content, baseName),
-    docx: () => createDocxBlob(content, baseName),
+    pdf: () => createPdfBlob(content, baseName, template),
+    docx: () => createDocxBlob(content, baseName, template),
     md: async () => new Blob([(await import('./documents/parse')).toMarkdownFile(content)], { type: DOCUMENT_MIME_TYPES.md }),
     xlsx: () => createXlsxBlob(content),
     pptx: () => createPptxBlob(content, baseName),

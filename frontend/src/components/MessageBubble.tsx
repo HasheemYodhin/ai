@@ -37,11 +37,13 @@ function formatFileSize(bytes: number) {
 export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate, saved, onSave, onBranch, onRecover, onSourceJump }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isError = message.error
+  const hasFiles = Boolean(message.generatedFiles?.length)
+  const isDocument = Boolean(message.documentRequest || hasFiles)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [stepsOpen, setStepsOpen] = useState(false)
-  const { text: shownContent, revealing } = useSmoothText(message.content, !!isStreaming && message.role !== 'user')
+  const { text: shownContent, revealing } = useSmoothText(hasFiles ? '' : message.content, !!isStreaming && !isUser)
   const writing = !!isStreaming || revealing
   useEffect(() => {
     onRevealChange?.(message.id, writing)
@@ -85,12 +87,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
   // Auto-speak replies to a voice-input turn — feels like an actual voice
   // conversation instead of silently reverting to text once you'd spoken.
   useEffect(() => {
-    if (!isUser && message.viaVoice && !isStreaming && message.content && !hasAutoPlayedRef.current) {
+    if (!isUser && !hasFiles && message.viaVoice && !isStreaming && message.content && !hasAutoPlayedRef.current) {
       hasAutoPlayedRef.current = true
       handleToggleSpeak()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUser, message.viaVoice, isStreaming, message.content])
+  }, [isUser, hasFiles, message.viaVoice, isStreaming, message.content])
 
   useEffect(() => {
     return () => stopSpeakingRef.current?.()
@@ -388,7 +390,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                   </div>
                 )}
 
-                {message.reasoning && (
+                {!isDocument && message.reasoning && (
                   // The expanded text floats over the reply (absolute, scrollable)
                   // instead of pushing the table/code below down ~280px, which
                   // made clicks land on the wrong element.
@@ -403,9 +405,9 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                     <MarkdownRenderer content={shownContent} className={writing ? 'streaming-cursor' : undefined} />
                   </Suspense>
                 ) : isStreaming && !message.isGeneratingImage ? (
-                  <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label="Dabba is thinking">
+                  <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label={isDocument ? 'Preparing files' : 'Dabba is thinking'}>
                     <span className="thinking-dot" />
-                    {streamElapsed >= 6 && (
+                    {isDocument ? <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">Preparing files…</span> : streamElapsed >= 6 && (
                       <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">
                         {streamElapsed >= 20 ? 'Still waiting for the model' : 'Waiting for the model'} · {streamElapsed}s
                       </span>
@@ -413,7 +415,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                   </div>
                 ) : null}
 
-                {!shownContent && isStreaming && !message.isGeneratingImage && streamElapsed >= 15 ? (
+                {!isDocument && !shownContent && isStreaming && !message.isGeneratingImage && streamElapsed >= 15 ? (
                   <p className="mt-1 max-w-md text-xs text-text-tertiary dark:text-text-dark-tertiary">
                     {['high', 'xhigh', 'max'].includes(settings.effort)
                       ? 'High reasoning effort makes large models slower to start. Medium effort is much quicker for everyday questions.'
@@ -507,19 +509,19 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
             </span>
           )}
 
-          {!isEditing && !writing && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
+          {!isEditing && !writing && (message.content || hasFiles || (message.generatedImages?.length ?? 0) > 0) && (
             <div className={cn(
               'flex flex-wrap items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity',
               isUser ? 'flex-row-reverse' : 'flex-row'
             )}>
-              <button
+              {!hasFiles && <button
                 onClick={handleCopy}
                 title={copied ? 'Copied' : 'Copy'}
                 aria-label={copied ? 'Copied' : 'Copy message'}
                 className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
               >
                 {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-              </button>
+              </button>}
               {onSave && (
                 <button type="button" className={cn(messageAction, saved && 'text-accent')} aria-pressed={!!saved}
                   title={saved ? 'Remove saved message' : 'Save message'} aria-label={saved ? 'Remove saved message' : 'Save message'}
@@ -553,7 +555,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
               {!isUser && !isError && onRegenerate && (
                 <RegenerateMenu onRegenerate={(overrides) => onRegenerate(message.id, overrides)} />
               )}
-              {!isUser && !isError && message.content && (
+              {!isUser && !isError && !hasFiles && message.content && (
                 <button
                   onClick={handleToggleSpeak}
                   title={isSpeaking ? 'Stop' : 'Play aloud'}
@@ -568,7 +570,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                   {isSpeaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                 </button>
               )}
-              {!isUser && !isError && message.content && (
+              {!isUser && !isError && !hasFiles && message.content && (
                 <DownloadMenu content={message.content} baseName={message.content.slice(0, 40) || 'dabba-reply'} />
               )}
             </div>

@@ -66,7 +66,7 @@ export function ShareChatDialog({ chatId, loadPreview, onClose }: {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(true)
   const [preview, setPreview] = useState(false)
-  const messages = chat?.messages.filter(message => message.role !== 'system' && message.content.trim() && !message.error && !message.recoveryRequestId) ?? []
+  const messages = chat?.messages.filter(message => message.role !== 'system' && message.content.trim() && !message.error && !message.recoveryRequestId && !message.generatedFiles?.length) ?? []
 
   useEffect(() => {
     let active = true

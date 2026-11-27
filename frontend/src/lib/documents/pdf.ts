@@ -8,6 +8,7 @@
  * Other scripts cannot be drawn with them; a note at the end of the file says
  * so and points to the Word export.
  */
+import { DOCUMENT_TEMPLATES, type DocumentTemplate } from './templates'
 import { inlinesToText, parseDocument, type Align, type Block, type Inline } from './parse'
 
 type JsPdfClass = typeof import('jspdf').jsPDF
@@ -95,7 +96,12 @@ class PdfWriter {
   private quoteDepth = 0
   private readonly widths = new Map<string, number>()
 
-  constructor(private readonly doc: Pdf) {}
+  private readonly colors: typeof COLORS
+
+  constructor(private readonly doc: Pdf, private readonly template: DocumentTemplate) {
+    const { heading, accent, tableHeader } = DOCUMENT_TEMPLATES[template]
+    this.colors = { ...COLORS, heading: `#${heading}`, accent: `#${accent}`, tableHeader: `#${tableHeader}` }
+  }
 
   // ── measuring and drawing text ──
 
@@ -173,14 +179,14 @@ class PdfWriter {
       cursor += word.gap
       const fontSize = word.code ? size * 0.92 : size
       if (word.code) {
-        doc.setFillColor(COLORS.codeBackground)
+        doc.setFillColor(this.colors.codeBackground)
         doc.rect(cursor - 1.5, baseline - fontSize * 0.88, word.width + 3, fontSize * 1.2, 'F')
       }
       this.font(word.style, fontSize, word.code)
-      doc.setTextColor(word.link ? COLORS.link : color)
+      doc.setTextColor(word.link ? this.colors.link : color)
       doc.text(word.text, cursor, baseline)
       if (word.link) {
-        doc.setDrawColor(COLORS.link)
+        doc.setDrawColor(this.colors.link)
         doc.setLineWidth(0.5)
         doc.line(cursor, baseline + 1.6, cursor + word.width, baseline + 1.6)
         doc.link(cursor, baseline - fontSize, word.width, fontSize + 3, { url: word.link })
@@ -211,25 +217,28 @@ class PdfWriter {
 
   // ── blocks ──
 
-  private paragraph(inlines: Inline[], x: number, width: number, size = BODY_SIZE, color = COLORS.ink, base: TextStyle = {}) {
+  private paragraph(inlines: Inline[], x: number, width: number, size = BODY_SIZE, color = this.colors.ink, base: TextStyle = {}) {
     const lineHeight = size * LINE_RATIO
     const style = this.quoteDepth ? { ...base, italic: true } : base
     for (const line of this.layout(inlines, width, size, style)) {
       this.ensure(lineHeight)
-      this.drawLine(line, x, this.y, lineHeight, size, width, this.quoteDepth ? COLORS.muted : color)
+      this.drawLine(line, x, this.y, lineHeight, size, width, this.quoteDepth ? this.colors.muted : color)
       this.y += lineHeight
     }
   }
 
   private title(text: string) {
-    const lines = this.layout([{ text }], CONTENT_WIDTH, 26, { bold: true })
+    const { titleSize } = DOCUMENT_TEMPLATES[this.template]
+    const height = titleSize * 1.25
+    const lines = this.layout([{ text }], CONTENT_WIDTH, titleSize, { bold: true })
     for (const line of lines) {
-      this.ensure(26 * 1.25)
-      this.drawLine(line, MARGIN.left, this.y, 26 * 1.25, 26, CONTENT_WIDTH, COLORS.heading)
-      this.y += 26 * 1.25
+      this.ensure(height)
+      this.drawLine(line, MARGIN.left, this.y, height, titleSize, CONTENT_WIDTH, this.colors.heading)
+      this.y += height
     }
+    if (this.template === 'minimal') { this.y += 18; return }
     this.y += 4
-    this.doc.setDrawColor(COLORS.accent)
+    this.doc.setDrawColor(this.colors.accent)
     this.doc.setLineWidth(1.5)
     this.doc.line(MARGIN.left, this.y, MARGIN.left + CONTENT_WIDTH, this.y)
     this.y += 22
@@ -244,11 +253,11 @@ class PdfWriter {
     this.ensure(before + lines.length * lineHeight + spec.after + BODY_SIZE * LINE_RATIO * 2)
     this.y += this.atPageTop ? 0 : before
     for (const line of lines) {
-      this.drawLine(line, x, this.y, lineHeight, spec.size, width, COLORS.heading)
+      this.drawLine(line, x, this.y, lineHeight, spec.size, width, this.colors.heading)
       this.y += lineHeight
     }
     if (block.level === 1) {
-      this.doc.setDrawColor(COLORS.rule)
+      this.doc.setDrawColor(this.colors.rule)
       this.doc.setLineWidth(0.7)
       this.doc.line(x, this.y + 2, x + width, this.y + 2)
       this.y += 4
@@ -277,16 +286,16 @@ class PdfWriter {
           this.ensure(lineHeight)
           if (lineIndex === 0) {
             this.font('normal', BODY_SIZE)
-            this.doc.setTextColor(COLORS.muted)
+            this.doc.setTextColor(this.colors.muted)
             this.doc.text(marker, itemX, this.y + lineHeight * 0.78)
           }
-          this.drawLine(line, textX, this.y, lineHeight, BODY_SIZE, textWidth, COLORS.ink)
+          this.drawLine(line, textX, this.y, lineHeight, BODY_SIZE, textWidth, this.colors.ink)
           this.y += lineHeight
         })
       } else {
         this.ensure(lineHeight)
         this.font('normal', BODY_SIZE)
-        this.doc.setTextColor(COLORS.muted)
+        this.doc.setTextColor(this.colors.muted)
         this.doc.text(marker, itemX, this.y + lineHeight * 0.78)
         this.y += lineHeight
         if (first) rest.unshift(first)
@@ -325,17 +334,17 @@ class PdfWriter {
     const drawRow = (row: ReturnType<typeof prepare>, isHeader: boolean) => {
       let cursor = x
       if (isHeader) {
-        doc.setFillColor(COLORS.tableHeader)
+        doc.setFillColor(this.colors.tableHeader)
         doc.rect(x, this.y, width, row.height, 'F')
       }
-      doc.setDrawColor(COLORS.rule)
+      doc.setDrawColor(this.colors.rule)
       doc.setLineWidth(0.6)
       row.lines.forEach((cellLines, column) => {
         const columnWidth = columnWidths[column]
         doc.rect(cursor, this.y, columnWidth, row.height, 'S')
         cellLines.forEach((line, index) => {
           this.drawLine(line, cursor + pad, this.y + pad + index * lineHeight, lineHeight, size, columnWidth - pad * 2,
-            isHeader ? COLORS.heading : COLORS.ink, block.align[column] ?? null)
+            isHeader ? this.colors.heading : this.colors.ink, block.align[column] ?? null)
         })
         cursor += columnWidth
       })
@@ -378,12 +387,12 @@ class PdfWriter {
       const isLast = index === wrapped.length - 1
       const rowHeight = lineHeight + (isFirst ? pad / 2 : 0) + (isLast ? pad / 2 : 0)
       this.ensure(rowHeight)
-      doc.setFillColor(COLORS.codeBackground)
+      doc.setFillColor(this.colors.codeBackground)
       doc.rect(x, this.y, width, rowHeight, 'F')
-      doc.setFillColor(COLORS.accent)
+      doc.setFillColor(this.colors.accent)
       doc.rect(x, this.y, 2.5, rowHeight, 'F')
       this.font('normal', size, true)
-      doc.setTextColor(COLORS.ink)
+      doc.setTextColor(this.colors.ink)
       doc.text(text, x + pad, this.y + (isFirst ? pad / 2 : 0) + lineHeight * 0.74)
       this.y += rowHeight
     })
@@ -420,7 +429,7 @@ class PdfWriter {
           const startY = this.y
           this.block(inner, x + 16, width - 16)
           if (this.doc.getCurrentPageInfo().pageNumber === page) {
-            this.doc.setFillColor(COLORS.rule)
+            this.doc.setFillColor(this.colors.rule)
             this.doc.rect(x + 3, startY, 2.5, Math.max(0, this.y - startY - 6), 'F')
           }
         }
@@ -430,7 +439,7 @@ class PdfWriter {
       case 'rule':
         this.ensure(18)
         this.y += 6
-        this.doc.setDrawColor(COLORS.rule)
+        this.doc.setDrawColor(this.colors.rule)
         this.doc.setLineWidth(0.8)
         this.doc.line(x, this.y, x + width, this.y)
         this.y += 12
@@ -448,7 +457,7 @@ class PdfWriter {
       this.y += 6
       this.paragraph(
         [{ text: 'Some characters in this document (for example other writing systems) cannot be shown in a PDF. Download it as Word to keep them.', italic: true }],
-        MARGIN.left, CONTENT_WIDTH, 9, COLORS.faint,
+        MARGIN.left, CONTENT_WIDTH, 9, this.colors.faint,
       )
     }
   }
@@ -461,8 +470,8 @@ class PdfWriter {
     for (let page = 1; page <= pages; page += 1) {
       doc.setPage(page)
       this.font('normal', 8.5)
-      doc.setTextColor(COLORS.faint)
-      doc.setDrawColor(COLORS.rule)
+      doc.setTextColor(this.colors.faint)
+      doc.setDrawColor(this.colors.rule)
       doc.setLineWidth(0.5)
       doc.line(MARGIN.left, PAGE_HEIGHT - 44, PAGE_WIDTH - MARGIN.right, PAGE_HEIGHT - 44)
       if (shortLabel) doc.text(shortLabel, MARGIN.left, PAGE_HEIGHT - 30)
@@ -472,18 +481,18 @@ class PdfWriter {
 }
 
 /** Builds the PDF. Exported so tests and tools can inspect it without a browser. */
-export function buildPdfDocument(JsPdf: JsPdfClass, content: string, fallbackTitle = '') {
+export function buildPdfDocument(JsPdf: JsPdfClass, content: string, fallbackTitle = '', template: DocumentTemplate = 'professional') {
   const parsed = parseDocument(content)
   const label = parsed.title ?? fallbackTitle
   const doc = new JsPdf({ unit: 'pt', format: 'a4', compress: true })
   doc.setProperties({ title: label || 'Document', creator: 'Dabba' })
-  const writer = new PdfWriter(doc)
+  const writer = new PdfWriter(doc, template)
   writer.render(parsed.title, parsed.blocks)
   writer.addFooters(label)
   return doc
 }
 
-export async function createPdfBlob(content: string, fallbackTitle = ''): Promise<Blob> {
+export async function createPdfBlob(content: string, fallbackTitle = '', template: DocumentTemplate = 'professional'): Promise<Blob> {
   const { jsPDF } = await import('jspdf')
-  return buildPdfDocument(jsPDF, content, fallbackTitle).output('blob')
+  return buildPdfDocument(jsPDF, content, fallbackTitle, template).output('blob')
 }

@@ -23,6 +23,7 @@ const REPLY = [
 ].join('\n')
 
 test('asking for a PDF, Word and Markdown file attaches three real, titled files', async ({ page }) => {
+  let modelPrompt = ''
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   await page.route('**/v1/**', async route => {
     const request = route.request()
@@ -32,8 +33,9 @@ test('asking for a PDF, Word and Markdown file attaches three real, titled files
     }
     if (url.includes('/skills/match')) return route.fulfill({ json: { skill: null } })
     if (url.includes('/v1/chat/completions')) {
-      const sse = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
+      const sse = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text, reasoning_content: 'Private file draft' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
       const isTitleRequest = (request.postData() ?? '').includes('chat title')
+      if (!isTitleRequest) modelPrompt = request.postData() ?? ''
       return route.fulfill({ contentType: 'text/event-stream', body: sse(isTitleRequest ? 'Checklist' : REPLY) })
     }
     if (url.includes('/v1/conversations?')) return route.fulfill({ json: { conversations: [] } })
@@ -42,13 +44,16 @@ test('asking for a PDF, Word and Markdown file attaches three real, titled files
 
   await page.goto('/')
   const box = page.getByPlaceholder('Ask anything…')
-  await box.fill('Please create a pdf, a word document and a markdown file with an onboarding checklist')
+  await box.fill('Please create a pdf, a word document and a markdown file with an onboarding checklist using the Technical template')
   await box.press('Enter')
 
   // Named after the document's own title, not after the request. The libraries load on demand, so allow time.
   const links = page.locator('a[download]')
   await expect(links).toHaveCount(3, { timeout: 60_000 })
   await expect(links).toHaveText([/onboarding-checklist\.pdf/, /onboarding-checklist\.docx/, /onboarding-checklist\.md/])
+  expect(modelPrompt).toContain('Document template: Technical')
+  await expect(page.getByRole('main').getByText('Get repository access', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('main').getByText('Thinking', { exact: true })).toHaveCount(0)
 
   // The Markdown file is the document only: no lead-in, no closing offer.
   const [download] = await Promise.all([

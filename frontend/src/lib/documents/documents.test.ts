@@ -6,6 +6,7 @@ import { jsPDF } from 'jspdf'
 import { buildDocxDocument } from './docx'
 import { buildPdfDocument, toPdfText } from './pdf'
 import { cleanMarkdown, parseDocument, toMarkdownFile } from './parse'
+import { documentTemplateInstruction, templateForPrompt } from './templates'
 
 const SAMPLE = [
   "Sure! Here is the report you asked for:",
@@ -143,4 +144,27 @@ describe('PDF export', () => {
     expect(toPdfText('Café – “quoted”').text).toBe('Café – “quoted”')
     expect(toPdfText(`x${tamil}`)).toEqual({ text: 'x?', lostLetters: 1 })
   })
+})
+
+it('applies the requested template to PDF and Word and sends its outline to the model', async () => {
+  const technical = templateForPrompt('Create a PDF using the Technical template', 'professional')
+  expect(technical).toBe('technical')
+  expect(documentTemplateInstruction(technical)).toContain('requirements, implementation, and verification')
+  expect(templateForPrompt('Create a PDF', 'minimal')).toBe('minimal')
+
+  class InspectablePdf extends jsPDF {
+    constructor() { super({ unit: 'pt', format: 'a4', compress: false }) }
+  }
+  const professionalPdf = buildPdfDocument(InspectablePdf, SAMPLE, '', 'professional').output()
+  const minimalPdf = buildPdfDocument(InspectablePdf, SAMPLE, '', 'minimal').output()
+  expect(professionalPdf).toContain(' 26 Tf')
+  expect(minimalPdf).toContain(' 22 Tf')
+  expect(minimalPdf).not.toContain(' 26 Tf')
+
+  const technicalWord = await docx.Packer.toBuffer(buildDocxDocument(docx, parseDocument(SAMPLE), '', technical))
+  const minimalWord = await docx.Packer.toBuffer(buildDocxDocument(docx, parseDocument(SAMPLE), '', 'minimal'))
+  const technicalStyles = await (await JSZip.loadAsync(technicalWord)).file('word/styles.xml')!.async('string')
+  const minimalStyles = await (await JSZip.loadAsync(minimalWord)).file('word/styles.xml')!.async('string')
+  expect(technicalStyles).toContain('w:color="0F766E"')
+  expect(minimalStyles).not.toContain('<w:pBdr>')
 })

@@ -638,7 +638,7 @@ export class ApiClient {
       }
       const content = m.documentContext
         ? `${m.content}\n\n${m.documentContext}`.trim()
-        : m.content
+        : m.documentOutput ?? m.content
       return { role: m.role, content }
     })
   }

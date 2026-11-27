@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
-import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment } from '@/types'
+import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment, DocumentRequest, GeneratedFile } from '@/types'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
 import { ocrImages } from '@/lib/ocr'
 import { createGeneratedDocument, type DocumentFormat } from '@/lib/download'
+import { documentTemplateInstruction, templateForPrompt, type DocumentTemplate } from '@/lib/documents/templates'
 
 const FILE_EXPORT_CAPABILITY = [
   'This chat client can create and attach real PDF, Word (.docx), Markdown (.md), Excel (.xlsx),',
@@ -13,7 +14,7 @@ const FILE_EXPORT_CAPABILITY = [
   'of these formats, or asks to edit an attached document, provide the complete',
   'revised content for the whole file, not only a description of the changes.',
   'When writing a document, use this Markdown structure so the file is laid out properly:',
-  'one "# Title" line first, then a one or two sentence summary;',
+  'one "# Title" line first;',
   '"## " for sections and "### " for subsections, never skipping a level;',
   'short paragraphs; "- " bullets for lists of items and "1. " for ordered steps;',
   'a Markdown table with a header row for comparisons and data;',
@@ -42,6 +43,7 @@ function attachmentDocumentFormat(attachment: DocumentAttachment): DocumentForma
   if (attachment.type.includes('wordprocessingml') || name.endsWith('.docx')) return 'docx'
   if (attachment.type.includes('spreadsheetml') || name.endsWith('.xlsx')) return 'xlsx'
   if (attachment.type.includes('presentationml') || name.endsWith('.pptx')) return 'pptx'
+  if (attachment.type === 'text/markdown' || name.endsWith('.md')) return 'md'
   return null
 }
 
@@ -49,16 +51,16 @@ function requestedDocumentFormats(
   prompt: string,
   attachments?: DocumentAttachment[],
 ): DocumentFormat[] {
-  const asksForFile = /\b(create|generate|make|export|convert|save|give|provide|prepare|build|produce|download|need|want|write)\b/i.test(prompt)
+  const asksForFile = /\b(create|generate|make|export|convert|save|give|provide|prepare|build|produce|download|need|want|write)\b|\b(?:pdf|docx|word|markdown|md)\s+please\b/i.test(prompt)
 
   const formats: DocumentFormat[] = []
   if (asksForFile) {
     if (/\b(pdf|portable document)\b/i.test(prompt)) formats.push('pdf')
-    if (/\b(docx|word(?:\s+(?:file|document))?|microsoft word)\b/i.test(prompt)) formats.push('docx')
+    if (/\b(docx|word\s+(?:file|document|format|please)|microsoft word)\b|\b(?:as|in|to|pdf|markdown|md)[\s,/]+word\b(?![-\s]+(?:count|list|game|cloud|search|by))|\bword\s*(?:,|\/|and\b)\s*(?:a\s+)?(?:pdf|docx|markdown|md)\b/i.test(prompt)) formats.push('docx')
     if (/\b(xlsx|excel|spreadsheet|workbook)\b/i.test(prompt)) formats.push('xlsx')
     if (/\b(pptx|powerpoint|presentation|slide deck|slides)\b/i.test(prompt)) formats.push('pptx')
     // "markdown file", "md document", ".md", "as markdown" - not every mention of markdown.
-    if (/\b(?:markdown|md)\s+(?:file|document|doc)\b|\.md\b|\b(?:as|in|to)\s+(?:a\s+)?markdown\b/i.test(prompt)) formats.push('md')
+    if (/\b(?:markdown|md)\s+(?:file|document|doc|please)\b|\.md\b|\b(?:as|in|to|and)\s+(?:a\s+)?(?:markdown|md)\b|\b(?:pdf|word|docx)\s+md\b|\bmd\s*(?:,|\/|$)/i.test(prompt)) formats.push('md')
   }
 
   if (formats.length === 0 && EDIT_DOCUMENT_RE.test(prompt)) {
@@ -68,6 +70,21 @@ function requestedDocumentFormats(
     }
   }
   return formats
+}
+
+function documentRequestFor(prompt: string, fallback: DocumentTemplate, attachments?: DocumentAttachment[]): DocumentRequest | undefined {
+  const formats = requestedDocumentFormats(prompt, attachments)
+  return formats.length ? { formats, template: templateForPrompt(prompt, fallback) } : undefined
+}
+
+async function buildRequestedFiles(body: string, request: DocumentRequest, userMessage: Message, attachmentMessage?: Message) {
+  if (!body.trim()) throw new Error('The model returned an empty document. Try generating it again.')
+  const baseName = generatedDocumentBaseName(attachmentMessage ?? userMessage, userMessage.content, body)
+  const files: GeneratedFile[] = []
+  for (const format of request.formats) {
+    files.push(await createGeneratedDocument(body, baseName, format, request.template))
+  }
+  return files
 }
 
 /** The first Markdown heading in generated text, without the markup. */
@@ -267,12 +284,21 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     const model = overrides?.model ?? settings.model
     const effort = overrides?.effort ?? settings.effort
     const systemPrompt = overrides?.systemPromptOverride ?? settings.systemPrompt
+    const userMessage = [...historyMessages].reverse().find(message => message.role === 'user')
+    const attachmentMessage = [...historyMessages].reverse().find(
+      message => message.role === 'user' && message.documentAttachments?.length
+    )
+    const documentRequest = userMessage && documentRequestFor(userMessage.content, settings.documentTemplate, attachmentMessage?.documentAttachments)
+    if (documentRequest) updateMessage(assistantId, { documentRequest }, conversationId)
 
     const apiMessages = [...historyMessages]
     apiMessages.unshift({
       id: 'system-prompt',
       role: 'system',
-      content: [systemPrompt, FILE_EXPORT_CAPABILITY].filter(Boolean).join('\n\n'),
+      content: [
+        systemPrompt, FILE_EXPORT_CAPABILITY,
+        documentRequest && documentTemplateInstruction(documentRequest.template),
+      ].filter(Boolean).join('\n\n'),
       timestamp: Date.now()
     })
 
@@ -291,19 +317,6 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         latestChunk = undefined
       }
     }
-    const userMessage = [...historyMessages].reverse().find(message => message.role === 'user')
-    const attachmentMessage = [...historyMessages].reverse().find(
-      message => message.role === 'user' && message.documentAttachments?.length
-    )
-    const requestedFormats = userMessage
-      ? requestedDocumentFormats(
-          userMessage.content,
-          userMessage.documentAttachments?.length
-            ? userMessage.documentAttachments
-            : attachmentMessage?.documentAttachments,
-        )
-      : []
-
     const chatParams = {
       effort,
       temperature: settings.temperature,
@@ -336,14 +349,13 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
           requestId,
           onChunk: (chunk) => {
             if (chunk.usage) lastUsage = chunk.usage
+            if (documentRequest) return
             const hitCapacity = NVIDIA_CAPACITY_RE.test(chunk.content)
             latestChunk = {
               // Document-edit preambles are not useful output. Clear them as
               // soon as a provider-capacity response arrives; the clean retry
               // below will replace the bubble with its own streamed content.
-              content: hitCapacity
-                ? (requestedFormats.length > 0 ? '' : withoutCapacityError(chunk.content))
-                : chunk.content,
+              content: hitCapacity ? withoutCapacityError(chunk.content) : chunk.content,
               model: requestModel,
               reasoning: chunk.reasoning,
               ...(chunk.finishReason ? { timestamp: Date.now() } : {}),
@@ -374,32 +386,25 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         throw new Error('The model is temporarily at capacity. Please retry shortly.')
       }
 
+      const generatedFiles = documentRequest && userMessage
+        ? await buildRequestedFiles(fullContent, documentRequest, userMessage, attachmentMessage)
+        : undefined
+      if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantId, {
-        content: fullContent,
+        content: generatedFiles ? '' : fullContent,
+        ...(generatedFiles ? { generatedFiles, documentOutput: fullContent } : {}),
         model: responseModel,
         timestamp: Date.now(),
+        error: false,
+        interrupted: false,
+        recoveryRequestId: undefined,
+        usage: lastUsage,
         sources: attachmentMessage?.documentAttachments?.map(file => {
           const pages = [...new Set(fullContent.split('\n')
             .filter(line => line.toLowerCase().includes(file.name.toLowerCase()))
             .flatMap(line => [...line.matchAll(/\bpage\s+(\d+)/gi)].map(match => Number(match[1]))))]
           return { kind: 'file', title: file.name, messageId: attachmentMessage.id, pages }
         }),
-      }, conversationId)
-      if (requestedFormats.length > 0 && fullContent.trim() && userMessage) {
-        const sourceMessage = attachmentMessage ?? userMessage
-        const baseName = generatedDocumentBaseName(sourceMessage, userMessage.content, fullContent)
-        const generatedFiles = await Promise.all(
-          requestedFormats.map(format => createGeneratedDocument(fullContent, baseName, format))
-        )
-        updateMessage(assistantId, { generatedFiles }, conversationId)
-      }
-      // Fall back to a rough token estimate when the server doesn't report usage.
-      updateMessage(assistantId, {
-        error: false,
-        interrupted: false,
-        recoveryRequestId: undefined,
-        model: responseModel,
-        usage: lastUsage,
       }, conversationId)
       const titleModel = models.find(item => item.has_key && item.provider !== 'dabba' && item.tier === 'low')
         ?? models.find(item => item.has_key && item.provider === 'nvidia' && item.tier === 'medium')
@@ -530,9 +535,10 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
   const runAgentMode = useCallback(async (content: string, opts: { conversationId?: string; label: string; effort?: string; hint?: string; allowedTools?: string[]; viaVoice?: boolean; planMode?: boolean }) => {
     if (!content.trim() || isLoading) return
     const conversationId = opts.conversationId ?? activeConversationRef.current ?? '__draft__'
+    const documentRequest = documentRequestFor(content, settings.documentTemplate)
 
     const userMessage = addMessage(content, 'user', { viaVoice: opts.viaVoice }, conversationId)
-    const assistantMessage = addMessage('', 'assistant', { agentActivity: { label: opts.label, steps: [], done: false }, viaVoice: opts.viaVoice }, conversationId)
+    const assistantMessage = addMessage('', 'assistant', { documentRequest, agentActivity: { label: opts.label, steps: [], done: false }, viaVoice: opts.viaVoice }, conversationId)
 
     setError(null)
     setConversationRunning(conversationId, true)
@@ -540,6 +546,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     abortControllersRef.current.set(conversationId, abortController)
 
     let textParts: string[] = []
+    let askedQuestion = false
     const steps: AgentStep[] = []
     const webSources = new Map<string, ChatSource>()
     const fetchedUrls = new Map<string, string>()
@@ -554,11 +561,11 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
 
     const isResearch = opts.label === 'Research'
-    const requestedFormats = requestedDocumentFormats(content)
-    const exportHint = requestedFormats.length > 0
-      ? `The Dabba client will convert your final response into ${requestedFormats.join(', ')} and attach the real file. ` +
+    const exportHint = documentRequest
+      ? `The Dabba client will convert your final response into ${documentRequest.formats.join(', ')} and attach the real file. ` +
         `Return the complete export data in the final response (use a markdown table for Excel). ` +
-        `Do not call file_write or claim that a local file was created.`
+        `Do not call file_write or claim that a local file was created. ` +
+        documentTemplateInstruction(documentRequest.template)
       : ''
     // Research has a dedicated backend pipeline that gathers sources before
     // synthesis, so send the user's clean query instead of a UI-only hint.
@@ -602,11 +609,11 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
             const c = event.content as { tool?: string; description?: string; status?: string; error?: string | null }
             steps.push({ tool: c?.tool ?? 'plan step', detail: c?.description ?? '', success: c?.status === 'succeeded' })
             updateMessage(assistantMessage.id, { agentActivity: { label: opts.label, steps: [...steps], done: false } }, conversationId)
-          } else if (event.type === 'plan_summary') {
+          } else if (event.type === 'plan_summary' && !documentRequest) {
             const c = event.content as { summary?: string }
             textParts = [...textParts, String(c?.summary ?? '')]
             updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
-          } else if (event.type === 'plan_denied') {
+          } else if (event.type === 'plan_denied' && !documentRequest) {
             textParts = [...textParts, '_Plan declined — continuing without it._']
             updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
           } else if (event.type === 'tool_call') {
@@ -632,14 +639,15 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
             addWebSources(event.content)
           } else if (event.type === 'text') {
             textParts = [...textParts, String(event.content ?? '')]
-            updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
+            if (!documentRequest) updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
           } else if (event.type === 'question') {
             // ask_user ends the turn here (see agent_loop.py's stream_chat) —
             // render it like any other reply; the user's next message is
             // the answer, continuing the same conversation.
             const c = event.content as { question?: string; options?: string[] | null }
             const optionsText = c?.options?.length ? '\n' + c.options.map(o => `  • ${o}`).join('\n') : ''
-            textParts = [...textParts, `❓ ${c?.question ?? ''}${optionsText}`]
+            askedQuestion = true
+            textParts = [...(documentRequest ? [] : textParts), `❓ ${c?.question ?? ''}${optionsText}`]
             updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
           } else if (event.type === 'error') {
             throw new Error(String(event.content ?? 'Agent error'))
@@ -647,17 +655,16 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         },
       })
       const finalContent = textParts.join('\n\n').trim()
-      const generatedFiles = requestedFormats.length > 0 && finalContent
-        ? await Promise.all(requestedFormats.map(format =>
-            createGeneratedDocument(finalContent, generatedDocumentBaseName(userMessage, content, finalContent), format)
-          ))
+      const generatedFiles = documentRequest && !askedQuestion
+        ? await buildRequestedFiles(finalContent, documentRequest, userMessage)
         : undefined
+      if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantMessage.id, {
         model: settings.model,
         timestamp: Date.now(),
         agentActivity: { label: opts.label, steps, done: true },
         ...(webSources.size ? { sources: [...webSources.values()] } : {}),
-        ...(generatedFiles ? { generatedFiles } : {}),
+        ...(generatedFiles ? { generatedFiles, documentOutput: finalContent, content: '' } : {}),
       }, conversationId)
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
@@ -676,7 +683,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model, settings.effort, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
+  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model, settings.effort, settings.documentTemplate, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
 
   // Generates images from a prompt via /v1/images/generations (proxies to
   // whichever image-capable provider has a key configured — currently OpenAI).
@@ -748,8 +755,21 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
     const promptTokens = result.usage?.prompt_tokens ?? 0
     const completionTokens = result.usage?.completion_tokens ?? 0
+    let generatedFiles: GeneratedFile[] | undefined
+    if (latest.documentRequest) {
+      const conversation = conversationMessagesRef.current.get(conversationId) ?? []
+      const history = conversation.slice(0, conversation.indexOf(latest)).reverse()
+      const userMessage = history.find(message => message.role === 'user')
+      if (!userMessage) throw new Error('The original document request could not be found.')
+      generatedFiles = await buildRequestedFiles(
+        result.content, latest.documentRequest, userMessage,
+        history.find(message => message.role === 'user' && message.documentAttachments?.length),
+      )
+      if (conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId !== requestId) return
+    }
     updateMessage(id, {
-      content: result.content, model: result.model, timestamp: Date.now(),
+      content: generatedFiles ? '' : result.content, model: result.model, timestamp: Date.now(),
+      ...(generatedFiles ? { generatedFiles, documentOutput: result.content } : {}),
       interrupted: false, error: false, recoveryRequestId: undefined,
       usage: result.usage ? { promptTokens, completionTokens, totalTokens: result.usage.total_tokens ?? promptTokens + completionTokens } : undefined,
     }, conversationId)

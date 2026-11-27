@@ -359,6 +359,7 @@ def create_conversations_router() -> APIRouter:
                     and message.get("role") in ("user", "assistant")
                     and not message.get("error")
                     and not message.get("recoveryRequestId")
+                    and not message.get("generatedFiles")
                     and isinstance(message.get("content"), str)
                     and message["content"].strip()
                 ]

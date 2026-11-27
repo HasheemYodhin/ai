@@ -1,3 +1,11 @@
+import type { DocumentTemplate } from '@/lib/documents/templates'
+import type { DocumentFormat } from '@/lib/download'
+
+export interface DocumentRequest {
+  formats: DocumentFormat[]
+  template: DocumentTemplate
+}
+
 export interface TokenUsage {
   promptTokens: number
   completionTokens: number
@@ -30,6 +38,9 @@ export interface Message {
   documentAttachments?: DocumentAttachment[]
   /** Real binary documents generated from an assistant reply. */
   generatedFiles?: GeneratedFile[]
+  documentRequest?: DocumentRequest
+  /** Generated document body kept for follow-up requests. */
+  documentOutput?: string
   /** Images the model generated in response to this message (data URLs). */
   generatedImages?: string[]
   /** True while this message represents an in-flight image generation request. */

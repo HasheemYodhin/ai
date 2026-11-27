@@ -4,6 +4,7 @@
  * true bullet and numbered lists, shaded tables with a repeating header row,
  * code blocks, and "Page X of Y" in the footer.
  */
+import { DOCUMENT_TEMPLATES, type DocumentTemplate } from './templates'
 import { inlinesToText, parseDocument, type Block, type Inline, type ParsedDocument } from './parse'
 
 type Docx = typeof import('docx')
@@ -78,12 +79,14 @@ function columnWidths(header: Inline[][], rows: Inline[][][]): number[] {
 interface Context {
   /** Each ordered list gets its own numbering instance so every list starts at 1. */
   orderedInstance: number
+  colors: typeof COLORS
 }
 
 function renderBlock(docx: Docx, block: Block, context: Context, indent = 0): Child[] {
   const { Paragraph, Table, TableRow, TableCell, WidthType, BorderStyle, ShadingType, AlignmentType, HeadingLevel, TextRun } = docx
   const headings = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4]
 
+  const colors = context.colors
   switch (block.type) {
     case 'heading':
       return [new Paragraph({ heading: headings[block.level - 1], children: runs(docx, block.inlines) })]
@@ -101,7 +104,7 @@ function renderBlock(docx: Docx, block: Block, context: Context, indent = 0): Ch
 
     case 'table': {
       const widths = columnWidths(block.header, block.rows)
-      const line = { style: BorderStyle.SINGLE, size: 4, color: COLORS.border }
+      const line = { style: BorderStyle.SINGLE, size: 4, color: colors.border }
       const align = (column: number) => {
         const value = block.align[column]
         return value === 'center' ? AlignmentType.CENTER : value === 'right' ? AlignmentType.RIGHT : AlignmentType.LEFT
@@ -113,7 +116,7 @@ function renderBlock(docx: Docx, block: Block, context: Context, indent = 0): Ch
           children: widths.map((width, column) =>
             new TableCell({
               width: { size: width, type: WidthType.DXA },
-              shading: isHeader ? { type: ShadingType.CLEAR, fill: COLORS.tableHeader, color: 'auto' } : undefined,
+              shading: isHeader ? { type: ShadingType.CLEAR, fill: colors.tableHeader, color: 'auto' } : undefined,
               margins: { top: 70, bottom: 70, left: 110, right: 110 },
               children: [
                 new Paragraph({
@@ -139,8 +142,8 @@ function renderBlock(docx: Docx, block: Block, context: Context, indent = 0): Ch
       const lines = block.text.replace(/\t/g, '    ').split('\n')
       return [
         new Paragraph({
-          shading: { type: ShadingType.CLEAR, fill: COLORS.codeBackground, color: 'auto' },
-          border: { left: { style: BorderStyle.SINGLE, size: 18, color: COLORS.accent, space: 8 } },
+          shading: { type: ShadingType.CLEAR, fill: colors.codeBackground, color: 'auto' },
+          border: { left: { style: BorderStyle.SINGLE, size: 18, color: colors.accent, space: 8 } },
           indent: { left: 160, right: 120 },
           spacing: { before: 80, after: 200, line: 264 },
           children: lines.map((text, index) => new TextRun({ text: text || ' ', font: CODE_FONT, size: 19, break: index ? 1 : undefined })),
@@ -153,15 +156,15 @@ function renderBlock(docx: Docx, block: Block, context: Context, indent = 0): Ch
         inner.type === 'paragraph'
           ? [new Paragraph({
               indent: { left: 480 },
-              border: { left: { style: BorderStyle.SINGLE, size: 18, color: COLORS.border, space: 10 } },
-              children: runs(docx, inner.inlines, { italics: true, color: COLORS.muted }),
+              border: { left: { style: BorderStyle.SINGLE, size: 18, color: colors.border, space: 10 } },
+              children: runs(docx, inner.inlines, { italics: true, color: colors.muted }),
             })]
           : renderBlock(docx, inner, context, 480))
 
     case 'rule':
       return [new Paragraph({
         spacing: { before: 120, after: 120 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: COLORS.border, space: 1 } },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: colors.border, space: 1 } },
         children: [],
       })]
   }
@@ -199,9 +202,11 @@ function renderList(docx: Docx, block: Extract<Block, { type: 'list' }>, context
 }
 
 /** Builds the Word document. Exported so tests and tools can inspect it without a browser. */
-export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTitle = '') {
+export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTitle = '', template: DocumentTemplate = 'professional') {
   const { Document, Paragraph, Footer, AlignmentType, BorderStyle, HeadingLevel, LevelFormat, PageNumber, TextRun } = docx
-  const context: Context = { orderedInstance: 0 }
+  const { heading: headingColor, accent, tableHeader, titleSize } = DOCUMENT_TEMPLATES[template]
+  const colors: typeof COLORS = { ...COLORS, heading: headingColor, accent, tableHeader }
+  const context: Context = { orderedInstance: 0, colors }
 
   const children: Child[] = []
   if (parsed.title) {
@@ -226,7 +231,7 @@ export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTi
     style: { paragraph: { indent: { left: 540 + level * 360, hanging: 360 } } },
   }))
 
-  const heading = (id: string, name: string, size: number, before: number, after: number, outline: number, color = COLORS.heading) => ({
+  const heading = (id: string, name: string, size: number, before: number, after: number, outline: number, color = colors.heading) => ({
     id, name, basedOn: 'Normal', next: 'Normal', quickFormat: true,
     run: { size, bold: true, color, font: BODY_FONT },
     paragraph: { spacing: { before, after }, keepNext: true, keepLines: true, outlineLevel: outline },
@@ -238,17 +243,17 @@ export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTi
     styles: {
       default: {
         document: {
-          run: { font: BODY_FONT, size: 22, color: COLORS.ink },
+          run: { font: BODY_FONT, size: 22, color: colors.ink },
           paragraph: { spacing: { after: 140, line: 288 } },
         },
       },
       paragraphStyles: [
         {
           id: 'Title', name: 'Title', basedOn: 'Normal', next: 'Normal', quickFormat: true,
-          run: { size: 52, bold: true, color: '111827', font: BODY_FONT },
+          run: { size: titleSize * 2, bold: true, color: template === 'professional' ? '111827' : headingColor, font: BODY_FONT },
           paragraph: {
             spacing: { after: 280 },
-            border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: COLORS.accent, space: 8 } },
+            border: template === 'minimal' ? undefined : { bottom: { style: BorderStyle.SINGLE, size: 12, color: colors.accent, space: 8 } },
           },
         },
         // The footer's own size, so the page-number fields match the text around them.
@@ -259,7 +264,7 @@ export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTi
         heading('Heading4', 'heading 4', 22, 180, 70, 3, '374151'),
       ],
       characterStyles: [
-        { id: 'Hyperlink', name: 'Hyperlink', run: { color: COLORS.link, underline: { type: 'single' } } },
+        { id: 'Hyperlink', name: 'Hyperlink', run: { color: colors.link, underline: { type: 'single' } } },
       ],
     },
     numbering: {
@@ -291,7 +296,7 @@ export function buildDocxDocument(docx: Docx, parsed: ParsedDocument, fallbackTi
   })
 }
 
-export async function createDocxBlob(content: string, fallbackTitle = ''): Promise<Blob> {
+export async function createDocxBlob(content: string, fallbackTitle = '', template: DocumentTemplate = 'professional'): Promise<Blob> {
   const docx = await import('docx')
-  return docx.Packer.toBlob(buildDocxDocument(docx, parseDocument(content), fallbackTitle))
+  return docx.Packer.toBlob(buildDocxDocument(docx, parseDocument(content), fallbackTitle, template))
 }

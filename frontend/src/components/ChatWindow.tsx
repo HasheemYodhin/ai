@@ -90,7 +90,7 @@ export function ChatWindow({
   const findOpen = findFor === (chatId ?? '__temporary__')
   const normalizedQuery = query.trim().toLowerCase()
   const matches = useMemo(() => findOpen && normalizedQuery
-    ? messages.filter(message => message.content.toLowerCase().includes(normalizedQuery))
+    ? messages.filter(message => !message.generatedFiles?.length && message.content.toLowerCase().includes(normalizedQuery))
     : [], [findOpen, messages, normalizedQuery])
   const matchIndex = matches.findIndex(message => message.id === activeMatch)
   const moveMatch = (direction: number) => {
@@ -218,7 +218,7 @@ export function ChatWindow({
     setRevealingId(current => revealing ? id : current === id ? null : current)
   }, [])
   const lastMessage = messages[messages.length - 1]
-  const showFollowUps = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && revealingId !== lastMessage.id
+  const showFollowUps = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && !lastMessage.generatedFiles?.length && revealingId !== lastMessage.id
   // The chips render only once the reply has finished revealing, i.e. after
   // the streaming auto-scroll ran, so they used to sit below the fold, half
   // hidden behind the composer. Scroll again when they appear.
@@ -227,7 +227,7 @@ export function ChatWindow({
     const id = requestAnimationFrame(() => scrollToBottom(false))
     return () => cancelAnimationFrame(id)
   }, [showFollowUps, isAutoScroll, scrollToBottom])
-  const followUpRow = lastMessage?.role === 'assistant' && !isLoading && !lastMessage.error && revealingId !== lastMessage.id && (
+  const followUpRow = showFollowUps && (
     <div className="flex flex-wrap gap-2 pl-10">
       {FOLLOW_UPS.map((f, idx) => (
         <button

@@ -10,6 +10,7 @@ import { apiClient } from '@/api/client'
 import { ACCENT_PRESETS, applyAccent, normalizeAccent } from '@/lib/accent'
 import { EFFORT_TIERS, modelDisplayName, providerLabel } from '@/lib/models'
 import { loadUsageStats, type UsageStats } from '@/lib/usageStats'
+import { DOCUMENT_TEMPLATES, normalizeDocumentTemplate } from '@/lib/documents/templates'
 import { cn } from '@/lib/utils'
 import { ApiKeyPromptModal } from './ApiKeyPromptModal'
 import type { ModelInfo } from '@/types'
@@ -589,6 +590,14 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
 
                 <div className="space-y-4 pt-3 border-t border-border dark:border-border-dark">
+                  <label className="flex items-center justify-between gap-3 pt-2 text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
+                    Document template
+                    <select value={localSettings.documentTemplate}
+                      onChange={event => setLocalSettings(prev => ({ ...prev, documentTemplate: normalizeDocumentTemplate(event.target.value) }))}
+                      className="rounded-lg border border-border bg-surface px-2 py-1.5 dark:border-border-dark dark:bg-surface-dark-secondary">
+                      {Object.entries(DOCUMENT_TEMPLATES).map(([key, template]) => <option key={key} value={key}>{template.label}</option>)}
+                    </select>
+                  </label>
                   <label className="flex items-center justify-between gap-3 pt-2">
                     <span className="text-xs font-semibold text-text-secondary dark:text-text-dark-secondary">
                       Stream responses

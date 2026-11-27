@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { apiClient, DEFAULT_API_URL } from '@/api/client'
 import { applyAccent, DEFAULT_ACCENT, normalizeAccent } from '@/lib/accent'
+import { normalizeDocumentTemplate, type DocumentTemplate } from '@/lib/documents/templates'
 
 /** Generation params that can be remembered per-model. */
 export interface ModelParams {
@@ -24,6 +25,7 @@ export interface AppSettings {
   frequencyPenalty: number
   stop: string[]
   streaming: boolean
+  documentTemplate: DocumentTemplate
   typingSpeed: number // ms delay per token on the server-side typewriter (informational)
   systemPrompt: string
   /** Remembered params keyed by model id — restored when you switch back. */
@@ -64,6 +66,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   frequencyPenalty: 0,
   stop: [],
   streaming: true,
+  documentTemplate: 'professional',
   typingSpeed: 0,
   systemPrompt: 'You are Dabba, a production-grade custom transformer assistant.',
   modelDefaults: {},
@@ -105,6 +108,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           baseUrl: parsed.baseUrl || DEFAULT_API_URL,
           // A missing or invalid saved color falls back to the default.
           accentColor: normalizeAccent(parsed.accentColor ?? DEFAULT_ACCENT),
+          documentTemplate: normalizeDocumentTemplate(parsed.documentTemplate),
         }
       }
     } catch {
