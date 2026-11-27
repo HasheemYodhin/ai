@@ -41,6 +41,8 @@ export interface Message {
   documentRequest?: DocumentRequest
   /** Generated document body kept for follow-up requests. */
   documentOutput?: string
+  /** Brief text shown beside a generated file. */
+  documentSummary?: string
   /** Images the model generated in response to this message (data URLs). */
   generatedImages?: string[]
   /** True while this message represents an in-flight image generation request. */

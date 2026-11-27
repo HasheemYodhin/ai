@@ -20,7 +20,7 @@ const FILE_EXPORT_CAPABILITY = [
   'a Markdown table with a header row for comparisons and data;',
   '**bold** only for key terms; code in fenced blocks with a language.',
   'Do not use emoji, HTML or decorative divider lines.',
-  'Return only the document itself: no sentence before the title and no closing remark after the end.',
+  'Omit chat greetings and closing offers.',
   'For Excel, use markdown tables that preserve all rows and columns. For',
   'PowerPoint, use markdown headings for slide titles and bullets for slide content.',
   'Do not narrate your plan, repeat the request, expose internal reasoning,',
@@ -28,6 +28,8 @@ const FILE_EXPORT_CAPABILITY = [
   'Never claim that you cannot create binary files, never ask the user to copy',
   'and paste the response, and do not substitute extracted text for the requested file.',
 ].join(' ')
+const DOCUMENT_SUMMARY_INSTRUCTION =
+  'Start with one line labeled "Chat summary:" and give one or two short sentences about what the file contains. Then leave a blank line and write the complete file content. The summary line is only used in chat.'
 
 const EDIT_DOCUMENT_RE = /\b(edit|update|change|modify|improve|replace|remove|delete|add|append|insert|fix|correct|rewrite|revise|translate|reformat|rename)\b/i
 const NVIDIA_CAPACITY_RE = /(?:resourceexhausted|worker\s+local\s+total\s+request\s+limit\s+reached)/i
@@ -77,14 +79,16 @@ function documentRequestFor(prompt: string, fallback: DocumentTemplate, attachme
   return formats.length ? { formats, template: templateForPrompt(prompt, fallback) } : undefined
 }
 
-async function buildRequestedFiles(body: string, request: DocumentRequest, userMessage: Message, attachmentMessage?: Message) {
+async function buildDocumentReply(reply: string, request: DocumentRequest, userMessage: Message, attachmentMessage?: Message) {
+  const { splitDocumentReply } = await import('@/lib/documents/summary')
+  const { body, summary } = splitDocumentReply(reply)
   if (!body.trim()) throw new Error('The model returned an empty document. Try generating it again.')
   const baseName = generatedDocumentBaseName(attachmentMessage ?? userMessage, userMessage.content, body)
   const files: GeneratedFile[] = []
   for (const format of request.formats) {
     files.push(await createGeneratedDocument(body, baseName, format, request.template))
   }
-  return files
+  return { content: '', generatedFiles: files, documentOutput: body, documentSummary: summary }
 }
 
 /** The first Markdown heading in generated text, without the markup. */
@@ -298,6 +302,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       content: [
         systemPrompt, FILE_EXPORT_CAPABILITY,
         documentRequest && documentTemplateInstruction(documentRequest.template),
+        documentRequest && DOCUMENT_SUMMARY_INSTRUCTION,
       ].filter(Boolean).join('\n\n'),
       timestamp: Date.now()
     })
@@ -386,13 +391,12 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         throw new Error('The model is temporarily at capacity. Please retry shortly.')
       }
 
-      const generatedFiles = documentRequest && userMessage
-        ? await buildRequestedFiles(fullContent, documentRequest, userMessage, attachmentMessage)
-        : undefined
+      const documentReply = documentRequest && userMessage
+        ? await buildDocumentReply(fullContent, documentRequest, userMessage, attachmentMessage)
+        : { content: fullContent }
       if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantId, {
-        content: generatedFiles ? '' : fullContent,
-        ...(generatedFiles ? { generatedFiles, documentOutput: fullContent } : {}),
+        ...documentReply,
         model: responseModel,
         timestamp: Date.now(),
         error: false,
@@ -565,7 +569,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       ? `The Dabba client will convert your final response into ${documentRequest.formats.join(', ')} and attach the real file. ` +
         `Return the complete export data in the final response (use a markdown table for Excel). ` +
         `Do not call file_write or claim that a local file was created. ` +
-        documentTemplateInstruction(documentRequest.template)
+        `${documentTemplateInstruction(documentRequest.template)} ${DOCUMENT_SUMMARY_INSTRUCTION}`
       : ''
     // Research has a dedicated backend pipeline that gathers sources before
     // synthesis, so send the user's clean query instead of a UI-only hint.
@@ -655,8 +659,8 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         },
       })
       const finalContent = textParts.join('\n\n').trim()
-      const generatedFiles = documentRequest && !askedQuestion
-        ? await buildRequestedFiles(finalContent, documentRequest, userMessage)
+      const documentReply = documentRequest && !askedQuestion
+        ? await buildDocumentReply(finalContent, documentRequest, userMessage)
         : undefined
       if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantMessage.id, {
@@ -664,7 +668,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         timestamp: Date.now(),
         agentActivity: { label: opts.label, steps, done: true },
         ...(webSources.size ? { sources: [...webSources.values()] } : {}),
-        ...(generatedFiles ? { generatedFiles, documentOutput: finalContent, content: '' } : {}),
+        ...documentReply,
       }, conversationId)
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
@@ -755,21 +759,20 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
     const promptTokens = result.usage?.prompt_tokens ?? 0
     const completionTokens = result.usage?.completion_tokens ?? 0
-    let generatedFiles: GeneratedFile[] | undefined
+    let reply: Partial<Message> = { content: result.content }
     if (latest.documentRequest) {
       const conversation = conversationMessagesRef.current.get(conversationId) ?? []
       const history = conversation.slice(0, conversation.indexOf(latest)).reverse()
       const userMessage = history.find(message => message.role === 'user')
       if (!userMessage) throw new Error('The original document request could not be found.')
-      generatedFiles = await buildRequestedFiles(
+      reply = await buildDocumentReply(
         result.content, latest.documentRequest, userMessage,
         history.find(message => message.role === 'user' && message.documentAttachments?.length),
       )
       if (conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId !== requestId) return
     }
     updateMessage(id, {
-      content: generatedFiles ? '' : result.content, model: result.model, timestamp: Date.now(),
-      ...(generatedFiles ? { generatedFiles, documentOutput: result.content } : {}),
+      ...reply, model: result.model, timestamp: Date.now(),
       interrupted: false, error: false, recoveryRequestId: undefined,
       usage: result.usage ? { promptTokens, completionTokens, totalTokens: result.usage.total_tokens ?? promptTokens + completionTokens } : undefined,
     }, conversationId)

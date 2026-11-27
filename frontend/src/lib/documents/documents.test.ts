@@ -7,6 +7,7 @@ import { buildDocxDocument } from './docx'
 import { buildPdfDocument, toPdfText } from './pdf'
 import { cleanMarkdown, parseDocument, toMarkdownFile } from './parse'
 import { documentTemplateInstruction, templateForPrompt } from './templates'
+import { splitDocumentReply } from './summary'
 
 const SAMPLE = [
   "Sure! Here is the report you asked for:",
@@ -39,6 +40,22 @@ const SAMPLE = [
   '',
   'Let me know if you would like changes!',
 ].join('\n')
+
+describe('generated file chat summaries', () => {
+  it('keeps the short summary out of the file body', () => {
+    expect(splitDocumentReply('**Chat summary:** Two steps for new teammates.\n\n# Onboarding\n\n1. Get access\n2. Set up the environment')).toEqual({
+      summary: 'Two steps for new teammates.',
+      body: '# Onboarding\n\n1. Get access\n2. Set up the environment',
+    })
+  })
+
+  it('uses prose or table metadata for unmarked replies', () => {
+    expect(splitDocumentReply(SAMPLE).summary).toBe('This covers uptime and the status page.')
+    expect(splitDocumentReply('| Task | Owner |\n| --- | --- |\n| Setup | IT |').summary)
+      .toBe('Includes 1 data row with columns for Task, Owner.')
+    expect(splitDocumentReply('Chat summary: A file without a body.').body).toBe('')
+  })
+})
 
 describe('cleaning a reply before it becomes a file', () => {
   it('drops the chat lead-in, the closing offer and the divider', () => {

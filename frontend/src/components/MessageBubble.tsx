@@ -424,49 +424,54 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                 ) : null}
 
                 {message.generatedFiles && message.generatedFiles.length > 0 && (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {message.generatedFiles.map((file, index) => {
-                      const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
-                      const isPdf = file.type === 'application/pdf'
-                      const isExcel = file.type.includes('spreadsheet')
-                      const isPowerPoint = file.type.includes('presentation')
-                      const Icon = isExcel
-                        ? FileSpreadsheet
-                        : isPowerPoint
-                          ? Presentation
-                          : FileText
-                      const accentClass = isPdf
-                        ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-                        : isExcel
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                  <>
+                    {message.documentSummary && (
+                      <p className="text-sm leading-relaxed text-text-secondary dark:text-text-dark-secondary">{message.documentSummary}</p>
+                    )}
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {message.generatedFiles.map((file, index) => {
+                        const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+                        const isPdf = file.type === 'application/pdf'
+                        const isExcel = file.type.includes('spreadsheet')
+                        const isPowerPoint = file.type.includes('presentation')
+                        const Icon = isExcel
+                          ? FileSpreadsheet
                           : isPowerPoint
-                            ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
-                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                            ? Presentation
+                            : FileText
+                        const accentClass = isPdf
+                          ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                          : isExcel
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : isPowerPoint
+                              ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                              : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
 
-                      return (
-                        <a
-                          key={`${file.name}-${index}`}
-                          href={file.dataUrl}
-                          download={file.name}
-                          className="group/file flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-accent/40 hover:bg-surface-tertiary dark:border-border-dark dark:bg-surface-dark-tertiary dark:hover:bg-surface-dark-secondary"
-                          title={`Download ${file.name}`}
-                        >
-                          <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl', accentClass)}>
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
-                              {file.name}
-                            </p>
-                            <p className="mt-0.5 text-xs text-text-tertiary dark:text-text-dark-tertiary">
-                              {extension} · {formatFileSize(file.size)}
-                            </p>
-                          </div>
-                          <Download className="h-4 w-4 flex-shrink-0 text-text-tertiary transition-colors group-hover/file:text-accent" />
-                        </a>
-                      )
-                    })}
-                  </div>
+                        return (
+                          <a
+                            key={`${file.name}-${index}`}
+                            href={file.dataUrl}
+                            download={file.name}
+                            className="group/file flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-accent/40 hover:bg-surface-tertiary dark:border-border-dark dark:bg-surface-dark-tertiary dark:hover:bg-surface-dark-secondary"
+                            title={`Download ${file.name}`}
+                          >
+                            <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl', accentClass)}>
+                              <Icon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
+                                {file.name}
+                              </p>
+                              <p className="mt-0.5 text-xs text-text-tertiary dark:text-text-dark-tertiary">
+                                {extension} · {formatFileSize(file.size)}
+                              </p>
+                            </div>
+                            <Download className="h-4 w-4 flex-shrink-0 text-text-tertiary transition-colors group-hover/file:text-accent" />
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
             )}
