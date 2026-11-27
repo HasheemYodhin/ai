@@ -13,7 +13,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import { apiClient, type CodeExecutionStatus } from '@/api/client'
-import { downloadJavaSource, javaSourceFileName } from '@/lib/download'
+import { downloadJavaSource } from '@/lib/download'
 import { javaPlaygroundUrl } from '@/lib/javaPlayground'
 import { useAuth } from '@/hooks/useAuth'
 import { runBrowserPython, type BrowserCodeResult } from '@/lib/browserPython'
@@ -297,7 +297,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const executionPanel = !canRun && showRunReason ? (
     <div className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
       <p role="status">{runDisabledReason}. {runtime === 'java'
-        ? `Run opens JavaFiddle with your code. If the editor is blank, select the ${javaSourceFileName(code)} tab.`
+        ? 'Run opens JavaFiddle with your code in the editor.'
         : 'Python snippets can run in a supported browser. Other runtimes require the owner’s local server.'}</p>
       {runtime === 'java' && (
         <div className="mt-2 flex flex-wrap gap-3">

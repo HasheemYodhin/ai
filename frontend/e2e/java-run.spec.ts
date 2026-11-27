@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 import lzString from 'lz-string'
 
 const javaSnippet = 'public final class ReverseString { public static void main(String[] args) { System.out.println(new StringBuilder("Dabba").reverse()); } }'
@@ -35,7 +36,10 @@ for (const available of [false, true]) {
       expect(url.origin).toBe('https://javafiddle.leaningtech.com')
       expect(url.search).toBe('')
       expect(JSON.parse(lzString.decompressFromEncodedURIComponent(url.hash.slice(1))!)).toMatchObject({
-        files: [{ path: 'ReverseString.java', content: javaSnippet }],
+        files: [{
+          path: 'Main.java',
+          content: `${javaSnippet.slice('public'.length)}\n\nclass Main {\n    public static void main(String[] args) throws Throwable {\n        ReverseString.main(args);\n    }\n}\n`,
+        }],
       })
       await context.route('https://javafiddle.leaningtech.com/**', route => route.fulfill({ body: 'JavaFiddle' }))
       const [playground] = await Promise.all([page.waitForEvent('popup'), run.click()])
@@ -48,6 +52,7 @@ for (const available of [false, true]) {
         page.getByRole('button', { name: 'Download Java source' }).click(),
       ])
       expect(download.suggestedFilename()).toBe('ReverseString.java')
+      expect(await readFile(await download.path(), 'utf8')).toBe(javaSnippet)
     }
   })
 }
