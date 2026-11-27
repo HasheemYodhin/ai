@@ -260,7 +260,7 @@ CI runs on every pull request: lint, unit tests, CodeQL, and PR metadata checks.
 
 **Run Python.** On hosted installs, Python code blocks run in a sandboxed browser worker and load Pyodide from jsDelivr. The runner supports standard input and output with a five-second execution timeout. Scripts that install software or need access to the host must be run in your own terminal. The owner can use local runtimes by setting `api.enable_local_code_execution: true` in the server YAML and connecting through loopback.
 
-**Run Java.** On hosted installs, open the Java block’s Run menu to download its source or open JavaFiddle. Paste the source into the playground to run it there. For Dabba’s local Run button, install an OpenJDK JDK with both `java` and `javac` on the backend’s PATH, then use the local execution setting above.
+**Run Java.** On hosted installs, the Java block’s Run link opens JavaFiddle with the snippet loaded. Select the Java file tab if needed, then run it there. Open Java run options to download the source. For Dabba’s local runner, install an OpenJDK JDK with both `java` and `javac` on the backend’s PATH, then use the local execution setting above.
 
 The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check. It also bundles [Litestream](https://litestream.io): set `LITESTREAM_BUCKET` and the R2 variables to back up the SQLite databases to Cloudflare R2 and restore them on startup.
 

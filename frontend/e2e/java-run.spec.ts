@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test'
+import lzString from 'lz-string'
 
 const javaSnippet = 'public final class ReverseString { public static void main(String[] args) { System.out.println(new StringBuilder("Dabba").reverse()); } }'
 
 for (const available of [false, true]) {
-  test(available ? 'Java uses the local runner when the JDK is available' : 'Locked Java offers a download and browser playground', async ({ page }) => {
+  test(available ? 'Java uses the local runner when the JDK is available' : 'Run opens JavaFiddle with the Java source already loaded', async ({ page, context }) => {
     const messages = [
       { id: 'prompt', role: 'user', content: 'Reverse a string in Java', timestamp: 1 },
       { id: 'reply', role: 'assistant', content: ['```java', javaSnippet, '```'].join('\n'), timestamp: 2 },
@@ -28,8 +29,20 @@ for (const available of [false, true]) {
       await page.getByRole('button', { name: 'Run', exact: true }).click()
       await expect(page.getByText('abbaD', { exact: true })).toBeVisible()
     } else {
-      await page.getByRole('button', { name: /Java JDK is missing/ }).click()
-      await expect(page.getByRole('link', { name: 'Open Java playground' })).toHaveAttribute('href', 'https://javafiddle.leaningtech.com/')
+      const run = page.getByRole('link', { name: 'Run in JavaFiddle' })
+      await expect(run).toBeVisible()
+      const url = new URL((await run.getAttribute('href'))!)
+      expect(url.origin).toBe('https://javafiddle.leaningtech.com')
+      expect(url.search).toBe('')
+      expect(JSON.parse(lzString.decompressFromEncodedURIComponent(url.hash.slice(1))!)).toMatchObject({
+        files: [{ path: 'ReverseString.java', content: javaSnippet }],
+      })
+      await context.route('https://javafiddle.leaningtech.com/**', route => route.fulfill({ body: 'JavaFiddle' }))
+      const [playground] = await Promise.all([page.waitForEvent('popup'), run.click()])
+      await expect(playground).toHaveURL(url.href)
+      await playground.close()
+      await page.getByRole('button', { name: 'Java run options' }).click()
+      await expect(page.getByRole('status').filter({ hasText: 'Java JDK is missing' })).toBeVisible()
       const [download] = await Promise.all([
         page.waitForEvent('download'),
         page.getByRole('button', { name: 'Download Java source' }).click(),

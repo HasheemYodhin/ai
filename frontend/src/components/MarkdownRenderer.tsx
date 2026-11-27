@@ -8,12 +8,13 @@ import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
-import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X, Lock } from 'lucide-react'
+import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X, Lock, CircleHelp, ExternalLink } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import { apiClient, type CodeExecutionStatus } from '@/api/client'
-import { downloadJavaSource } from '@/lib/download'
+import { downloadJavaSource, javaSourceFileName } from '@/lib/download'
+import { javaPlaygroundUrl } from '@/lib/javaPlayground'
 import { useAuth } from '@/hooks/useAuth'
 import { runBrowserPython, type BrowserCodeResult } from '@/lib/browserPython'
 
@@ -196,6 +197,8 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
       : 'Checking code execution availability'
   const useBrowserRunner = canRunInBrowser && runDisabledReason !== null
   const canRun = useBrowserRunner || (isRunnableLanguage && runDisabledReason === null)
+  const useJavaPlayground = runtime === 'java' && !canRun && (!isAdmin || executionAccess?.userId === userId)
+  const playgroundUrl = useMemo(() => useJavaPlayground ? javaPlaygroundUrl(code) : '', [code, useJavaPlayground])
 
   useEffect(() => {
     if (!isAdmin || !userId || !isRunnableLanguage) return
@@ -247,7 +250,18 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   }, [canRun, useBrowserRunner, language, code, stdin])
 
   const [showRunReason, setShowRunReason] = useState(false)
-  const runner = isRunnableLanguage && !canRun && runDisabledReason ? (
+  const runner = useJavaPlayground ? (
+    <>
+      <a href={playgroundUrl} target="_blank" rel="noopener noreferrer" aria-label="Run in JavaFiddle"
+        title="Open JavaFiddle with this code" className="flex items-center gap-1.5 rounded bg-accent px-2 py-1 text-xs font-medium text-white hover:bg-accent-hover">
+        <Play className="h-3.5 w-3.5" aria-hidden="true" /> Run <ExternalLink className="h-3 w-3" aria-hidden="true" />
+      </a>
+      <button type="button" onClick={() => setShowRunReason(value => !value)} aria-expanded={showRunReason}
+        aria-label="Java run options" title="Java run options" className="rounded p-1 text-accent hover:bg-accent/10">
+        <CircleHelp className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </>
+  ) : isRunnableLanguage && !canRun && runDisabledReason ? (
     <button
       type="button"
       onClick={() => setShowRunReason(value => !value)}
@@ -283,12 +297,11 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const executionPanel = !canRun && showRunReason ? (
     <div className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
       <p role="status">{runDisabledReason}. {runtime === 'java'
-        ? 'Run Java with a local JDK or open the browser playground and paste the code there.'
+        ? `Run opens JavaFiddle with your code. If the editor is blank, select the ${javaSourceFileName(code)} tab.`
         : 'Python snippets can run in a supported browser. Other runtimes require the owner’s local server.'}</p>
       {runtime === 'java' && (
         <div className="mt-2 flex flex-wrap gap-3">
           <button type="button" onClick={() => downloadJavaSource(code)} className="font-medium text-accent underline">Download Java source</button>
-          <a href="https://javafiddle.leaningtech.com/" target="_blank" rel="noopener noreferrer" className="font-medium text-accent underline">Open Java playground</a>
         </div>
       )}
     </div>
