@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Square, X, Loader2, Mic } from 'lucide-react'
-import { startRecording, watchAudioLevel, type VoiceRecorder } from '@/lib/voice'
-import { apiClient } from '@/api/client'
-import { useTheme } from '@/hooks/useTheme'
+import { currentAccentColor } from '@/lib/accent'
+import { useDialogFocus } from '@/hooks/useDialogFocus'
+import { friendlyVoiceError, startVoiceInput, watchAudioLevel, type VoiceInput } from '@/lib/voice'
 
 interface VoiceRecordingModalProps {
   onClose: () => void
@@ -12,26 +12,33 @@ interface VoiceRecordingModalProps {
 /** Full "voice mode" overlay — live waveform while recording, then transcribes on stop. */
 export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingModalProps) {
   const [error, setError] = useState<string | null>(null)
+  // True when the server can't transcribe at all (as opposed to a microphone problem).
+  const [unavailable, setUnavailable] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [elapsed, setElapsed] = useState(0)
-  const recorderRef = useRef<VoiceRecorder | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const recorderRef = useRef<VoiceInput | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const levelsRef = useRef<number[]>(new Array(48).fill(0))
-  const { theme } = useTheme()
 
   useEffect(() => {
     let stopWatching: (() => void) | null = null
-    let cancelled = false
-
-    startRecording()
-      .then(async (recorder) => {
-        if (cancelled) { recorder.cancel(); return }
-        recorderRef.current = recorder
-        stopWatching = watchAudioLevel(recorder.stream, (level) => {
+    const controller = new AbortController()
+    startVoiceInput(controller.signal).then(recorder => {
+      if (controller.signal.aborted) { recorder.cancel(); return }
+      recorderRef.current = recorder
+      setIsRecording(true)
+      if (recorder.stream) {
+        stopWatching = watchAudioLevel(recorder.stream, level => {
           levelsRef.current = [...levelsRef.current.slice(1), level]
         })
-      })
-      .catch(err => setError((err as Error).message || 'Could not access the microphone'))
+      }
+    }).catch(err => {
+      if (controller.signal.aborted) return
+      const friendly = friendlyVoiceError((err as Error).message || 'Could not access the microphone')
+      setUnavailable(friendly.unavailable)
+      setError(friendly.text)
+    })
 
     const timer = setInterval(() => setElapsed(e => e + 1), 1000)
 
@@ -49,7 +56,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
         ctx.clearRect(0, 0, w, h)
         const barWidth = w / levelsRef.current.length
-        const accent = theme === 'dark' ? '#e08a6a' : '#c96442'
+        const accent = currentAccentColor()
         levelsRef.current.forEach((level, i) => {
           const barHeight = Math.max(3, level * h * 0.9)
           ctx.fillStyle = accent
@@ -62,41 +69,48 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
     draw()
 
     return () => {
-      cancelled = true
+      controller.abort()
       clearInterval(timer)
       cancelAnimationFrame(rafId)
       stopWatching?.()
       recorderRef.current?.cancel()
+      recorderRef.current = null
     }
-  }, [theme])
+  }, [])
 
   const handleStop = async () => {
     const recorder = recorderRef.current
     if (!recorder) { onClose(); return }
     setIsTranscribing(true)
     try {
-      const blob = await recorder.stop()
-      const text = await apiClient.transcribeAudio(blob)
-      if (text) onTranscribed(text)
+      const text = await recorder.stop()
+      if (recorderRef.current !== recorder) return
+      if (!text) throw new Error('No speech detected. Try again.')
+      onTranscribed(text)
       onClose()
     } catch (err) {
-      setError((err as Error).message || 'Transcription failed')
+      if (recorderRef.current !== recorder) return
+      const friendly = friendlyVoiceError((err as Error).message || 'Transcription failed')
+      setUnavailable(friendly.unavailable)
+      setError(friendly.text)
       setIsTranscribing(false)
     }
   }
 
   const handleCancel = () => {
     recorderRef.current?.cancel()
+    recorderRef.current = null
     onClose()
   }
 
+  const dialogRef = useDialogFocus(true, handleCancel)
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
   const ss = String(elapsed % 60).padStart(2, '0')
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 animate-fade-in">
-      <div className="bg-surface dark:bg-surface-dark-secondary rounded-2xl border border-border dark:border-border-dark shadow-xl w-full max-w-sm m-4 p-6 flex flex-col items-center">
-        <button onClick={handleCancel} className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Voice mode" tabIndex={-1} className="relative bg-surface dark:bg-surface-dark-secondary rounded-2xl border border-border dark:border-border-dark shadow-xl w-full max-w-sm m-4 p-6 flex flex-col items-center">
+        <button onClick={handleCancel} aria-label="Close voice mode" className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
           <X className="w-4 h-4" />
         </button>
 
@@ -109,7 +123,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
         </div>
 
         <p className="text-sm font-medium text-text-primary dark:text-text-dark-primary mb-1">
-          {isTranscribing ? 'Transcribing…' : error ? 'Microphone error' : 'Listening…'}
+          {isTranscribing ? 'Transcribing…' : unavailable ? 'Voice input unavailable' : error ? 'Microphone error' : isRecording ? 'Listening…' : 'Opening microphone…'}
         </p>
 
         {error ? (
@@ -129,7 +143,7 @@ export function VoiceRecordingModal({ onClose, onTranscribed }: VoiceRecordingMo
           </button>
           <button
             onClick={handleStop}
-            disabled={isTranscribing || !!error}
+            disabled={!isRecording || isTranscribing || !!error}
             className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-semibold bg-accent hover:bg-accent-hover disabled:opacity-50 text-white transition-colors"
           >
             <Square className="w-3.5 h-3.5 fill-current" /> Stop

@@ -174,6 +174,21 @@ class CliConfig:
         except OSError:
             pass
 
+    def remove_provider_key(self, provider: str) -> bool:
+        from dabba.platform.services import SecretVault
+
+        matches = [
+            name for name in self.api_keys if name.casefold() == provider.casefold()
+        ]
+        if not matches:
+            return False
+        vault = SecretVault()
+        for name in matches:
+            vault.delete("cli", f"provider:{name}")
+            del self.api_keys[name]
+        self.save()
+        return True
+
     def set(self, key: str, value: str) -> None:
         """
         Set a configuration key from a string value.

@@ -15,9 +15,10 @@ import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dabba.platform.core import (
     PlatformStore,
@@ -30,6 +31,8 @@ from dabba.platform.core import (
     resolve_workspace_directory,
     utc_ms,
 )
+from dabba.platform.postgres import PostgresConnection
+from sqlite3 import Connection as SQLiteConnection
 
 TASK_STATES = {
     "queued",
@@ -108,6 +111,13 @@ TASK_TRANSITIONS = {
 }
 
 
+CHAT_USAGE_WINDOWS = (
+    ("5-hour", 5, "DABBA_CHAT_TOKEN_LIMIT_5H", 250_000),
+    ("Daily", 24, "DABBA_CHAT_TOKEN_LIMIT_DAILY", 1_000_000),
+    ("Weekly", 168, "DABBA_CHAT_TOKEN_LIMIT_WEEKLY", 4_000_000),
+)
+
+
 class TaskOrchestrator:
     """Durable state machine and event log for long-running work."""
 
@@ -123,24 +133,31 @@ class TaskOrchestrator:
         workspace_id: Optional[str] = None,
         model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        reject_duplicate: bool = False,
+        connection: Optional[SQLiteConnection | PostgresConnection] = None,
     ) -> Dict[str, Any]:
-        if idempotency_key:
-            existing = self.store.fetchone(
-                "SELECT * FROM tasks WHERE user_id IS ? AND idempotency_key = ?",
-                (user_id, idempotency_key),
-            )
-            if existing:
-                return self._decode(existing)
-
         task_id = new_id("task")
         now = utc_ms()
-        with self.store.transaction() as conn:
-            conn.execute(
+        with (
+            nullcontext(connection)
+            if connection is not None
+            else self.store.transaction()
+        ) as conn:
+            if idempotency_key:
+                existing = conn.execute(
+                    "SELECT * FROM tasks WHERE user_id IS ? AND idempotency_key = ?",
+                    (user_id, idempotency_key),
+                ).fetchone()
+                if existing:
+                    if reject_duplicate:
+                        raise FileExistsError("Task already exists")
+                    return self._decode(dict(existing))
+            row = conn.execute(
                 """
                 INSERT INTO tasks
                     (id, user_id, workspace_id, kind, status, request_json,
                      progress, model, idempotency_key, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?) RETURNING *
                 """,
                 (
                     task_id,
@@ -153,9 +170,9 @@ class TaskOrchestrator:
                     now,
                     now,
                 ),
-            )
+            ).fetchone()
             self._insert_event(conn, task_id, "task.created", {"kind": kind}, now)
-        return self.get(task_id)
+            return self._decode(dict(row))
 
     def get(self, task_id: str) -> Dict[str, Any]:
         row = self.store.fetchone("SELECT * FROM tasks WHERE id = ?", (task_id,))
@@ -195,28 +212,45 @@ class TaskOrchestrator:
         current_step: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None,
         error: Optional[Dict[str, Any]] = None,
+        record_model_usage: bool = False,
     ) -> Dict[str, Any]:
         if status not in TASK_STATES:
             raise ValueError(f"Unknown task state: {status}")
-        current = self.get(task_id)
-        if (
-            status != current["status"]
-            and status not in TASK_TRANSITIONS[current["status"]]
-        ):
-            raise ValueError(
-                f"Invalid task transition: {current['status']} -> {status}"
-            )
-
-        now = utc_ms()
-        resolved_progress = (
-            max(0.0, min(float(progress), 1.0))
-            if progress is not None
-            else current["progress"]
-        )
-        if status == "completed":
-            resolved_progress = 1.0
         with self.store.transaction() as conn:
-            conn.execute(
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Task not found: {task_id}")
+            current = self._decode(dict(row))
+            if (
+                status != current["status"]
+                and status not in TASK_TRANSITIONS[current["status"]]
+            ):
+                raise ValueError(
+                    f"Invalid task transition: {current['status']} -> {status}"
+                )
+
+            now = utc_ms()
+            resolved_progress = (
+                max(0.0, min(float(progress), 1.0))
+                if progress is not None
+                else current["progress"]
+            )
+            if status == "completed":
+                resolved_progress = 1.0
+            usage = (result or {}).get("usage")
+            record_usage = (
+                record_model_usage
+                and status == "completed"
+                and current["kind"] == "chat"
+                and current["userId"]
+                and current["model"]
+                and isinstance(usage, dict)
+                and all(
+                    isinstance(usage.get(key), int) and usage[key] >= 0
+                    for key in ("prompt_tokens", "completion_tokens")
+                )
+            )
+            updated = conn.execute(
                 """
                 UPDATE tasks SET status=?, progress=?, current_step=?,
                     result_json=COALESCE(?, result_json),
@@ -227,7 +261,7 @@ class TaskOrchestrator:
                     completed_at=CASE WHEN ? IN ('completed','failed') THEN ? ELSE completed_at END,
                     cancelled_at=CASE WHEN ? = 'cancelled' THEN ? ELSE cancelled_at END,
                     updated_at=?
-                WHERE id=?
+                WHERE id=? RETURNING *
                 """,
                 (
                     status,
@@ -244,7 +278,21 @@ class TaskOrchestrator:
                     now,
                     task_id,
                 ),
-            )
+            ).fetchone()
+            if record_usage:
+                conn.execute(
+                    """INSERT INTO model_usage
+                       (task_id, user_id, model, prompt_tokens, completion_tokens, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO NOTHING""",
+                    (
+                        task_id,
+                        current["userId"],
+                        current["model"],
+                        usage["prompt_tokens"],
+                        usage["completion_tokens"],
+                        now,
+                    ),
+                )
             self._insert_event(
                 conn,
                 task_id,
@@ -257,7 +305,106 @@ class TaskOrchestrator:
                 },
                 now,
             )
-        return self.get(task_id)
+        return self._decode(dict(updated))
+
+    def chat_usage_limits(self, user_id: str) -> list[Dict[str, Any]]:
+        now = utc_ms()
+        cutoffs = [now - hours * 3_600_000 for _, hours, _, _ in CHAT_USAGE_WINDOWS]
+        totals = self.store.fetchone(
+            """SELECT CAST(COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS BIGINT) AS five_hour,
+                      CAST(COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS BIGINT) AS daily,
+                      CAST(COALESCE(SUM(tokens), 0) AS BIGINT) AS weekly
+               FROM (
+                   SELECT created_at, prompt_tokens + completion_tokens AS tokens
+                   FROM model_usage WHERE user_id=? AND created_at > ? AND created_at <= ?
+               ) AS usage""",
+            (cutoffs[0], cutoffs[1], user_id, cutoffs[2], now),
+        )
+        limits = []
+        for (label, hours, env_var, default), column, cutoff in zip(
+            CHAT_USAGE_WINDOWS, ("five_hour", "daily", "weekly"), cutoffs
+        ):
+            used = totals[column]
+            limit = max(0, int(os.getenv(env_var, str(default))))
+            retry_at = None
+            if limit and used >= limit:
+                row = self.store.fetchone(
+                    """SELECT created_at FROM (
+                        SELECT created_at, SUM(prompt_tokens + completion_tokens)
+                            OVER (ORDER BY created_at) AS expired_tokens
+                        FROM model_usage
+                        WHERE user_id=? AND created_at>? AND created_at<=?
+                    ) AS usage WHERE expired_tokens>? ORDER BY created_at LIMIT 1""",
+                    (user_id, cutoff, now, used - limit),
+                )
+                if row:
+                    retry_at = row["created_at"] + hours * 3_600_000
+            limits.append(
+                {
+                    "label": label,
+                    "windowHours": hours,
+                    "usedTokens": used,
+                    "limitTokens": limit,
+                    "retryAt": retry_at,
+                }
+            )
+        return limits
+
+    def usage_summary(self, user_id: str) -> Dict[str, Any]:
+        """Token totals for a user, from the usage recorded for each finished chat."""
+        rows = self.store.fetchall(
+            """SELECT model, COUNT(*) AS replies,
+                      CAST(COALESCE(SUM(prompt_tokens), 0) AS BIGINT) AS prompt_tokens,
+                      CAST(COALESCE(SUM(completion_tokens), 0) AS BIGINT) AS completion_tokens
+               FROM model_usage WHERE user_id=? GROUP BY model""",
+            (user_id,),
+        )
+        by_model = sorted(
+            (
+                {
+                    "model": row["model"],
+                    "replies": row["replies"],
+                    "promptTokens": row["prompt_tokens"],
+                    "completionTokens": row["completion_tokens"],
+                    "tokens": row["prompt_tokens"] + row["completion_tokens"],
+                }
+                for row in rows
+            ),
+            key=lambda item: item["tokens"],
+            reverse=True,
+        )
+        return {
+            "replies": sum(item["replies"] for item in by_model),
+            "promptTokens": sum(item["promptTokens"] for item in by_model),
+            "completionTokens": sum(item["completionTokens"] for item in by_model),
+            "totalTokens": sum(item["tokens"] for item in by_model),
+            "byModel": by_model,
+            "limits": self.chat_usage_limits(user_id),
+        }
+
+    def fail_stale_chat_tasks(self, cutoff_ms: int) -> int:
+        """Recover abandoned API chat tasks after allowing for active workers."""
+        failure = {
+            "code": "chat_interrupted",
+            "message": "The chat worker stopped responding.",
+        }
+        now = utc_ms()
+        with self.store.transaction() as conn:
+            rows = conn.execute(
+                """SELECT id FROM tasks WHERE kind='chat'
+                   AND status IN ('queued', 'running') AND updated_at < ?""",
+                (cutoff_ms,),
+            ).fetchall()
+            for row in rows:
+                conn.execute(
+                    """UPDATE tasks SET status='failed', error_json=?, current_step=NULL,
+                       completed_at=?, updated_at=? WHERE id=?""",
+                    (json_dumps(failure), now, now, row["id"]),
+                )
+                self._insert_event(
+                    conn, row["id"], "task.failed", {"error": failure}, now
+                )
+        return len(rows)
 
     def append_event(
         self, task_id: str, event_type: str, payload: Dict[str, Any]
@@ -313,12 +460,17 @@ class TaskOrchestrator:
         handler: Callable[
             [Dict[str, Any], Callable[[float, str], None]], Dict[str, Any]
         ],
+        *,
+        already_claimed: bool = False,
     ) -> Dict[str, Any]:
         """Run a registered job handler while persisting progress and failure."""
         task = self.get(task_id)
-        if task["status"] not in {"queued", "retrying"}:
-            raise ValueError(f"Task {task_id} cannot run from {task['status']}")
-        self.transition(task_id, "running", current_step="Starting")
+        if not already_claimed:
+            if task["status"] not in {"queued", "retrying"}:
+                raise ValueError(f"Task {task_id} cannot run from {task['status']}")
+            self.transition(task_id, "running", current_step="Starting")
+        elif task["status"] != "running":
+            return task
 
         def progress(value: float, step: str) -> None:
             current = self.get(task_id)
@@ -367,11 +519,11 @@ class TaskOrchestrator:
         cursor = conn.execute(
             """
             INSERT INTO task_events(task_id, event_type, payload_json, created_at)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?) RETURNING id
             """,
             (task_id, kind, json_dumps(payload), now),
         )
-        return int(cursor.lastrowid)
+        return int(cursor.fetchone()["id"])
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -595,19 +747,26 @@ class IdentityService:
             raise ValueError("A valid name and email are required")
         user_id = new_id("user")
         now = utc_ms()
+        password_hash = self.hash_password(password)
         try:
             with self.store.transaction() as conn:
+                # The first account becomes the workspace owner (role
+                # "admin"); everyone after is a member. Deciding inside the
+                # INSERT keeps it atomic, so two simultaneous first signups
+                # can't both become owner.
                 conn.execute(
                     """
                     INSERT INTO users
                         (id, email, name, password_hash, role, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'member', ?, ?)
+                    SELECT ?, ?, ?, ?,
+                        CASE WHEN EXISTS (SELECT 1 FROM users) THEN 'member' ELSE 'admin' END,
+                        ?, ?
                     """,
                     (
                         user_id,
                         normalized,
                         name.strip(),
-                        self.hash_password(password),
+                        password_hash,
                         now,
                         now,
                     ),
@@ -642,7 +801,19 @@ class IdentityService:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = utc_ms()
         session_id = new_id("session")
+        oldest_tiebreaker = "id" if self.store.postgres_url else "rowid"
         with self.store.transaction() as conn:
+            # Installs created before "first account = owner" may have no
+            # owner at all; the oldest account claims it on its next login.
+            conn.execute(
+                f"""
+                UPDATE users SET role='admin', updated_at=?
+                WHERE id=?
+                  AND NOT EXISTS (SELECT 1 FROM users WHERE role='admin' AND disabled=0)
+                  AND id=(SELECT id FROM users ORDER BY created_at, {oldest_tiebreaker} LIMIT 1)
+                """,
+                (now, row["id"]),
+            )
             conn.execute(
                 """
                 INSERT INTO sessions
@@ -666,7 +837,7 @@ class IdentityService:
         now = utc_ms()
         row = self.store.fetchone(
             """
-            SELECT s.id AS session_id, s.user_id, s.expires_at, u.*
+            SELECT s.id AS session_id, s.last_seen_at, u.*
             FROM sessions s JOIN users u ON u.id=s.user_id
             WHERE s.token_hash=? AND s.revoked_at IS NULL
               AND s.expires_at>? AND u.disabled=0
@@ -675,12 +846,14 @@ class IdentityService:
         )
         if not row:
             return None
-        with self.store.transaction() as conn:
-            conn.execute(
-                "UPDATE sessions SET last_seen_at=? WHERE id=?",
-                (now, row["session_id"]),
-            )
-        return self.get_user(row["user_id"])
+        cutoff = now - 300_000
+        if row["last_seen_at"] <= cutoff:
+            with self.store.transaction() as conn:
+                conn.execute(
+                    "UPDATE sessions SET last_seen_at=? WHERE id=? AND last_seen_at<=?",
+                    (now, row["session_id"], cutoff),
+                )
+        return self._profile(row)
 
     def logout(self, token: str) -> None:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -690,14 +863,30 @@ class IdentityService:
                 (utc_ms(), token_hash),
             )
 
+    def update_profile(self, user_id: str, name: str, bio: str) -> Dict[str, Any]:
+        name, bio = name.strip(), bio.strip()
+        if not name:
+            raise ValueError("Display name is required")
+        with self.store.transaction() as conn:
+            conn.execute(
+                "UPDATE users SET name=?, bio=?, updated_at=? WHERE id=?",
+                (name, bio, utc_ms(), user_id),
+            )
+        return self.get_user(user_id)
+
     def get_user(self, user_id: str) -> Dict[str, Any]:
         row = self.store.fetchone("SELECT * FROM users WHERE id=?", (user_id,))
         if not row:
             raise KeyError(f"User not found: {user_id}")
+        return self._profile(row)
+
+    @staticmethod
+    def _profile(row: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "id": row["id"],
             "email": row["email"],
             "name": row["name"],
+            "bio": row["bio"],
             "role": row["role"],
             "disabled": bool(row["disabled"]),
             "createdAt": row["created_at"],
@@ -1290,14 +1479,20 @@ class MemoryService:
             raise ValueError(f"Unknown memory scope: {scope}")
         memory_id = new_id("memory")
         now = utc_ms()
+        conflict_target = (
+            "((COALESCE(user_id, '')), (COALESCE(workspace_id, '')), "
+            "(COALESCE(conversation_id, '')), scope, memory_key)"
+            if self.store.postgres_url
+            else ""
+        )
         with self.store.transaction() as conn:
             conn.execute(
-                """
+                f"""
                 INSERT INTO memories
                     (id, user_id, workspace_id, conversation_id, scope, memory_key,
                      content, metadata_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO UPDATE SET
+                ON CONFLICT {conflict_target} DO UPDATE SET
                     content=excluded.content,
                     metadata_json=excluded.metadata_json,
                     updated_at=excluded.updated_at
@@ -2913,32 +3108,37 @@ class ScheduledSkillService:
         cadence: str = "daily",
         interval_minutes: Optional[int] = None,
         time_of_day: Optional[str] = None,
+        time_zone: str = "UTC",
         weekdays: Optional[list[int]] = None,
         enabled: bool = True,
         next_run_at: Optional[int] = None,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._validate(
             name, instructions, cadence, interval_minutes, time_of_day, weekdays
         )
+        self._time_zone(time_zone)
         now, schedule_id = utc_ms(), new_id("schedule")
         next_at = next_run_at or self._next_run(
-            cadence, now, interval_minutes, time_of_day, weekdays
+            cadence, now, interval_minutes, time_of_day, weekdays, time_zone
         )
         with self.store.transaction() as conn:
             conn.execute(
                 """INSERT INTO scheduled_skills
-                   (id,user_id,name,skill_name,instructions,cadence,interval_minutes,
-                    time_of_day,weekdays_json,enabled,next_run_at,created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id,user_id,name,skill_name,instructions,model,cadence,interval_minutes,
+                    time_of_day,time_zone,weekdays_json,enabled,next_run_at,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     schedule_id,
                     user_id,
                     name.strip(),
                     skill_name.strip() or name.strip(),
                     instructions.strip(),
+                    (model or "").strip() or None,
                     cadence,
                     interval_minutes,
                     time_of_day,
+                    time_zone,
                     json_dumps(weekdays or []),
                     int(enabled),
                     next_at,
@@ -2972,9 +3172,11 @@ class ScheduledSkillService:
             "name",
             "skillName",
             "instructions",
+            "model",
             "cadence",
             "intervalMinutes",
             "timeOfDay",
+            "timeZone",
             "weekdays",
             "enabled",
             "nextRunAt",
@@ -2990,9 +3192,16 @@ class ScheduledSkillService:
             values["timeOfDay"],
             values["weekdays"],
         )
+        self._time_zone(values["timeZone"])
         if any(
             key in changes
-            for key in ("cadence", "intervalMinutes", "timeOfDay", "weekdays")
+            for key in (
+                "cadence",
+                "intervalMinutes",
+                "timeOfDay",
+                "timeZone",
+                "weekdays",
+            )
         ):
             values["nextRunAt"] = self._next_run(
                 values["cadence"],
@@ -3000,19 +3209,22 @@ class ScheduledSkillService:
                 values["intervalMinutes"],
                 values["timeOfDay"],
                 values["weekdays"],
+                values["timeZone"],
             )
         with self.store.transaction() as conn:
             conn.execute(
-                """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,cadence=?,
-                   interval_minutes=?,time_of_day=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
+                """UPDATE scheduled_skills SET name=?,skill_name=?,instructions=?,model=?,cadence=?,
+                   interval_minutes=?,time_of_day=?,time_zone=?,weekdays_json=?,enabled=?,next_run_at=?,updated_at=?
                    WHERE id=? AND user_id=?""",
                 (
                     str(values["name"]).strip(),
                     str(values["skillName"]).strip(),
                     str(values["instructions"]).strip(),
+                    (str(values["model"] or "").strip() or None),
                     values["cadence"],
                     values["intervalMinutes"],
                     values["timeOfDay"],
+                    values["timeZone"],
                     json_dumps(values["weekdays"] or []),
                     int(values["enabled"]),
                     values["nextRunAt"],
@@ -3032,24 +3244,14 @@ class ScheduledSkillService:
             )
 
     def dispatch(
-        self, schedule_id: str, user_id: str, triggered_by: str = "manual"
+        self,
+        schedule_id: str,
+        user_id: str,
+        triggered_by: str = "manual",
+        *,
+        expected_at: Optional[int] = None,
     ) -> Dict[str, Any]:
         schedule = self.get(schedule_id, user_id)
-        task = self.tasks.create(
-            "scheduled_skill",
-            {
-                "scheduleId": schedule_id,
-                "skillName": schedule["skillName"],
-                "instructions": schedule["instructions"],
-                "triggeredBy": triggered_by,
-            },
-            user_id=user_id,
-            idempotency_key=(
-                f"schedule:{schedule_id}:{schedule['nextRunAt']}"
-                if triggered_by == "schedule"
-                else None
-            ),
-        )
         now, run_id = utc_ms(), new_id("run")
         next_at = self._next_run(
             schedule["cadence"],
@@ -3057,8 +3259,34 @@ class ScheduledSkillService:
             schedule["intervalMinutes"],
             schedule["timeOfDay"],
             schedule["weekdays"],
+            schedule["timeZone"],
         )
         with self.store.transaction() as conn:
+            row = conn.execute(
+                "SELECT enabled,next_run_at FROM scheduled_skills WHERE id=? AND user_id=?",
+                (schedule_id, user_id),
+            ).fetchone()
+            if not row or (
+                triggered_by == "schedule"
+                and (not row["enabled"] or row["next_run_at"] != expected_at)
+            ):
+                raise KeyError("Schedule occurrence is no longer due")
+            task = self.tasks.create(
+                "scheduled_skill",
+                {
+                    "scheduleId": schedule_id,
+                    "skillName": schedule["skillName"],
+                    "instructions": schedule["instructions"],
+                    "triggeredBy": triggered_by,
+                },
+                user_id=user_id,
+                connection=conn,
+                idempotency_key=(
+                    f"schedule:{schedule_id}:{schedule['nextRunAt']}"
+                    if triggered_by == "schedule"
+                    else None
+                ),
+            )
             conn.execute(
                 """INSERT INTO scheduled_skill_runs
                    (id,schedule_id,user_id,task_id,status,triggered_by,output_json,started_at,completed_at)
@@ -3084,10 +3312,60 @@ class ScheduledSkillService:
     def dispatch_due(self, limit: int = 25) -> list[Dict[str, Any]]:
         now = utc_ms()
         rows = self.store.fetchall(
-            "SELECT id,user_id FROM scheduled_skills WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at LIMIT ?",
+            "SELECT id,user_id,next_run_at FROM scheduled_skills WHERE enabled=1 AND next_run_at<=? ORDER BY next_run_at LIMIT ?",
             (now, max(1, min(limit, 100))),
         )
-        return [self.dispatch(row["id"], row["user_id"], "schedule") for row in rows]
+        dispatched = []
+        for row in rows:
+            try:
+                dispatched.append(
+                    self.dispatch(
+                        row["id"],
+                        row["user_id"],
+                        "schedule",
+                        expected_at=row["next_run_at"],
+                    )
+                )
+            except KeyError:
+                continue
+        return dispatched
+
+    def queued_runs(self, limit: int = 25) -> list[Dict[str, Any]]:
+        rows = self.store.fetchall(
+            """SELECT r.* FROM scheduled_skill_runs r JOIN tasks t ON t.id = r.task_id
+               WHERE r.status = 'queued' AND t.status = 'queued'
+               ORDER BY r.started_at, r.id LIMIT ?""",
+            (limit,),
+        )
+        return [self._decode_run(row) for row in rows]
+
+    def prompt_with_context(
+        self, schedule: Dict[str, Any], user_id: str, current_run_id: str
+    ) -> str:
+        """The schedule's instructions plus what a model can't otherwise know.
+
+        A model doesn't know today's date, and each run starts with no memory of
+        the last one, so a recurring job like "new words every day" would keep
+        giving the same answer. Add the date and the last few results, and ask
+        for something new.
+        """
+        today = datetime.now(timezone.utc).strftime("%A, %d %B %Y")
+        text = f"{schedule['instructions']}\n\nToday's date is {today} (UTC)."
+        earlier: list[str] = []
+        for run in self.runs(user_id, schedule["id"], 10):
+            if run["id"] == current_run_id or run["status"] != "completed":
+                continue
+            content = str((run.get("output") or {}).get("content") or "").strip()
+            if content:
+                earlier.append(content[:1500])
+            if len(earlier) == 5:
+                break
+        if earlier:
+            text += (
+                "\n\nEarlier results from this schedule are below. Do not repeat "
+                "them; give new content.\n---\n" + "\n---\n".join(earlier)[:5000]
+            )
+        return text
 
     def execute(
         self, run_id: str, user_id: str, executor: Callable[[str], str]
@@ -3095,6 +3373,34 @@ class ScheduledSkillService:
         """Execute a dispatched run and mirror its outcome into task and run history."""
         run = self.get_run(run_id, user_id)
         schedule = self.get(run["scheduleId"], user_id)
+
+        now = utc_ms()
+        with self.store.transaction() as conn:
+            claimed = conn.execute(
+                """UPDATE tasks SET status='running', current_step='Starting', started_at=?, updated_at=?
+                   WHERE id=? AND status='queued'
+                     AND EXISTS (SELECT 1 FROM scheduled_skill_runs WHERE id=? AND status='queued')""",
+                (now, now, run["taskId"], run_id),
+            ).rowcount
+            if claimed:
+                conn.execute(
+                    "UPDATE scheduled_skill_runs SET status='running' WHERE id=?",
+                    (run_id,),
+                )
+                self.tasks._insert_event(
+                    conn,
+                    run["taskId"],
+                    "task.running",
+                    {
+                        "progress": 0,
+                        "current_step": "Starting",
+                        "result": None,
+                        "error": None,
+                    },
+                    now,
+                )
+        if not claimed:
+            return self.get_run(run_id, user_id)
 
         def handler(
             _request: Dict[str, Any], progress: Callable[[float, str], None]
@@ -3104,7 +3410,7 @@ class ScheduledSkillService:
             progress(0.9, "Saving result")
             return {"content": content, "scheduleId": schedule["id"]}
 
-        task = self.tasks.run(run["taskId"], handler)
+        task = self.tasks.run(run["taskId"], handler, already_claimed=True)
         status = task["status"]
         error = (task.get("error") or {}).get("message") if task.get("error") else None
         with self.store.transaction() as conn:
@@ -3181,21 +3487,32 @@ class ScheduledSkillService:
             raise ValueError("Weekdays must be between 0 and 6")
 
     @staticmethod
+    def _time_zone(name: str) -> ZoneInfo:
+        try:
+            return ZoneInfo(name)
+        except (ZoneInfoNotFoundError, TypeError, ValueError) as exc:
+            raise ValueError("Choose a valid timezone such as Asia/Kolkata") from exc
+
+    @staticmethod
     def _next_run(
         cadence: str,
         after_ms: int,
         interval_minutes: Optional[int],
         time_of_day: Optional[str],
         weekdays: Optional[list[int]],
+        time_zone: str = "UTC",
     ) -> int:
         after = datetime.fromtimestamp(after_ms / 1000, tz=timezone.utc)
         if cadence == "interval":
             return int(
                 (after + timedelta(minutes=interval_minutes or 60)).timestamp() * 1000
             )
+        after = after.astimezone(ScheduledSkillService._time_zone(time_zone))
         hour, minute = map(int, (time_of_day or "09:00").split(":"))
-        candidate = after.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if candidate <= after:
+        candidate = after.replace(
+            hour=hour, minute=minute, second=0, microsecond=0, fold=0
+        )
+        if candidate.timestamp() * 1000 <= after_ms:
             candidate += timedelta(days=1)
         if cadence == "weekly":
             valid = set(weekdays or [0])
@@ -3210,9 +3527,11 @@ class ScheduledSkillService:
             "name": row["name"],
             "skillName": row["skill_name"],
             "instructions": row["instructions"],
+            "model": row["model"] if "model" in row.keys() else None,
             "cadence": row["cadence"],
             "intervalMinutes": row["interval_minutes"],
             "timeOfDay": row["time_of_day"],
+            "timeZone": row["time_zone"],
             "weekdays": json_loads(row["weekdays_json"], []),
             "enabled": bool(row["enabled"]),
             "nextRunAt": row["next_run_at"],

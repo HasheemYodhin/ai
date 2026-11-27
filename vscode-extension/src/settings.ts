@@ -61,7 +61,7 @@ export class SettingsManager {
   }
 
   async getApiKey(): Promise<string | undefined> {
-    return this.secretStorage.get('dabba.apiKey');
+    return (await this.secretStorage.get(this.sessionKey(this.getSettings().apiEndpoint))) ?? this.secretStorage.get('dabba.apiKey');
   }
 
   async setApiKey(key: string): Promise<void> {
@@ -70,6 +70,18 @@ export class SettingsManager {
 
   async clearApiKey(): Promise<void> {
     await this.secretStorage.delete('dabba.apiKey');
+  }
+
+  private sessionKey(endpoint: string): string {
+    return `dabba.session:${endpoint.replace(/\/+$/, '')}`;
+  }
+
+  async setSession(endpoint: string, token: string): Promise<void> {
+    await this.secretStorage.store(this.sessionKey(endpoint), token);
+  }
+
+  async clearSession(endpoint: string): Promise<void> {
+    await this.secretStorage.delete(this.sessionKey(endpoint));
   }
 
   dispose(): void {

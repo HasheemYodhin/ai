@@ -5,15 +5,18 @@ Model IDs verified against the live catalog (July 2026).
 
 from __future__ import annotations
 import re
+from contextlib import closing
 from typing import Iterator, List, Optional
 from dabba.providers.base import (
     BaseProvider,
     ModelInfo,
+    ReasoningDelta,
     tools_to_openai_schema,
     openai_tool_calls_to_tags,
     remap_tool_role_for_provider,
 )
 
+FLUX_IMAGE_MODEL = "black-forest-labs/flux.1-dev"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 SLOW_REASONING_TIMEOUT_SECONDS = 300.0
@@ -38,118 +41,82 @@ RESOURCE_EXHAUSTED_BACKOFF_SECONDS = 3.0
 # appear permanently stuck after one overloaded request; a short cooldown
 # avoids hammering the endpoint while allowing the user to continue promptly.
 CAPACITY_COOLDOWN_SECONDS = 45.0
-DEFAULT_CAPACITY_FALLBACK = "qwen/qwen2.5-coder-32b-instruct"
+DEFAULT_CAPACITY_FALLBACK = "nvidia/nemotron-3.5-lightning-30b-a3b"
 CAPACITY_FALLBACKS = {
-    "deepseek-ai/deepseek-v4-flash": "qwen/qwen2.5-coder-32b-instruct",
+    "deepseek-ai/deepseek-v4-flash": DEFAULT_CAPACITY_FALLBACK,
     "nvidia/nemotron-3-ultra-550b-a55b": DEFAULT_CAPACITY_FALLBACK,
 }
 
 MODELS = [
-    # Meta Llama
-    ModelInfo(
-        "meta/llama-3.3-70b-instruct",
-        "Llama 3.3 70B",
-        "nvidia",
-        "high",
-        "Meta Llama 3.3 70B Instruct",
-        128000,
-        0.23,
-        0.23,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "meta/llama-3.1-8b-instruct",
-        "Llama 3.1 8B",
-        "nvidia",
-        "medium",
-        "Meta Llama 3.1 8B Instruct",
-        128000,
-        0.05,
-        0.05,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "meta/llama-3.2-3b-instruct",
-        "Llama 3.2 3B",
-        "nvidia",
-        "low",
-        "Meta Llama 3.2 3B fast",
-        128000,
-        0.04,
-        0.04,
-        False,
-        True,
-    ),
     # NVIDIA Nemotron
-    ModelInfo(
-        "nvidia/llama-3.1-nemotron-70b-instruct",
-        "Nemotron 70B",
-        "nvidia",
-        "xhigh",
-        "NVIDIA Nemotron reasoning model",
-        128000,
-        0.35,
-        0.35,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "nvidia/llama-3.3-nemotron-super-49b-v1",
-        "Nemotron Super 49B",
-        "nvidia",
-        "high",
-        "NVIDIA Nemotron Super",
-        128000,
-        0.42,
-        0.42,
-        False,
-        True,
-    ),
     ModelInfo(
         "nvidia/nemotron-3-ultra-550b-a55b",
         "Nemotron-3 Ultra 550B",
         "nvidia",
         "max",
-        "NVIDIA Nemotron-3 Ultra 550B model",
-        8192,
+        "Hybrid Mamba-Transformer MoE for agentic reasoning, coding and tool calling",
+        1000000,
         0.0,
         0.0,
         False,
         True,
     ),
-    # DeepSeek — only the full R1 is confirmed live on NVIDIA NIM
     ModelInfo(
-        "deepseek-ai/deepseek-r1",
-        "DeepSeek R1",
+        "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        "Nemotron 3.5 Super VL 120B",
+        "nvidia",
+        "high",
+        "Early-access reasoning model for agentic, coding and multimodal work",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+        supports_vision=True,
+    ),
+    ModelInfo(
+        "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "Nemotron 3.5 Lightning 30B",
+        "nvidia",
+        "medium",
+        "Fast 30B A3B MoE for specialized agentic tasks",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning",
+        "Nemotron 3 Nano Omni 30B",
+        "nvidia",
+        "medium",
+        "Omni-modal reasoning model (images, video, speech, text)",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    ModelInfo(
+        "nvidia/nemotron-3.5-bolt-e4b",
+        "Nemotron 3.5 Bolt E4B",
+        "nvidia",
+        "low",
+        "Compact model for reasoning, tool calling and agentic chat",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    # Moonshot
+    ModelInfo(
+        "moonshotai/kimi-k3.1-pro",
+        "Kimi K3.1 Pro",
         "nvidia",
         "max",
-        "DeepSeek R1 full reasoning model",
-        128000,
-        0.55,
-        2.19,
-        True,
-        True,
-    ),
-    ModelInfo(
-        "deepseek-ai/deepseek-r1-distill-qwen-7b",
-        "DeepSeek R1 Qwen 7B",
-        "nvidia",
-        "high",
-        "DeepSeek R1 distilled (Qwen base)",
-        128000,
-        0.08,
-        0.08,
-        True,
-        True,
-    ),
-    ModelInfo(
-        "deepseek-ai/deepseek-v4-flash",
-        "DeepSeek V4 Flash",
-        "nvidia",
-        "high",
-        "284B MoE, 1M context, fast coding & agents",
+        "3T-class open model with 1M context for agentic coding",
         1000000,
         0.0,
         0.0,
@@ -158,138 +125,90 @@ MODELS = [
     ),
     # Mistral
     ModelInfo(
-        "mistralai/mistral-7b-instruct-v0.3",
-        "Mistral 7B",
-        "nvidia",
-        "medium",
-        "Mistral 7B Instruct",
-        32768,
-        0.04,
-        0.04,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "mistralai/mixtral-8x7b-instruct-v0.1",
-        "Mixtral 8x7B",
-        "nvidia",
-        "high",
-        "Mixtral MoE 8x7B",
-        32768,
-        0.24,
-        0.24,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "mistralai/mistral-large-2-instruct",
-        "Mistral Large 2",
+        "mistralai/mistral-large-4-1t-a52b",
+        "Mistral Large 4",
         "nvidia",
         "xhigh",
-        "Mistral Large 2",
+        "1T-total / 52B-active MoE with reasoning and function calling",
         128000,
-        2.00,
-        6.00,
+        0.0,
+        0.0,
         False,
         True,
     ),
-    # Microsoft Phi
+    # StepFun
     ModelInfo(
-        "microsoft/phi-3.5-mini-instruct",
-        "Phi-3.5 Mini",
+        "stepfun-ai/step-5-preview",
+        "Step 5 Preview",
         "nvidia",
-        "medium",
-        "Microsoft Phi-3.5 Mini 128K",
-        128000,
-        0.05,
-        0.05,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "microsoft/phi-3-medium-128k-instruct",
-        "Phi-3 Medium",
-        "nvidia",
-        "high",
-        "Microsoft Phi-3 Medium 128K",
-        128000,
-        0.12,
-        0.12,
-        False,
-        True,
-    ),
-    # Qwen
-    ModelInfo(
-        "qwen/qwen2.5-72b-instruct",
-        "Qwen 2.5 72B",
-        "nvidia",
-        "high",
-        "Qwen 2.5 72B Instruct",
-        32768,
-        0.35,
-        0.35,
-        False,
-        True,
-    ),
-    ModelInfo(
-        "qwen/qwen2.5-coder-32b-instruct",
-        "Qwen 2.5 Coder 32B",
-        "nvidia",
-        "high",
-        "Qwen 2.5 Coder specialized",
-        32768,
-        0.20,
-        0.20,
-        False,
-        True,
-    ),
-    # Z.ai GLM — free endpoint on NVIDIA NIM (build.nvidia.com/z-ai/glm-5.2)
-    ModelInfo(
-        "z-ai/glm-5.2",
-        "GLM 5.2",
-        "nvidia",
-        "max",
-        "Flagship LLM for agentic workflows, coding, and long-horizon reasoning",
+        "xhigh",
+        "~600B / 27B-active multimodal MoE with 1M context",
         1000000,
         0.0,
         0.0,
-        True,
+        False,
         True,
     ),
-    # ThinkingMachines
+    # Z.ai GLM
     ModelInfo(
-        "thinkingmachines/inkling",
-        "Inkling",
+        "z-ai/glm-5.3-flash",
+        "GLM 5.3 Flash",
         "nvidia",
-        "max",
-        "ThinkingMachines Inkling model",
-        8192,
+        "high",
+        "320B / 18B-active MoE with reasoning and tool calling",
+        128000,
         0.0,
         0.0,
-        False,
+        True,
         True,
     ),
     # MiniMax
     ModelInfo(
-        "minimaxai/minimax-m3",
-        "MiniMax M3",
+        "minimaxai/minimax-m3.1-flash",
+        "MiniMax M3.1 Flash",
         "nvidia",
         "high",
-        "MiniMax M3 model",
-        1000000,
+        "Multimodal MoE for coding, agentic workflows and computer use",
+        128000,
         0.0,
         0.0,
         True,
         True,
-    ),  # 428B MoE, up to 1M context / 512K output
+    ),
+    # Meta
+    ModelInfo(
+        "meta/muse-glimmer-30b",
+        "Muse Glimmer 30B",
+        "nvidia",
+        "high",
+        "Multimodal reasoning model with native tool calling",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
     # Google Gemma
     ModelInfo(
-        "google/gemma-2-2b-it",
-        "Gemma-2 2B It",
+        "google/gemma-4-31b-it",
+        "Gemma 4 31B",
         "nvidia",
-        "low",
-        "Google Gemma-2 2B Instruct model",
-        8192,
+        "high",
+        "Dense 31B model for coding and agentic workflows",
+        128000,
+        0.0,
+        0.0,
+        False,
+        True,
+    ),
+    # Poolside
+    ModelInfo(
+        "poolside/laguna-xs-2.1",
+        "Laguna XS 2.1",
+        "nvidia",
+        "medium",
+        "33B MoE for long-horizon agentic coding and terminal tasks",
+        128000,
         0.0,
         0.0,
         False,
@@ -297,7 +216,7 @@ MODELS = [
     ),
     # Image generation (FLUX.1-dev via NVIDIA NIM ai.api.nvidia.com)
     ModelInfo(
-        "black-forest-labs/flux.1-dev",
+        FLUX_IMAGE_MODEL,
         "FLUX.1-dev (Image)",
         "nvidia",
         "high",
@@ -310,10 +229,52 @@ MODELS = [
     ),
 ]
 
-# Models confirmed EOL on NVIDIA NIM — kept here as reference, NOT in active list:
-#   google/gemma-3-27b-it       — EOL 2026-05-12
-#   google/gemma-3-12b-it       — EOL 2026-05-12
-#   deepseek-ai/deepseek-r1-distill-llama-8b — 404 (ID changed / removed)
+# Models confirmed EOL (410) or removed (404) on NVIDIA NIM as of 2026-11-18 —
+# kept here as reference, NOT in active list: meta/llama-3.x, nvidia/llama-3.x-nemotron,
+# deepseek-ai/deepseek-r1*, deepseek-ai/deepseek-v4-flash, mistralai/mistral-7b,
+# mixtral-8x7b, mistral-large-2, microsoft/phi-3*, qwen/qwen2.5-*, z-ai/glm-5.2,
+# thinkingmachines/inkling, minimaxai/minimax-m3, google/gemma-2/3.
+
+
+class _ReasoningFilter:
+    """Separate inline think blocks even when a tag spans several deltas."""
+
+    def __init__(self):
+        self.inside = False
+        self.tail = ""
+
+    def feed(self, text: str, *, final: bool = False) -> Iterator[str]:
+        remaining = self.tail + text
+        self.tail = ""
+        while remaining:
+            marker = "</think>" if self.inside else "<think>"
+            lowered = remaining.lower()
+            position = lowered.find(marker)
+            if position >= 0:
+                visible = remaining[:position]
+                remaining = remaining[position + len(marker) :]
+            else:
+                trailing = 0
+                if not final:
+                    for length in range(min(len(marker) - 1, len(remaining)), 0, -1):
+                        if lowered.endswith(marker[:length]):
+                            trailing = length
+                            break
+                self.tail = remaining[-trailing:] if trailing else ""
+                visible = remaining[:-trailing] if trailing else remaining
+                remaining = ""
+            if visible:
+                yield ReasoningDelta(visible) if self.inside else visible
+            if position >= 0:
+                self.inside = not self.inside
+
+
+def _without_inline_reasoning(text: str) -> str:
+    return "".join(
+        part
+        for part in _ReasoningFilter().feed(text, final=True)
+        if not isinstance(part, ReasoningDelta)
+    )
 
 
 class NvidiaProvider(BaseProvider):
@@ -359,6 +320,9 @@ class NvidiaProvider(BaseProvider):
         is_slow = (
             self._is_reasoning_model(model)
             or model_l == "deepseek-ai/deepseek-v4-flash"
+            or model_l.startswith(
+                ("moonshotai/kimi", "stepfun-ai/step-", "google/gemma-4")
+            )
         )
         return SLOW_REASONING_TIMEOUT_SECONDS if is_slow else DEFAULT_TIMEOUT_SECONDS
 
@@ -370,7 +334,7 @@ class NvidiaProvider(BaseProvider):
             or "inkling" in model_l
             or "thinkingmachines" in model_l
             or "minimax" in model_l
-            or model_l == "z-ai/glm-5.2"
+            or model_l.startswith("z-ai/glm-5")
         )
 
     def _build_params(
@@ -425,7 +389,7 @@ class NvidiaProvider(BaseProvider):
         # an ordinary chat look stuck. Keep GLM fast at low/medium effort and
         # only enable the long thinking path when the registry explicitly asks
         # for it (high/xhigh/max effort).
-        if model.lower() == "z-ai/glm-5.2":
+        if model.lower().startswith("z-ai/glm-5"):
             params["extra_body"] = {
                 "chat_template_kwargs": {
                     "enable_thinking": bool(kwargs.get("thinking", False)),
@@ -446,6 +410,13 @@ class NvidiaProvider(BaseProvider):
                     ),
                 }
             }
+
+        # Nemotron reasons before answering by default, which roughly doubles
+        # reply time (measured 11.8s vs 6.5s on a short question). Callers
+        # that want quick answers, like guest chat, pass thinking=False
+        # explicitly; when the kwarg is absent the model's default is kept.
+        if "nemotron" in model.lower() and kwargs.get("thinking") is False:
+            params["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
         # Reasoning models work better without explicit temperature.
         if not self._is_reasoning_model(model):
@@ -481,7 +452,7 @@ class NvidiaProvider(BaseProvider):
         """
         cont = dict(params)
         model_l = model.lower()
-        if model_l == "z-ai/glm-5.2":
+        if model_l.startswith("z-ai/glm-5"):
             cont["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         elif "minimax" in model_l:
             cont["extra_body"] = {"chat_template_kwargs": {"thinking_mode": "disabled"}}
@@ -581,7 +552,9 @@ class NvidiaProvider(BaseProvider):
                     ) from exc
                 raise
 
-    def _stream_with_recovery(self, client, params: dict, model: str):
+    def _stream_with_recovery(
+        self, client, params: dict, model: str, cancel_event=None
+    ):
         """
         Iterate an NVIDIA stream with capacity recovery around iteration.
 
@@ -596,11 +569,13 @@ class NvidiaProvider(BaseProvider):
 
         lazy_attempt = 0
         partial_text = ""
-        while True:
+        while cancel_event is None or not cancel_event.is_set():
             stream = self._create_with_retries(client, params, model, stream=True)
             emitted_text = False
             try:
                 for chunk in stream:
+                    if cancel_event is not None and cancel_event.is_set():
+                        return
                     if getattr(chunk, "choices", None):
                         delta = chunk.choices[0].delta
                         text = getattr(delta, "content", None)
@@ -619,7 +594,10 @@ class NvidiaProvider(BaseProvider):
                 if emitted_text and can_fallback:
                     self._mark_capacity_cooldown(model)
                     params["messages"] = list(params["messages"]) + [
-                        {"role": "assistant", "content": partial_text},
+                        {
+                            "role": "assistant",
+                            "content": _without_inline_reasoning(partial_text),
+                        },
                         {"role": "user", "content": _CONTINUE_PROMPT},
                     ]
                     params["model"] = fallback
@@ -629,9 +607,13 @@ class NvidiaProvider(BaseProvider):
 
                 if not emitted_text and lazy_attempt < RESOURCE_EXHAUSTED_RETRIES:
                     lazy_attempt += 1
-                    _time.sleep(
-                        RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (2 ** (lazy_attempt - 1))
+                    delay = RESOURCE_EXHAUSTED_BACKOFF_SECONDS * (
+                        2 ** (lazy_attempt - 1)
                     )
+                    if cancel_event is None:
+                        _time.sleep(delay)
+                    elif cancel_event.wait(delay):
+                        return
                     continue
 
                 if not emitted_text and can_fallback:
@@ -645,6 +627,10 @@ class NvidiaProvider(BaseProvider):
                     f"Model '{params.get('model', model)}' is at capacity on NVIDIA NIM "
                     "right now and stayed overloaded through automatic retries."
                 ) from exc
+            finally:
+                close = getattr(stream, "close", None)
+                if close:
+                    close()
 
     @staticmethod
     def _max_tokens_ceiling(exc: Exception) -> Optional[int]:
@@ -682,7 +668,7 @@ class NvidiaProvider(BaseProvider):
         resp = self._create_with_retries(client, params, model)
 
         message = resp.choices[0].message
-        text = (message.content or "").strip()
+        text = _without_inline_reasoning(message.content or "").strip()
         if params["model"] != model:
             text = (
                 f"_`{model}` is at capacity, so Dabba used `{params['model']}` for this response._\n\n"
@@ -709,7 +695,7 @@ class NvidiaProvider(BaseProvider):
                 "messages": continuation_messages,
             }
             cont_resp = self._create_with_retries(client, cont_params, model)
-            more = cont_resp.choices[0].message.content or ""
+            more = _without_inline_reasoning(cont_resp.choices[0].message.content or "")
             text = (text + more).strip()
             finish_reason = cont_resp.choices[0].finish_reason
             self._accumulate_usage(usage_total, cont_resp.usage)
@@ -724,6 +710,8 @@ class NvidiaProvider(BaseProvider):
         self, messages, model, max_tokens=4096, temperature=0.7, **kwargs
     ) -> Iterator[str]:
         usage_out = kwargs.pop("usage_out", None)
+        cancel_event = kwargs.pop("cancel_event", None)
+        include_reasoning = kwargs.pop("include_reasoning", False)
         key = kwargs.get("api_key", "")
         if not key:
             raise RuntimeError(
@@ -742,50 +730,59 @@ class NvidiaProvider(BaseProvider):
         params["stream_options"] = {"include_usage": True}
 
         accumulated = ""
-        finish_reason = None
-        usage_total: dict = {}
-        for chunk in self._stream_with_recovery(client, params, model):
-            if getattr(chunk, "usage", None):
-                self._accumulate_usage(usage_total, chunk.usage)
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            text = getattr(delta, "content", None)
-            if text:
-                accumulated += text
-                yield text
-            if chunk.choices[0].finish_reason:
-                finish_reason = chunk.choices[0].finish_reason
-
         continuation_messages = list(params["messages"])
-        continuations = 0
-        while finish_reason == "length" and continuations < MAX_LENGTH_CONTINUATIONS:
+        request_params = params
+        usage_total: dict = {}
+        for continuation in range(MAX_LENGTH_CONTINUATIONS + 1):
+            finish_reason = None
+            reasoning_filter = _ReasoningFilter()
+            with closing(
+                self._stream_with_recovery(client, request_params, model, cancel_event)
+            ) as chunks:
+                for chunk in chunks:
+                    if getattr(chunk, "usage", None):
+                        self._accumulate_usage(usage_total, chunk.usage)
+                    if not chunk.choices:
+                        continue
+                    choice = chunk.choices[0]
+                    delta = choice.delta
+                    reasoning = getattr(delta, "reasoning_content", None)
+                    if include_reasoning and isinstance(reasoning, str) and reasoning:
+                        yield ReasoningDelta(reasoning)
+                    for part in reasoning_filter.feed(
+                        getattr(delta, "content", None) or ""
+                    ):
+                        if isinstance(part, ReasoningDelta):
+                            if include_reasoning:
+                                yield part
+                        else:
+                            accumulated += part
+                            yield part
+                    if choice.finish_reason:
+                        finish_reason = choice.finish_reason
+            for part in reasoning_filter.feed("", final=True):
+                if isinstance(part, ReasoningDelta):
+                    if include_reasoning:
+                        yield part
+                else:
+                    accumulated += part
+                    yield part
+
+            if (
+                finish_reason != "length"
+                or continuation == MAX_LENGTH_CONTINUATIONS
+                or (cancel_event is not None and cancel_event.is_set())
+            ):
+                break
             if accumulated:
                 continuation_messages = continuation_messages + [
                     {"role": "assistant", "content": accumulated},
                     {"role": "user", "content": _CONTINUE_PROMPT},
                 ]
-            # else: thinking consumed the entire budget with nothing visible
-            # streamed — retry the same request fresh (thinking forced off
-            # below) instead of continuing from an empty turn.
-            cont_params = {
+            request_params = {
                 **self._continuation_params(model, params),
                 "messages": continuation_messages,
             }
-            finish_reason = None
-            for chunk in self._stream_with_recovery(client, cont_params, model):
-                if getattr(chunk, "usage", None):
-                    self._accumulate_usage(usage_total, chunk.usage)
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                text = getattr(delta, "content", None)
-                if text:
-                    accumulated += text
-                    yield text
-                if chunk.choices[0].finish_reason:
-                    finish_reason = chunk.choices[0].finish_reason
-            continuations += 1
 
         if usage_out is not None:
             usage_out.update(usage_total)
@@ -813,7 +810,7 @@ class NvidiaProvider(BaseProvider):
         payload = {
             "prompt": prompt,
             "seed": 0,
-            "num_inference_steps": 50,
+            "steps": 50,
         }
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -834,7 +831,9 @@ class NvidiaProvider(BaseProvider):
                 )
             except Exception:
                 msg = resp.text or f"HTTP {resp.status_code}"
-            raise RuntimeError(f"NVIDIA NIM image generation failed: {msg}")
+            raise RuntimeError(
+                f"NVIDIA NIM image generation failed (HTTP {resp.status_code}): {msg}"
+            )
 
         data = resp.json()
         images = []

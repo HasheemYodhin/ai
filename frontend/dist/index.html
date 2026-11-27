@@ -5,16 +5,29 @@
     <link rel="icon" type="image/svg+xml" href="/assets/icon-wQv5PIov.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#000000" />
-    <meta name="description" content="dabba - AI Chat Interface" />
+    <meta name="description" content="Dabba is a self hosted AI workspace: Claude, GPT, Gemini, NVIDIA and local models in one chat, with agents, connectors, saved skills and scheduled automations." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Dabba" />
+    <meta property="og:title" content="Dabba: self hosted AI workspace for chat, code and automation" />
+    <meta property="og:description" content="Claude, GPT, Gemini, NVIDIA and local models in one chat, with agents, connectors and scheduled skills, running on your own server." />
+    <meta property="og:image" content="/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <title>dabba</title>
-    <script type="module" crossorigin src="/assets/index-BxS9pLSZ.js"></script>
-    <link rel="modulepreload" crossorigin href="/assets/lucide-DQh9JCD7.js">
-    <link rel="modulepreload" crossorigin href="/assets/pdf-Dj13fgTl.js">
+    <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <title>Dabba: self hosted AI workspace for chat, code and automation</title>
+    <script>
+      // Apply the saved theme before paint.
+      try {
+        var d = document.documentElement
+        var t = localStorage.getItem('dabba-theme') || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+        d.classList.add(t === 'light' ? 'light' : 'dark')
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-CF_H2OaF.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/lucide-HajeRx4l.js">
     <link rel="modulepreload" crossorigin href="/assets/simple-icons-C2p9-J2X.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-C0OIKKI8.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-A1vbuuTX.css">
   </head>
   <body class="antialiased">
     <div id="root"></div>

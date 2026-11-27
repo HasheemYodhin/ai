@@ -2,35 +2,71 @@ import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Messag
 
 export const DEFAULT_API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
 
+export class HttpResponseError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
+export class TerminalChatError extends Error {}
+
 async function responseError(response: Response, fallback: string): Promise<Error> {
+  if (response.headers.get('Content-Type')?.includes('text/html')) {
+    return new HttpResponseError(response.status, response.status >= 500
+      ? `Dabba is temporarily unavailable (HTTP ${response.status}). Please try again.`
+      : fallback)
+  }
   const text = await response.text().catch(() => '')
-  if (!text) return new Error(fallback)
+  if (!text) return new HttpResponseError(response.status, fallback)
 
   try {
     const body = JSON.parse(text) as {
       detail?: unknown
       error?: { message?: unknown }
     }
-    if (typeof body.error?.message === 'string') return new Error(body.error.message)
-    if (typeof body.detail === 'string') return new Error(body.detail)
+    if (typeof body.error?.message === 'string') return new HttpResponseError(response.status, body.error.message)
+    if (typeof body.detail === 'string') return new HttpResponseError(response.status, body.detail)
     if (Array.isArray(body.detail)) {
       const details = body.detail
         .map(item => typeof item?.msg === 'string' ? item.msg : '')
         .filter(Boolean)
         .join('; ')
-      if (details) return new Error(details)
+      if (details) return new HttpResponseError(response.status, details)
     }
   } catch {
     // Some proxies return plain-text errors instead of JSON.
   }
 
-  return new Error(text.trim() || fallback)
+  return new HttpResponseError(response.status, /^\s*</.test(text) ? fallback : text.trim() || fallback)
 }
+
+/** How long a shared read (models, skills) is reused before refetching. */
+const READ_CACHE_TTL_MS = 30_000
+
+/** Let one caller stop waiting on a shared promise without cancelling it for the others. */
+function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('Aborted', 'AbortError'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      value => { signal.removeEventListener('abort', onAbort); resolve(value) },
+      error => { signal.removeEventListener('abort', onAbort); reject(error) },
+    )
+  })
+}
+
+export class ConversationConflictError extends Error {}
 
 export class ApiClient {
   private baseUrl: string
   private apiKey: string
   private sessionToken = localStorage.getItem('dabba-session-token') ?? ''
+  // Several components request the same read-only data on one page load
+  // (the model catalog 3x, skills 2x). Concurrent callers share one in-flight
+  // request and reuse its result for READ_CACHE_TTL_MS.
+  private readCache = new Map<string, { at: number; promise: Promise<unknown> }>()
 
   constructor(baseUrl = DEFAULT_API_URL, apiKey = '') {
     this.baseUrl = baseUrl
@@ -43,6 +79,31 @@ export class ApiClient {
 
   setApiKey(key: string) {
     this.apiKey = key
+  }
+
+  /**
+   * Shared, short-lived cache for idempotent GETs. The key includes the
+   * server, session and API key so a different user or server never sees
+   * another's cached data. Failed requests are dropped so the next call retries.
+   */
+  private cachedRead<T>(name: string, load: () => Promise<T>, opts: { signal?: AbortSignal; force?: boolean } = {}): Promise<T> {
+    const key = `${name}|${this.baseUrl}|${this.sessionToken}|${this.apiKey}`
+    const hit = this.readCache.get(key)
+    if (!opts.force && hit && Date.now() - hit.at < READ_CACHE_TTL_MS) {
+      return withAbort(hit.promise as Promise<T>, opts.signal)
+    }
+    const promise = load()
+    const entry = { at: Date.now(), promise }
+    this.readCache.set(key, entry)
+    promise.catch(() => { if (this.readCache.get(key) === entry) this.readCache.delete(key) })
+    return withAbort(promise, opts.signal)
+  }
+
+  /** Drop cached reads for one resource (call after writes that change it). */
+  invalidateReadCache(name: string) {
+    for (const key of this.readCache.keys()) {
+      if (key.startsWith(`${name}|`)) this.readCache.delete(key)
+    }
   }
 
   setSessionToken(token: string) {
@@ -105,18 +166,75 @@ export class ApiClient {
     return data
   }
 
+  /** Free prompts left for a signed-out visitor (server-enforced). */
+  async guestStatus(guestId: string, signal?: AbortSignal): Promise<{ available: boolean; remaining: number; limit: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/guest/status?guestId=${encodeURIComponent(guestId)}`, { signal })
+    if (!response.ok) throw await responseError(response, 'Could not check free prompts')
+    return response.json()
+  }
+
+  /**
+   * Send a guest prompt and stream the reply. The server sends
+   * `{"delta": text}` events as the reply is generated, then
+   * `{"done": true, "remaining": n}` or `{"error": ..., "remaining": n}`;
+   * comment lines are keepalives. A 429 means the free prompts are used up.
+   */
+  async guestChat(
+    guestId: string,
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    onDelta: (text: string) => void,
+    signal?: AbortSignal,
+  ): Promise<{ error?: string; remaining: number; limitReached?: boolean }> {
+    let response: Response
+    try {
+      response = await fetch(`${this.baseUrl}/v1/guest/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ guestId, messages }),
+        signal,
+      })
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err
+      throw new Error('Cannot reach Dabba right now. Check your connection and try again.')
+    }
+    if (response.status === 429) return { remaining: 0, limitReached: true }
+    if (!response.ok || !response.body) throw await responseError(response, 'Dabba couldn\'t answer just now. Try again in a moment.')
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let result: { error?: string; remaining: number } | null = null
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE events are separated by a blank line; keep any partial event.
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() ?? ''
+      for (const part of parts) {
+        const line = part.split('\n').find(row => row.startsWith('data: '))
+        if (!line) continue // keepalive comment
+        const event = JSON.parse(line.slice('data: '.length)) as { delta?: string; done?: boolean; error?: string; remaining?: number }
+        if (event.delta) onDelta(event.delta)
+        else if (event.done || event.error) result = { error: event.error, remaining: event.remaining ?? 0 }
+      }
+    }
+    if (!result) throw new Error('Dabba couldn\'t answer just now. Try again in a moment.')
+    return result
+  }
+
   async currentUser(signal?: AbortSignal): Promise<PlatformUser | null> {
-    if (!this.sessionToken) return null
-    const response = await fetch(`${this.baseUrl}/v1/platform/identity/me`, {
+    const token = this.sessionToken
+    if (!token) return null
+    const response = await fetch(`${this.baseUrl}/v1/platform/identity/me?restore=true`, {
       headers: this.getPlatformHeaders(),
+      cache: 'no-store',
       signal,
     })
-    if (response.status === 401) {
-      this.setSessionToken('')
-      return null
-    }
-    if (!response.ok) throw await responseError(response, 'Could not restore your session')
-    return response.json()
+    if (!response.ok && response.status !== 401) throw await responseError(response, 'Could not restore your session')
+    const user: PlatformUser | null = response.status === 401 ? null : await response.json()
+    if (!user && !signal?.aborted && this.sessionToken === token) this.setSessionToken('')
+    return user
   }
 
   async logout(): Promise<void> {
@@ -129,6 +247,62 @@ export class ApiClient {
     this.setSessionToken('')
   }
 
+  updateProfile(profile: ProfileDetails): Promise<PlatformUser> {
+    return this.platformRequest('/identity/me', {
+      method: 'PATCH',
+      body: JSON.stringify(profile),
+    })
+  }
+
+  private async chatToolsRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations${path}`, {
+      ...init, headers: this.getPlatformHeaders(), cache: 'no-store',
+    })
+    if (!response.ok) throw await responseError(response, 'Could not complete the chat action.')
+    return response.status === 204 ? undefined as T : response.json()
+  }
+
+  async savedMessages(): Promise<SavedChatMessage[]> {
+    const { items } = await this.chatToolsRequest<{ items: SavedChatMessage[] }>('/saved')
+    return items ?? []
+  }
+
+  setMessageSaved(chatId: string, messageId: string, saved: boolean): Promise<void> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/saved/${encodeURIComponent(messageId)}`, {
+      method: saved ? 'PUT' : 'DELETE',
+    })
+  }
+
+  async chatShares(chatId: string): Promise<ChatShare[]> {
+    const { items } = await this.chatToolsRequest<{ items: ChatShare[] }>(`/${encodeURIComponent(chatId)}/shares`)
+    return items ?? []
+  }
+
+  createChatShare(chatId: string, messageIds: string[], revision: number): Promise<ChatShare> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/shares`, {
+      method: 'POST', body: JSON.stringify({ messageIds, revision }),
+    })
+  }
+
+  revokeChatShare(chatId: string, id: string): Promise<void> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/shares/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async publicChatShare(id: string, signal: AbortSignal): Promise<SharedChat> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations/public/shares/${encodeURIComponent(id)}`, {
+      cache: 'no-store', signal,
+    })
+    if (!response.ok) throw await responseError(response, 'This shared chat is unavailable.')
+    return response.json()
+  }
+
+  recoverChatReply(requestId: string): Promise<{
+    status: string
+    result: { content: string; model: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } } | null
+  }> {
+    return this.chatToolsRequest(`/recovery?request_id=${encodeURIComponent(requestId)}`)
+  }
+
   private async platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response
     try {
@@ -136,7 +310,8 @@ export class ApiClient {
         ...init,
         headers: { ...this.getPlatformHeaders(), ...(init?.headers ?? {}) },
       })
-    } catch {
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') throw error
       throw new Error('Cannot reach the Dabba backend. Check that the server is running.')
     }
     if (!response.ok) {
@@ -282,17 +457,26 @@ export class ApiClient {
     return this.platformRequest(`/memory/${encodeURIComponent(memoryId)}`, { method: 'DELETE' })
   }
 
-  async listSkills(): Promise<Skill[]> {
-    const data = await this.platformRequest<{ skills: Skill[] }>('/skills')
+  async listSkills(opts: { force?: boolean } = {}): Promise<Skill[]> {
+    const data = await this.cachedRead('skills', () => this.platformRequest<{ skills: Skill[] }>('/skills'), opts)
     return data.skills
   }
 
-  createSkillPackage(input: { name: string; instructions: string; description?: string; script?: string }): Promise<Skill> {
-    return this.platformRequest('/skills', { method: 'POST', body: JSON.stringify(input) })
+  async createSkillPackage(input: { name: string; instructions: string; description?: string; script?: string }): Promise<Skill> {
+    const skill = await this.platformRequest<Skill>('/skills', { method: 'POST', body: JSON.stringify(input) })
+    this.invalidateReadCache('skills')
+    return skill
   }
 
-  deleteSkillPackage(id: string): Promise<void> {
-    return this.platformRequest(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  async importSkillPackage(input: { url?: string; content?: string }): Promise<Skill> {
+    const skill = await this.platformRequest<Skill>('/skills/import', { method: 'POST', body: JSON.stringify(input) })
+    this.invalidateReadCache('skills')
+    return skill
+  }
+
+  async deleteSkillPackage(id: string): Promise<void> {
+    await this.platformRequest(`/skills/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    this.invalidateReadCache('skills')
   }
 
   async matchSkill(message: string): Promise<Skill | null> {
@@ -462,7 +646,7 @@ export class ApiClient {
       }
       const content = m.documentContext
         ? `${m.content}\n\n${m.documentContext}`.trim()
-        : m.content
+        : m.documentOutput ?? m.content
       return { role: m.role, content }
     })
   }
@@ -510,6 +694,26 @@ export class ApiClient {
     return data.documents ?? []
   }
 
+  getCodeExecutionStatus(signal?: AbortSignal): Promise<CodeExecutionStatus> {
+    return this.cachedRead('code-execution', async () => {
+      const response = await fetch(`${this.baseUrl}/v1/code/languages`, {
+        headers: this.getHeaders(),
+      })
+      if (!response.ok) throw await responseError(response, 'Could not check code execution availability')
+      const data = await response.json() as Partial<CodeExecutionStatus>
+      return {
+        unavailableReason: data.unavailableReason === undefined
+          ? 'Code execution availability could not be verified'
+          : data.unavailableReason,
+        languages: data.languages ?? [],
+      }
+    }, { signal })
+  }
+
+  async getCodeExecutionUnavailableReason(signal?: AbortSignal): Promise<string | null> {
+    return (await this.getCodeExecutionStatus(signal)).unavailableReason
+  }
+
   async executeCode(
     language: string,
     code: string,
@@ -533,18 +737,30 @@ export class ApiClient {
   }
 
   /** Fetch the full model catalog from the Dabba agent endpoint (providers, tiers, key status). */
-  async fetchModels(signal?: AbortSignal): Promise<ModelCatalog> {
-    const response = await fetch(`${this.baseUrl}/v1/agent/models`, {
-      headers: this.getHeaders(),
-      signal,
-    })
-    if (!response.ok) {
-      throw new Error(`Failed to load models (status ${response.status})`)
-    }
-    return response.json()
+  async fetchModels(signal?: AbortSignal, opts: { force?: boolean } = {}): Promise<ModelCatalog> {
+    // No per-caller signal on the shared request: one component unmounting
+    // must not cancel the fetch other components are waiting on.
+    return this.cachedRead('models', async () => {
+      const response = await fetch(`${this.baseUrl}/v1/agent/models`, { headers: this.getHeaders() })
+      if (!response.ok) {
+        throw new Error(`Failed to load models (status ${response.status})`)
+      }
+      return response.json() as Promise<ModelCatalog>
+    }, { signal, force: opts.force })
   }
 
   /** Fetch connected MCP servers and their tools. */
+  async testMcpConnection(name: string): Promise<{ verifiedAt: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/mcp/test`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ name }),
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not test the connector')
+    return response.json()
+  }
+
   async fetchMcpStatus(signal?: AbortSignal): Promise<{ servers: McpServer[] }> {
     const response = await fetch(`${this.baseUrl}/v1/mcp/status`, {
       headers: this.getHeaders(),
@@ -582,7 +798,7 @@ export class ApiClient {
   }
 
   /** Which providers have an API key configured server-side — never the key values themselves. */
-  async fetchProviderKeys(signal?: AbortSignal): Promise<{ provider: string; hasKey: boolean }[]> {
+  async fetchProviderKeys(signal?: AbortSignal): Promise<{ provider: string; hasKey: boolean; fromEnvironment?: boolean }[]> {
     const response = await fetch(`${this.baseUrl}/v1/agent/keys`, {
       headers: this.getHeaders(),
       signal,
@@ -592,6 +808,17 @@ export class ApiClient {
     }
     const data = await response.json()
     return data.providers ?? []
+  }
+
+  async testProviderKey(provider: string): Promise<{ model: string; verifiedAt: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/agent/keys/test`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ provider }),
+      signal: AbortSignal.timeout(60_000),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not verify the provider key')
+    return response.json()
   }
 
   /** Sets a provider API key server-side — same effect as the CLI's `/keys set <provider> <key>`. */
@@ -605,6 +832,7 @@ export class ApiClient {
       const body = await response.json().catch(() => null)
       throw new Error(body?.error?.message ?? body?.detail ?? `Failed to save key (status ${response.status})`)
     }
+    this.invalidateReadCache('models')
   }
 
   async deleteProviderKey(provider: string): Promise<void> {
@@ -616,41 +844,104 @@ export class ApiClient {
       const body = await response.json().catch(() => null)
       throw new Error(body?.error?.message ?? body?.detail ?? `Failed to remove key (status ${response.status})`)
     }
+    this.invalidateReadCache('models')
   }
 
-  /** Loads every conversation stored server-side for this user. */
+  /**
+   * Lightweight sidebar list: metadata and messageCount, no message bodies.
+   * Entries come back with `messages: []` and `messagesLoaded: false`;
+   * load a chat's messages with fetchConversation().
+   */
   async fetchConversations(userId: string, signal?: AbortSignal): Promise<Conversation[]> {
-    const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}`, {
+    const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}&include_messages=false`, {
       headers: this.getPlatformHeaders(),
       signal,
     })
     if (!response.ok) {
       throw new Error(`Failed to load conversations (status ${response.status})`)
     }
-    const data = await response.json()
+    const data = await response.json() as { conversations?: Array<Omit<Conversation, 'messages'> & { messages?: Message[] }> }
+    return (data.conversations ?? []).map(summary => ({
+      ...summary,
+      messages: summary.messages ?? [],
+      messagesLoaded: Array.isArray(summary.messages),
+    }))
+  }
+
+  async searchConversations(query: string, signal: AbortSignal): Promise<{ id: string; snippet: string | null; messageId?: string | null }[]> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations/search?q=${encodeURIComponent(query)}`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (!response.ok) throw await responseError(response, 'Conversation search failed')
+    return (await response.json()).matches ?? []
+  }
+
+  /** Every conversation with all its messages, for exporting. */
+  async fetchAllConversations(userId: string, signal?: AbortSignal): Promise<Conversation[]> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations?user_id=${encodeURIComponent(userId)}&include_messages=true`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (!response.ok) throw new Error(`Failed to load conversations (status ${response.status})`)
+    const data = await response.json() as { conversations?: Conversation[] }
     return data.conversations ?? []
   }
 
+  /** Token usage recorded by the server for the signed-in user, totalled per model. */
+  fetchUsage(signal?: AbortSignal): Promise<ServerUsage> {
+    return this.platformRequest('/usage', { signal })
+  }
+
+  /** One full conversation with its messages (only the owner can read it). */
+  async fetchConversation(id: string, signal?: AbortSignal): Promise<Conversation> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(id)}`, {
+      headers: this.getPlatformHeaders(),
+      signal,
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to load conversation (status ${response.status})`)
+    }
+    const conversation = await response.json() as Conversation
+    return { ...conversation, messagesLoaded: true, messageCount: conversation.messages.length }
+  }
+
   /** Creates or updates one conversation server-side. */
-  async saveConversationRemote(userId: string, conv: Conversation): Promise<void> {
+  async saveConversationRemote(userId: string, conv: Conversation, opts: { keepalive?: boolean } = {}): Promise<number | undefined> {
+    const body = JSON.stringify({
+      id: conv.id,
+      userId,
+      title: conv.title,
+      messages: conv.messages,
+      createdAt: conv.createdAt,
+      updatedAt: conv.updatedAt,
+      pinned: !!conv.pinned,
+      customTitle: !!conv.customTitle,
+      projectId: conv.projectId ?? null,
+      revision: conv.revision ?? 0,
+    })
     const response = await fetch(`${this.baseUrl}/v1/conversations/${encodeURIComponent(conv.id)}`, {
       method: 'PUT',
       headers: this.getPlatformHeaders(),
-      body: JSON.stringify({
-        id: conv.id,
-        userId,
-        title: conv.title,
-        messages: conv.messages,
-        createdAt: conv.createdAt,
-        updatedAt: conv.updatedAt,
-        pinned: !!conv.pinned,
-        customTitle: !!conv.customTitle,
-        projectId: conv.projectId ?? null,
-      }),
+      body,
+      // keepalive lets a save finish while the tab closes, but browsers cap
+      // keepalive bodies at 64 KB, so only use it for small payloads.
+      keepalive: opts.keepalive && body.length < 60_000,
     })
-    if (!response.ok) {
-      throw new Error(`Failed to save conversation (status ${response.status})`)
+    if (response.status === 409) {
+      throw new ConversationConflictError((await responseError(response, 'Conversation changed on another device')).message)
     }
+    if (!response.ok) throw await responseError(response, 'Failed to save conversation')
+    return (await response.json().catch(() => ({}))).revision
+  }
+
+  async clearConversations(): Promise<{ deleted: number }> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations`, {
+      method: 'DELETE',
+      headers: this.getPlatformHeaders(),
+    })
+    if (!response.ok) throw await responseError(response, 'Could not clear conversation history')
+    return response.json()
   }
 
   async deleteConversationRemote(userId: string, id: string): Promise<void> {
@@ -669,6 +960,16 @@ export class ApiClient {
    * (WebM/Opus, etc.) — the server decodes it with ffmpeg regardless of the
    * nominal filename, no client-side transcoding needed.
    */
+  /** Whether the server can turn speech into text (needs whisper and ffmpeg installed on the server). */
+  async audioStatus(signal?: AbortSignal): Promise<{
+    transcription: { available: boolean; whisperInstalled: boolean; ffmpegInstalled: boolean }
+    speech?: { available: boolean }
+  }> {
+    const response = await fetch(`${this.baseUrl}/v1/audio/status`, { headers: this.getHeaders(), signal })
+    if (!response.ok) throw await responseError(response, 'Could not check voice input')
+    return response.json()
+  }
+
   async transcribeAudio(audioBlob: Blob, opts?: { model?: string; signal?: AbortSignal }): Promise<string> {
     const buffer = await audioBlob.arrayBuffer()
     const base64 = btoa(Array.from(new Uint8Array(buffer), b => String.fromCharCode(b)).join(''))
@@ -702,11 +1003,11 @@ export class ApiClient {
   }
 
   /** Generate images from a text prompt. Returns data URLs (works for both b64_json and url responses). */
-  async generateImages(prompt: string, opts?: { size?: string; n?: number; signal?: AbortSignal }): Promise<string[]> {
+  async generateImages(prompt: string, opts?: { model?: string; size?: string; n?: number; signal?: AbortSignal }): Promise<string[]> {
     const response = await fetch(`${this.baseUrl}/v1/images/generations`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ prompt, size: opts?.size ?? '1024x1024', n: opts?.n ?? 1 }),
+      body: JSON.stringify({ prompt, model: opts?.model, size: opts?.size ?? '1024x1024', n: opts?.n ?? 1 }),
       signal: opts?.signal,
     })
     if (!response.ok) {
@@ -740,6 +1041,7 @@ export class ApiClient {
       allowedTools?: string[]
       contextCompactionThreshold?: number
       contextCompactionKeepRecent?: number
+      systemPrompt?: string
       onApproval?: (request: { callId: string; name: string; arguments: unknown }) => Promise<boolean>
       onPlanApproval?: (request: { planId: string; objective: string; steps: Array<{ step_id: string; tool: string; description: string }> }) => Promise<boolean>
       onEvent: (event: { type: string; content: unknown }) => void
@@ -761,6 +1063,7 @@ export class ApiClient {
         allowed_tools: options.allowedTools,
         context_compaction_threshold: options.contextCompactionThreshold,
         context_compaction_keep_recent: options.contextCompactionKeepRecent,
+        system_prompt: options.systemPrompt,
       }),
       signal: options.signal,
     })
@@ -776,19 +1079,24 @@ export class ApiClient {
     const decoder = new TextDecoder()
     let buffer = ''
 
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
 
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || !trimmed.startsWith('data: ')) continue
-        try {
-          const event = JSON.parse(trimmed.slice(6)) as { type: string; content: unknown }
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data: ')) continue
+          let event: { type: string; content: unknown }
+          try {
+            event = JSON.parse(trimmed.slice(6))
+          } catch {
+            continue
+          }
           if (event.type === 'approval_required') {
             const content = event.content as { call_id?: string; name?: string; arguments?: unknown }
             const callId = content.call_id ?? ''
@@ -806,10 +1114,11 @@ export class ApiClient {
             if (planId) await this.approveAgentCall(planId, !!approved)
           }
           options.onEvent(event)
-        } catch {
-          // skip malformed SSE payloads
         }
       }
+    } finally {
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
     }
   }
 
@@ -817,6 +1126,7 @@ export class ApiClient {
     messages: Message[],
     options?: {
       signal?: AbortSignal
+      requestId?: string
       onChunk?: (chunk: StreamChunk) => void
       model?: string
       temperature?: number
@@ -842,26 +1152,26 @@ export class ApiClient {
     }
 
     if (options?.onChunk) {
-      return this.streamChat(body, options.onChunk, options.signal)
+      return this.streamChat(body, options.onChunk, options.signal, options.requestId)
     }
 
-    return this.nonStreamingChat(body, options?.signal)
+    return this.nonStreamingChat(body, options?.signal, options?.requestId)
   }
 
   private async nonStreamingChat(
     body: ChatCompletionRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestId?: string,
   ): Promise<string> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: { ...this.getHeaders(), ...(requestId ? { 'X-Idempotency-Key': requestId } : {}) },
       body: JSON.stringify({ ...body, stream: false }),
       signal,
     })
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
-      throw new Error(`API error ${response.status}: ${errorText}`)
+      throw await responseError(response, `Dabba chat failed (HTTP ${response.status}). Please try again.`)
     }
 
     const data: ChatCompletionResponse = await response.json()
@@ -871,18 +1181,18 @@ export class ApiClient {
   private async streamChat(
     body: ChatCompletionRequest,
     onChunk: (chunk: StreamChunk) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    requestId?: string,
   ): Promise<string> {
     const response = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: 'POST',
-      headers: this.getHeaders(),
+      headers: { ...this.getHeaders(), ...(requestId ? { 'X-Idempotency-Key': requestId } : {}) },
       body: JSON.stringify({ ...body, stream: true }),
       signal,
     })
 
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
-      throw new Error(`API error ${response.status}: ${errorText}`)
+      throw await responseError(response, `Dabba chat failed (HTTP ${response.status}). Please try again.`)
     }
 
     const reader = response.body?.getReader()
@@ -892,6 +1202,8 @@ export class ApiClient {
     let buffer = ''
     let fullContent = ''
     let usage: TokenUsage | undefined
+    let completed = false
+    let fullReasoning = ''
 
     try {
       while (true) {
@@ -907,11 +1219,14 @@ export class ApiClient {
           if (!trimmed || !trimmed.startsWith('data: ')) continue
 
           const data = trimmed.slice(6)
-          if (data === '[DONE]') continue
+          if (data === '[DONE]') {
+            completed = true
+            continue
+          }
 
           let parsed: {
             error?: { message?: string }
-            choices?: Array<{ delta?: { content?: string }; finish_reason?: 'stop' | 'length' | null }>
+            choices?: Array<{ delta?: { content?: string; reasoning_content?: string }; finish_reason?: 'stop' | 'length' | null }>
             usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
           }
           try {
@@ -921,9 +1236,11 @@ export class ApiClient {
             continue
           }
           if (parsed.error) {
-            throw new Error(parsed.error.message ?? 'The model provider could not complete this request.')
+            throw new TerminalChatError(parsed.error.message ?? 'The model provider could not complete this request.')
           }
           const delta = parsed.choices?.[0]?.delta?.content ?? ''
+          const reasoning = parsed.choices?.[0]?.delta?.reasoning_content ?? ''
+          fullReasoning += reasoning
           const finishReason = parsed.choices?.[0]?.finish_reason ?? null
 
           // Some servers emit a trailing usage object on the final SSE event.
@@ -935,32 +1252,55 @@ export class ApiClient {
             }
           }
 
-          if (delta) {
-            fullContent += delta
-            onChunk({ content: fullContent, finishReason, usage })
-          } else if (finishReason) {
-            onChunk({ content: fullContent, finishReason, usage })
+          fullContent += delta
+          if (delta || reasoning || finishReason) {
+            onChunk({ content: fullContent, reasoning: fullReasoning, finishReason, usage })
           }
         }
       }
+      if (!completed) throw new Error('The reply was interrupted. Retry when you reconnect.')
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        onChunk({ content: fullContent, finishReason: 'stop' })
+        onChunk({ content: fullContent, reasoning: fullReasoning, finishReason: 'stop' })
       }
       throw error
+    } finally {
+      await reader.cancel().catch(() => undefined)
+      reader.releaseLock()
     }
 
     return fullContent
   }
 }
 
+export interface ServerUsage {
+  conversationCount?: number
+  messageCount?: number
+  replies: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  limits?: { label: string; windowHours: number; usedTokens: number; limitTokens: number; retryAt?: number | null }[]
+  byModel: { model: string; tokens: number; replies: number; promptTokens: number; completionTokens: number }[]
+}
+
 export interface PlatformUser {
   id: string
   name: string
   email: string
+  bio?: string
   role: string
   createdAt: number
   updatedAt: number
 }
+
+export type ProfileDetails = { name: string; bio: string }
+export type CodeExecutionStatus = {
+  unavailableReason: string | null
+  languages: (string | { id: string; available: boolean })[]
+}
+export type SavedChatMessage = { conversation_id: string; message_id: string; title: string; snippet: string }
+export type ChatShare = { id: string; created_at: number }
+export type SharedChat = { title: string; messages: { role: 'user' | 'assistant'; content: string }[] }
 
 export const apiClient = new ApiClient()

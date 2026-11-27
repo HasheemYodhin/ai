@@ -11,9 +11,22 @@ services:
     envVars:
       - key: DABBA_DATA_DIR
         value: /data
+      - key: DABBA_LOW_MEMORY
+        value: "true"
       - key: DABBA_MODEL_PATH
         value: rule_based
       - key: DABBA_CORS_ORIGINS
+        sync: false
+      # Optional free persistence: Litestream backs up SQLite to Cloudflare R2.
+      - key: LITESTREAM_BUCKET
+        sync: false
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: LITESTREAM_ACCESS_KEY_ID
+        sync: false
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        sync: false
+      - key: DABBA_MASTER_KEY
         sync: false
     disk:
       name: dabba-data

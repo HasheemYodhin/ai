@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiClient } from '@/api/client'
+import { apiClient, HttpResponseError, TerminalChatError } from '@/api/client'
+import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import { SettingsProvider } from '@/hooks/useSettings'
 import { useChat } from '@/hooks/useChat'
 import type { Message } from '@/types'
@@ -67,4 +68,40 @@ describe('useChat multi-conversation execution', () => {
     const chatB = updates.get('chat-b') ?? []
     expect(chatB[chatB.length - 1]?.content).toBe('second answer')
   })
+  it.each([
+    { failure: new TerminalChatError('VyceAI rejected the request.'), recoverable: false },
+    { failure: new HttpResponseError(400, 'Invalid request.'), recoverable: false },
+    { failure: new HttpResponseError(409, 'Request already submitted.'), recoverable: true },
+    { failure: new TypeError('Connection lost.'), recoverable: true },
+  ])('keeps recovery only for uncertain failures ($failure.message)', async ({ failure, recoverable }) => {
+    vi.spyOn(apiClient, 'chat').mockRejectedValue(failure)
+    const { result } = renderHook(() => useChat({ activeConversationId: 'chat' }), { wrapper })
+    await act(async () => { await result.current.sendMessage('Hello') })
+
+    const reply = result.current.messages.slice(-1)[0]!
+    expect(reply.content).toBe(failure.message)
+    expect(Boolean(reply.recoveryRequestId)).toBe(recoverable)
+    if (recoverable) {
+      vi.spyOn(apiClient, 'recoverChatReply').mockRejectedValue(new HttpResponseError(404, 'No recoverable reply was found.'))
+      await act(async () => { await result.current.recoverReply(reply.id) })
+      expect(result.current.messages.slice(-1)[0]?.recoveryRequestId).toBeUndefined()
+      expect(result.current.messages.slice(-1)[0]?.content).toBe(failure.message)
+    }
+  })
+
+  it('retries an old FLUX error on the image endpoint using the original prompt', async () => {
+    const chat = vi.spyOn(apiClient, 'chat')
+    const image = vi.spyOn(apiClient, 'generateImages').mockResolvedValue(['data:image/png;base64,example'])
+    const { result } = renderHook(() => useChat({ activeConversationId: 'chat' }), { wrapper })
+    act(() => result.current.setMessages([
+      { id: 'prompt', role: 'user', content: 'Draw a mountain', timestamp: 1 },
+      { id: 'reply', role: 'assistant', content: 'Previous routing error', model: FLUX_IMAGE_MODEL, error: true, timestamp: 2 },
+    ]))
+    await act(async () => { await result.current.regenerate('reply') })
+
+    expect(chat).not.toHaveBeenCalled()
+    expect(image).toHaveBeenCalledWith('Draw a mountain', expect.objectContaining({ model: FLUX_IMAGE_MODEL }))
+    expect(result.current.messages.slice(-1)[0]?.generatedImages).toEqual(['data:image/png;base64,example'])
+  })
+
 })

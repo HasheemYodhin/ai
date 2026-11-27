@@ -1,22 +1,33 @@
-import { lazy, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
-import type { Message } from '@/types'
+import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
+import { modelDisplayName } from '@/lib/models'
+import type { DocumentProgress, DocumentRequest, Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { User, AlertCircle, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
+import { AlertCircle, Bookmark, GitBranch, ChevronRight, X, Copy, Check, Pencil, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
+import { useSettings } from '@/hooks/useSettings'
+import { useSmoothText } from '@/hooks/useSmoothText'
+import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
+import { DOCUMENT_FORMAT_LABELS } from '@/lib/download'
 import { RegenerateMenu } from './RegenerateMenu'
 import { DownloadMenu } from './DownloadMenu'
 import logo from '../icon.svg'
 
-const MarkdownRenderer = lazy(() =>
-  import('./MarkdownRenderer').then(mod => ({ default: mod.MarkdownRenderer }))
-)
+const MarkdownRenderer = lazy(loadMarkdownRenderer)
 
 interface MessageBubbleProps {
   message: Message
   isStreaming?: boolean
+  onRevealChange?: (id: string, revealing: boolean) => void
   onEdit?: (id: string, content: string) => void
   onRegenerate?: (id: string, overrides?: { model?: string; effort?: string }) => void
+  saved?: boolean
+  onSave?: (value: boolean) => void
+  onBranch?: () => void
+  onRecover?: () => void
+  onSourceJump?: (messageId: string) => void
 }
+
+const messageAction = 'rounded-lg p-1.5 text-text-tertiary hover:bg-surface-tertiary hover:text-text-primary dark:hover:bg-surface-dark-tertiary dark:hover:text-text-dark-primary'
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -24,16 +35,64 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: MessageBubbleProps) {
+function DocumentProgressLog({ request, progress, isStreaming }: {
+  request: DocumentRequest
+  progress: DocumentProgress
+  isStreaming: boolean
+}) {
+  const active = isStreaming && (progress.stage === 'drafting' || progress.stage === 'building')
+  const current = request.formats.find(format => progress.formats[format] === 'building')
+  const failed = request.formats.some(format => progress.formats[format] === 'failed')
+  const heading = progress.stage === 'finished'
+    ? failed ? 'Some files could not be created' : 'Files ready'
+    : progress.stage === 'failed' ? 'File preparation failed'
+      : progress.stage === 'stopped' ? 'File preparation stopped'
+        : !active ? 'File preparation interrupted'
+          : progress.stage === 'drafting' ? 'Drafting document content…'
+            : current ? `Building ${DOCUMENT_FORMAT_LABELS[current]}…` : 'Preparing downloads…'
+
+  return (
+    <details open={active} className="mb-3 w-full max-w-sm rounded-lg border border-border px-3 py-2 text-sm dark:border-border-dark">
+      <summary className="cursor-pointer font-medium">
+        <span role="status" aria-label="File preparation">{heading}</span>
+      </summary>
+      <ul aria-label="File preparation log" className="mt-2 space-y-1 border-t border-border pt-2 text-xs dark:border-border-dark">
+        {request.formats.map(format => {
+          const status = progress.formats[format]
+          const label = status === 'ready' ? 'Ready' : status === 'failed' ? 'Failed'
+            : active ? status === 'building' ? 'Building…' : 'Queued'
+              : status === 'building' ? 'Interrupted' : 'Skipped'
+          return (
+            <li key={format} className="flex justify-between gap-2">
+              <span>{DOCUMENT_FORMAT_LABELS[format]}</span>
+              <span className={status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-text-secondary dark:text-text-dark-secondary'}>{label}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
+  )
+}
+
+export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate, saved, onSave, onBranch, onRecover, onSourceJump }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isError = message.error
+  const hasFiles = Boolean(message.generatedFiles?.length)
+  const isDocument = Boolean(message.documentRequest || hasFiles)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const { text: shownContent, revealing } = useSmoothText(hasFiles ? '' : message.content, !!isStreaming && !isUser)
+  const writing = !!isStreaming || revealing
+  useEffect(() => {
+    onRevealChange?.(message.id, writing)
+  }, [message.id, onRevealChange, writing])
   const [draft, setDraft] = useState(message.content)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speakError, setSpeakError] = useState<string | null>(null)
   const [streamElapsed, setStreamElapsed] = useState(0)
+  const { settings } = useSettings()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const stopSpeakingRef = useRef<(() => void) | null>(null)
   // Guards against re-triggering auto-play on unrelated re-renders — this
@@ -54,7 +113,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing])
 
-  const handleToggleSpeak = useCallback(async () => {
+  const handleToggleSpeak = useCallback(() => {
     if (isSpeaking) {
       stopSpeakingRef.current?.()
       setIsSpeaking(false)
@@ -62,24 +121,18 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
     }
     setSpeakError(null)
     setIsSpeaking(true)
-    try {
-      const controller = await speak(message.content, () => setIsSpeaking(false))
-      stopSpeakingRef.current = controller.stop
-    } catch (err) {
-      setSpeakError((err as Error).message || 'Speech failed')
-      setIsSpeaking(false)
-    }
+    stopSpeakingRef.current = speak(message.content, () => setIsSpeaking(false), setSpeakError).stop
   }, [isSpeaking, message.content])
 
   // Auto-speak replies to a voice-input turn — feels like an actual voice
   // conversation instead of silently reverting to text once you'd spoken.
   useEffect(() => {
-    if (!isUser && message.viaVoice && !isStreaming && message.content && !hasAutoPlayedRef.current) {
+    if (!isUser && !hasFiles && message.viaVoice && !isStreaming && message.content && !hasAutoPlayedRef.current) {
       hasAutoPlayedRef.current = true
       handleToggleSpeak()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isUser, message.viaVoice, isStreaming, message.content])
+  }, [isUser, hasFiles, message.viaVoice, isStreaming, message.content])
 
   useEffect(() => {
     return () => stopSpeakingRef.current?.()
@@ -97,12 +150,14 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
     return () => window.clearInterval(timer)
   }, [isStreaming, message.id])
 
-  const timeStr = useMemo(() => {
-    if (!message.timestamp) return ''
-    return new Date(message.timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+  const messageTime = useMemo(() => {
+    const date = new Date(message.timestamp)
+    if (!Number.isFinite(date.getTime())) return null
+    return {
+      label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      full: date.toLocaleString(),
+      iso: date.toISOString(),
+    }
   }, [message.timestamp])
 
   const handleCopy = async () => {
@@ -155,39 +210,27 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
   return (
     <div
       className={cn(
-        'group flex gap-3 w-full animate-fade-in',
+        'group flex gap-4 w-full animate-fade-in',
         isUser ? 'justify-end' : 'justify-start'
       )}
     >
       {!isUser && (
-        <div className="flex-shrink-0 mt-1">
-          <div className="relative w-8 h-8" aria-label="Dabba">
-            <div className={cn(
-              'relative z-10 w-8 h-8 rounded-lg flex items-center justify-center border transition-colors',
-              isError
-                ? 'bg-red-500/10 border-red-500/20 text-red-500'
-                : 'bg-accent/10 border-accent/20 text-accent'
-            )}>
-              {isError ? (
-                <AlertCircle className="w-4 h-4" />
-              ) : (
-                <img
-                  src={logo}
-                  alt="Dabba"
-                  className={cn(
-                    'w-5 h-5 object-contain',
-                    isActing && 'animate-spin'
-                  )}
-                />
-              )}
-            </div>
-          </div>
+        <div className="flex-shrink-0 pt-1" aria-label="Dabba">
+          {isError ? (
+            <AlertCircle className="w-6 h-6 text-red-500" strokeWidth={1.5} />
+          ) : (
+            <img
+              src={logo}
+              alt="Dabba"
+              className={cn('w-6 h-6 object-contain', isActing && 'animate-spin')}
+            />
+          )}
         </div>
       )}
 
       <div className={cn(
-        'flex flex-col max-w-[85%] md:max-w-[75%]',
-        isUser ? 'items-end' : 'items-start'
+        'flex flex-col min-w-0',
+        isUser ? 'items-end max-w-[85%] md:max-w-[75%]' : 'items-start flex-1'
       )}>
         {isEditing ? (
           <div className="w-full min-w-[280px] rounded-2xl px-3.5 py-3 glass-input">
@@ -217,12 +260,11 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
         ) : (
           <div
             className={cn(
-              'rounded-2xl px-4 py-3',
               isUser
-                ? 'glass-card-user text-white rounded-br-sm'
+                ? 'glass-card-user rounded-3xl px-5 py-3'
                 : isError
-                  ? 'bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-900/50 rounded-bl-sm text-text-primary dark:text-text-dark-primary'
-                  : 'glass-card-bot rounded-bl-sm'
+                  ? 'w-full rounded-xl px-4 py-3 bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-900/50 text-text-primary dark:text-text-dark-primary'
+                  : 'w-full pt-0.5'
             )}
           >
             {isUser ? (
@@ -269,7 +311,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                                   <FileText className="h-12 w-12 text-red-500" />
                                 </div>
                               </object>
-                              <span className="absolute left-2 top-2 rounded-md bg-red-600 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white shadow-sm">
+                              <span className="absolute left-2 top-2 rounded-md bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white">
                                 PDF
                               </span>
                             </div>
@@ -282,7 +324,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                           )}
                           <div className="flex items-center gap-2.5 px-3 py-2.5">
                             <div className={cn(
-                              'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[9px] font-bold text-white',
+                              'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-[11px] font-medium text-white',
                               isPdf ? 'bg-red-600' : 'bg-blue-600'
                             )}>
                               {isPdf ? 'PDF' : extension.slice(0, 4)}
@@ -291,7 +333,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                               <p className="truncate text-xs font-semibold" title={attachment.name}>
                                 {attachment.name}
                               </p>
-                              <p className="mt-0.5 text-[10px] text-slate-500">
+                              <p className="mt-0.5 text-xs text-slate-500">
                                 {formatFileSize(attachment.size)}
                               </p>
                             </div>
@@ -307,44 +349,61 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   </p>
                 )}
                 {message.imageMode === 'ocr' && (
-                  <span className="mt-1 inline-block text-[10px] text-white/70">
+                  <span className="mt-1 inline-block text-xs text-text-tertiary dark:text-text-dark-tertiary">
                     text extracted via OCR
                   </span>
                 )}
               </div>
             ) : (
-              <div className="text-[15px] leading-relaxed text-text-primary dark:text-text-dark-primary">
-                {message.agentActivity && message.agentActivity.steps.length > 0 && (
-                  <div className="flex flex-col gap-1 mb-2">
-                    {message.agentActivity.steps.map((step, i) => (
-                      <div
-                        key={i}
-                        title={step.detail}
-                        className={cn(
-                          'flex items-center gap-1.5 text-xs',
-                          step.success === false ? 'text-red-500' : 'text-text-secondary dark:text-text-dark-secondary'
-                        )}
+              <div className="text-base leading-7 text-text-primary dark:text-text-dark-primary">
+                {message.agentActivity && message.agentActivity.steps.length > 0 && (() => {
+                  const activity = message.agentActivity
+                  const open = stepsOpen || !activity.done
+                  const failed = activity.steps.filter(s => s.success === false).length
+                  return (
+                    <div className="mb-4">
+                      <button
+                        type="button"
+                        onClick={() => setStepsOpen(o => !o)}
+                        disabled={!activity.done}
+                        aria-expanded={open}
+                        className="flex items-center gap-2 h-8 -ml-1 px-1 rounded-lg text-[13px] text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors disabled:cursor-default"
                       >
-                        <img
-                          src={logo}
-                          alt="Dabba"
-                          className={cn(
-                            'w-3.5 h-3.5 object-contain flex-shrink-0',
-                            step.success === undefined && !message.agentActivity?.done && 'animate-spin'
-                          )}
-                        />
-                        <span className="font-mono text-[10px] text-accent">{step.tool}</span>
-                        {step.detail && <span className="truncate max-w-[160px]">{step.detail}</span>}
-                      </div>
-                    ))}
-                    {!message.agentActivity.done && (
-                      <div className="flex items-center gap-1.5 text-xs text-accent">
-                        <img src={logo} alt="Dabba" className="w-3.5 h-3.5 object-contain flex-shrink-0 animate-spin" />
-                        <span>{message.agentActivity.label}…</span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                        {activity.done
+                          ? <ChevronRight className={cn('w-4 h-4 transition-transform', open && 'rotate-90')} strokeWidth={1.5} />
+                          : <Loader2 className="w-4 h-4 animate-spin text-accent" strokeWidth={1.5} />}
+                        <span>
+                          {activity.done
+                            ? `Used ${activity.steps.length} tool${activity.steps.length === 1 ? '' : 's'}`
+                            : `${activity.label}…`}
+                        </span>
+                        {failed > 0 && <span className="text-xs text-red-600 dark:text-red-400">{failed} failed</span>}
+                      </button>
+                      {open && (
+                        <ol className="mt-1 ml-[7px] pl-4 border-l border-border dark:border-border-dark space-y-1.5">
+                          {activity.steps.map((step, i) => {
+                            const running = step.success === undefined && !activity.done
+                            return (
+                              <li key={i} title={step.detail} className="relative flex items-center gap-2 text-[13px] min-w-0">
+                                <span className="absolute -left-[21px] flex items-center justify-center w-2.5 h-2.5 rounded-full bg-surface dark:bg-surface-dark">
+                                  <span className={cn(
+                                    'w-1.5 h-1.5 rounded-full',
+                                    step.success === false ? 'bg-red-500' : running ? 'bg-accent animate-pulse' : 'bg-text-tertiary/60 dark:bg-text-dark-tertiary/60'
+                                  )} />
+                                </span>
+                                <span className="font-mono text-xs text-text-primary dark:text-text-dark-primary flex-shrink-0">{step.tool}</span>
+                                {step.detail && (
+                                  <span className="truncate text-text-tertiary dark:text-text-dark-tertiary">{step.detail}</span>
+                                )}
+                                {step.success === false && <X className="w-3.5 h-3.5 text-red-500 flex-shrink-0" strokeWidth={1.5} />}
+                              </li>
+                            )
+                          })}
+                        </ol>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {message.isGeneratingImage && (
                   <div className="flex items-center gap-2 text-text-secondary dark:text-text-dark-secondary">
@@ -363,6 +422,7 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                           download={`dabba-image-${i + 1}.png`}
                           className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/50 text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
                           title="Download image"
+                          aria-label={`Download image ${i + 1}`}
                         >
                           <ImageDown className="w-4 h-4" />
                         </a>
@@ -371,135 +431,191 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   </div>
                 )}
 
-                {message.content ? (
-                  <Suspense fallback={<div className="text-sm text-text-tertiary dark:text-text-dark-tertiary">Loading message…</div>}>
-                    <MarkdownRenderer content={message.content} />
+                {!isDocument && message.reasoning && (
+                  // The expanded text floats over the reply (absolute, scrollable)
+                  // instead of pushing the table/code below down ~280px, which
+                  // made clicks land on the wrong element.
+                  <details className="relative mb-2 rounded-lg border border-border px-3 py-2 text-sm text-text-secondary dark:border-border-dark dark:text-text-dark-secondary">
+                    <summary className="cursor-pointer">Thinking</summary>
+                    <p className="absolute left-0 right-0 top-full z-20 mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-3 shadow-lg dark:border-border-dark dark:bg-surface-dark-secondary">{message.reasoning}</p>
+                  </details>
+                )}
+
+                {message.documentRequest && message.documentProgress && (
+                  <DocumentProgressLog request={message.documentRequest} progress={message.documentProgress} isStreaming={Boolean(isStreaming)} />
+                )}
+
+                {shownContent ? (
+                  <Suspense fallback={<p className="whitespace-pre-wrap">{shownContent}</p>}>
+                    <MarkdownRenderer content={shownContent} className={writing ? 'streaming-cursor' : undefined} />
                   </Suspense>
-                ) : isStreaming ? (
-                  <div className="typing-indicator">
-                    <span />
-                    <span />
-                    <span />
+                ) : isStreaming && !message.isGeneratingImage && !message.documentProgress ? (
+                  <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label={isDocument ? 'Preparing files' : 'Dabba is thinking'}>
+                    <span className="thinking-dot" />
+                    {isDocument ? <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">Preparing files…</span> : streamElapsed >= 6 && (
+                      <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">
+                        {streamElapsed >= 20 ? 'Still waiting for the model' : 'Waiting for the model'} · {streamElapsed}s
+                      </span>
+                    )}
                   </div>
                 ) : null}
 
-                {message.generatedFiles && message.generatedFiles.length > 0 && (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {message.generatedFiles.map((file, index) => {
-                      const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
-                      const isPdf = file.type === 'application/pdf'
-                      const isExcel = file.type.includes('spreadsheet')
-                      const isPowerPoint = file.type.includes('presentation')
-                      const Icon = isExcel
-                        ? FileSpreadsheet
-                        : isPowerPoint
-                          ? Presentation
-                          : FileText
-                      const accentClass = isPdf
-                        ? 'bg-red-500/10 text-red-600 dark:text-red-400'
-                        : isExcel
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                          : isPowerPoint
-                            ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
-                            : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                {!isDocument && !shownContent && isStreaming && !message.isGeneratingImage && streamElapsed >= 15 ? (
+                  <p className="mt-1 max-w-md text-xs text-text-tertiary dark:text-text-dark-tertiary">
+                    {['high', 'xhigh', 'max'].includes(settings.effort)
+                      ? 'High reasoning effort makes large models slower to start. Medium effort is much quicker for everyday questions.'
+                      : 'Large models can be slow to start when they are busy. A smaller model usually replies faster.'}
+                  </p>
+                ) : null}
 
-                      return (
-                        <a
-                          key={`${file.name}-${index}`}
-                          href={file.dataUrl}
-                          download={file.name}
-                          className="group/file flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-accent/40 hover:bg-surface-tertiary dark:border-border-dark dark:bg-surface-dark-tertiary dark:hover:bg-surface-dark-secondary"
-                          title={`Download ${file.name}`}
-                        >
-                          <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl', accentClass)}>
-                            <Icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
-                              {file.name}
-                            </p>
-                            <p className="mt-0.5 text-[10px] text-text-tertiary dark:text-text-dark-tertiary">
-                              {extension} · {formatFileSize(file.size)}
-                            </p>
-                          </div>
-                          <Download className="h-4 w-4 flex-shrink-0 text-text-tertiary transition-colors group-hover/file:text-accent" />
-                        </a>
-                      )
-                    })}
-                  </div>
+                {message.generatedFiles && message.generatedFiles.length > 0 && (
+                  <>
+                    {message.documentSummary && (
+                      <p className="text-sm leading-relaxed text-text-secondary dark:text-text-dark-secondary">{message.documentSummary}</p>
+                    )}
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {message.generatedFiles.map((file, index) => {
+                        const extension = file.name.split('.').pop()?.toUpperCase() || 'FILE'
+                        const isPdf = file.type === 'application/pdf'
+                        const isExcel = file.type.includes('spreadsheet')
+                        const isPowerPoint = file.type.includes('presentation')
+                        const Icon = isExcel
+                          ? FileSpreadsheet
+                          : isPowerPoint
+                            ? Presentation
+                            : FileText
+                        const accentClass = isPdf
+                          ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                          : isExcel
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                            : isPowerPoint
+                              ? 'bg-orange-500/10 text-orange-600 dark:text-orange-400'
+                              : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
+
+                        return (
+                          <a
+                            key={`${file.name}-${index}`}
+                            href={file.dataUrl}
+                            download={file.name}
+                            className="group/file flex min-w-0 items-center gap-3 rounded-xl border border-border bg-surface-secondary p-3 transition-colors hover:border-accent/40 hover:bg-surface-tertiary dark:border-border-dark dark:bg-surface-dark-tertiary dark:hover:bg-surface-dark-secondary"
+                            title={`Download ${file.name}`}
+                          >
+                            <div className={cn('flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl', accentClass)}>
+                              <Icon className="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-text-primary dark:text-text-dark-primary">
+                                {file.name}
+                              </p>
+                              <p className="mt-0.5 text-xs text-text-tertiary dark:text-text-dark-tertiary">
+                                {extension} · {formatFileSize(file.size)}
+                              </p>
+                            </div>
+                            <Download className="h-4 w-4 flex-shrink-0 text-text-tertiary transition-colors group-hover/file:text-accent" />
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </>
                 )}
               </div>
             )}
           </div>
         )}
 
+        {!writing && !!message.sources?.length && (
+          <details className="mt-2 max-w-full rounded-lg border border-border p-2 text-sm dark:border-border-dark">
+            <summary className="cursor-pointer font-medium">Sources ({message.sources.length})</summary>
+            <ul className="mt-2 space-y-2">
+              {message.sources.map((source, index) => (
+                <li key={index} className="break-words">
+                  {source.kind === 'web' && /^https?:\/\//i.test(source.url) ? (
+                    <a className="text-accent underline" href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a>
+                  ) : source.kind === 'file' && onSourceJump ? (
+                    <button type="button" className="text-left text-accent underline" onClick={() => onSourceJump(source.messageId)}>
+                      {source.title}{source.pages?.length ? ` · ${source.pages.length === 1 ? 'Page' : 'Pages'} ${source.pages.join(', ')}` : ''}
+                    </button>
+                  ) : source.title}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {!writing && (onRecover || (!isUser && isError && onRegenerate)) && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {onRecover && (
+              <button type="button" className="rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={onRecover}>
+                Recover reply
+              </button>
+            )}
+            {!isUser && isError && onRegenerate && (
+              <button type="button" className="rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={() => onRegenerate(message.id)}>
+                Retry
+              </button>
+            )}
+          </div>
+        )}
         <div className={cn(
-          'flex items-center gap-1.5 mt-1 px-1 min-h-[22px]',
-          isUser ? 'flex-row-reverse' : 'flex-row'
+          'flex flex-wrap items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
+          isUser ? 'flex-row-reverse' : 'flex-row -ml-1.5'
         )}>
-          <span className="text-[10px] text-text-tertiary dark:text-text-dark-tertiary font-medium">
-            {timeStr}
-          </span>
-          {isUser && (
-            <div className="w-5 h-5 rounded-full bg-accent/15 flex items-center justify-center">
-              <User className="w-3 h-3 text-accent" />
-            </div>
-          )}
-          {isStreaming && (
-            <span className="text-[10px] text-accent animate-pulse font-medium">
-              {streamElapsed >= 20 ? 'Still working...' : 'Generating...'}
-            </span>
+
+          {messageTime && !writing && !isActing && (
+            <time dateTime={messageTime.iso} title={messageTime.full} className="whitespace-nowrap text-xs tabular-nums text-text-tertiary dark:text-text-dark-tertiary">
+              {messageTime.label}
+            </time>
           )}
 
           {/* Model + token usage on assistant replies */}
-          {!isUser && !isStreaming && !isError && message.model && (
-            <span className="text-[10px] text-text-tertiary dark:text-text-dark-tertiary">
-              {message.model}
+          {!isUser && !writing && !isError && message.model && (
+            <span className="text-xs text-text-tertiary dark:text-text-dark-tertiary">
+              {modelDisplayName(message.model)}
               {message.usage && ` · ${message.usage.totalTokens} tok`}
             </span>
           )}
 
-          {!isEditing && !isStreaming && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
+          {!isEditing && !writing && (message.content || hasFiles || (message.generatedImages?.length ?? 0) > 0) && (
             <div className={cn(
-              'flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity',
+              'flex flex-wrap items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity',
               isUser ? 'flex-row-reverse' : 'flex-row'
             )}>
-              <button
+              {!hasFiles && <button
                 onClick={handleCopy}
-                title="Copy"
-                className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+                title={copied ? 'Copied' : 'Copy'}
+                aria-label={copied ? 'Copied' : 'Copy message'}
+                className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
               >
                 {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
-              </button>
+              </button>}
+              {onSave && (
+                <button type="button" className={cn(messageAction, saved && 'text-accent')} aria-pressed={!!saved}
+                  title={saved ? 'Remove saved message' : 'Save message'} aria-label={saved ? 'Remove saved message' : 'Save message'}
+                  onClick={() => onSave(!saved)}><Bookmark className={saved ? 'fill-current' : undefined} /></button>
+              )}
+              {onBranch && !message.recoveryRequestId && !message.error && (
+                <button type="button" className={messageAction} title="Branch from this message" aria-label="Branch from this message"
+                  onClick={onBranch}><GitBranch /></button>
+              )}
               {isUser && onEdit && (
                 <button
                   onClick={startEdit}
                   title="Edit"
-                  className="p-1 rounded-md text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
+                  aria-label="Edit message"
+                  className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
                 >
                   <Pencil className="w-3 h-3" />
-                </button>
-              )}
-              {/* Errored reply → retry with same model; successful reply → regenerate (with model options) */}
-              {!isUser && isError && onRegenerate && (
-                <button
-                  onClick={() => onRegenerate(message.id)}
-                  title="Retry"
-                  className="flex items-center gap-1 px-1.5 py-1 rounded-md text-text-tertiary hover:text-accent hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span className="text-[10px] font-medium">Retry</span>
                 </button>
               )}
               {!isUser && !isError && onRegenerate && (
                 <RegenerateMenu onRegenerate={(overrides) => onRegenerate(message.id, overrides)} />
               )}
-              {!isUser && !isError && message.content && (
+              {!isUser && !isError && !hasFiles && message.content && (
                 <button
                   onClick={handleToggleSpeak}
                   title={isSpeaking ? 'Stop' : 'Play aloud'}
+                  aria-label={isSpeaking ? 'Stop reading aloud' : 'Read reply aloud'}
                   className={cn(
-                    'p-1 rounded-md transition-colors',
+                    'p-1.5 rounded-lg transition-colors',
                     isSpeaking
                       ? 'text-accent'
                       : 'text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -508,19 +624,19 @@ export function MessageBubble({ message, isStreaming, onEdit, onRegenerate }: Me
                   {isSpeaking ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3" />}
                 </button>
               )}
-              {!isUser && !isError && message.content && (
+              {!isUser && !isError && !hasFiles && message.content && (
                 <DownloadMenu content={message.content} baseName={message.content.slice(0, 40) || 'dabba-reply'} />
               )}
             </div>
           )}
           {speakError && (
-            <span className="text-[10px] text-red-500">{speakError}</span>
+            <span className="text-xs text-red-500">{speakError}</span>
           )}
           {copyError && (
-            <span role="status" className="text-[10px] text-red-500">{copyError}</span>
+            <span role="status" className="text-xs text-red-500">{copyError}</span>
           )}
         </div>
       </div>
     </div>
   )
-}
+})

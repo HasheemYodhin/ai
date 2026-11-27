@@ -19,13 +19,12 @@ from dabba.data.document_parser import DocumentParser
 
 MAX_FILE_BYTES = 10 * 1024 * 1024
 MAX_TOTAL_BYTES = 25 * 1024 * 1024
-MAX_MULTIPART_FILE_BYTES = 100 * 1024 * 1024
+MAX_MULTIPART_FILE_BYTES = 25 * 1024 * 1024
 # Large archives stay on disk and are scanned incrementally. A finite ceiling
-# prevents an accidental upload from consuming the entire server volume while
-# still allowing multi-gigabyte ZIPs.
-MAX_ZIP_FILE_BYTES = 10 * 1024 * 1024 * 1024
-MAX_ZIP_ENTRIES = 100_000
-MAX_ZIP_MEMBER_BYTES = 100 * 1024 * 1024
+# limits temporary disk consumption.
+MAX_ZIP_FILE_BYTES = 100 * 1024 * 1024
+MAX_ZIP_ENTRIES = 5_000
+MAX_ZIP_MEMBER_BYTES = 25 * 1024 * 1024
 MAX_ZIP_SCAN_BYTES = 512 * 1024 * 1024
 MAX_ZIP_DOCUMENTS = 100
 # DeepSeek V4/GLM-class models have large context windows. The old 30K limit
@@ -155,7 +154,7 @@ def _parse_zip_document_member(
             return "", bytes_read
         sections = DocumentParser(
             max_file_size_mb=MAX_ZIP_MEMBER_BYTES // (1024 * 1024),
-        ).parse_file(tmp_path)
+        ).parse_file(tmp_path, label_pdf_pages=True)
         pieces: list[str] = []
         remaining = char_limit
         for section in sections:
@@ -282,7 +281,9 @@ def extract_document_bytes(name: str, content: bytes) -> str:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(content)
             tmp_path = tmp.name
-        sections = DocumentParser(max_file_size_mb=10).parse_file(tmp_path)
+        sections = DocumentParser(max_file_size_mb=10).parse_file(
+            tmp_path, label_pdf_pages=True
+        )
     except Exception as exc:
         raise ValueError(f'Could not read "{name}": {exc}') from exc
     finally:
@@ -303,7 +304,7 @@ def extract_document_bytes(name: str, content: bytes) -> str:
 
 
 def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
-    """Read a spooled multipart upload while keeping multi-GB ZIPs off-heap."""
+    """Read a spooled multipart upload without loading ZIPs into memory."""
     name = Path(upload.filename or "attachment").name
     suffix = Path(name).suffix.lower()
     size = upload.size
@@ -314,11 +315,15 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
 
     if is_zip:
         if size is not None and size > MAX_ZIP_FILE_BYTES:
-            raise ValueError(f'"{name}" exceeds the 10 GB ZIP attachment limit.')
+            raise ValueError(
+                f'"{name}" exceeds the {MAX_ZIP_FILE_BYTES // (1024 * 1024)} MiB ZIP attachment limit.'
+            )
         return extract_zip_file(name, upload.file)
 
     if size is not None and size > MAX_MULTIPART_FILE_BYTES:
-        raise ValueError(f'"{name}" exceeds the 100 MB document attachment limit.')
+        raise ValueError(
+            f'"{name}" exceeds the {MAX_MULTIPART_FILE_BYTES // (1024 * 1024)} MiB document attachment limit.'
+        )
 
     tmp_path = ""
     copied = 0
@@ -335,7 +340,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
                 tmp.write(chunk)
                 copied += len(chunk)
         if copied > MAX_MULTIPART_FILE_BYTES:
-            raise ValueError(f'"{name}" exceeds the 100 MB document attachment limit.')
+            raise ValueError(
+                f'"{name}" exceeds the {MAX_MULTIPART_FILE_BYTES // (1024 * 1024)} MiB document attachment limit.'
+            )
 
         with open(tmp_path, "rb") as source:
             signature = source.read(min(copied, MAX_FILE_BYTES))
@@ -345,7 +352,9 @@ def extract_uploaded_file(upload: UploadFile) -> tuple[str, bool]:
             raise ValueError(
                 f'Unsupported document type for "{name}". Supported: {supported}.'
             )
-        sections = DocumentParser(max_file_size_mb=100).parse_file(tmp_path)
+        sections = DocumentParser(max_file_size_mb=100).parse_file(
+            tmp_path, label_pdf_pages=True
+        )
     except ValueError:
         raise
     except Exception as exc:

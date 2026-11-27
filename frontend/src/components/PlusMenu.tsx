@@ -1,7 +1,8 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useRef, useEffect } from 'react'
 import {
   Plus, Paperclip, Camera, FolderPlus, Sparkles, Globe,
-  Wand2, Plug, Puzzle, Telescope, ChevronRight, Check, Loader2, Trash2, Slack as SlackIcon,
+  Wand2, Plug, Puzzle, Telescope, ChevronRight, Check, Loader2, Trash2, Lock, Slack as SlackIcon,
 } from 'lucide-react'
 import type { SimpleIcon } from 'simple-icons'
 import {
@@ -12,6 +13,7 @@ import {
 } from 'simple-icons'
 import type { Project } from '@/types'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
+import { useAuth } from '@/hooks/useAuth'
 import { useSkills } from '@/hooks/useSkills'
 import { SkillModal } from './SkillModal'
 import { cn } from '@/lib/utils'
@@ -113,7 +115,10 @@ export function PlusMenu({
   const [skillModalOpen, setSkillModalOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  const { servers: mcpServers, isLoading: mcpLoading } = useMcpStatus(open && (submenu === 'connectors' || submenu === 'plugins'))
+  // Agent modes (web search, connectors, plugins, research) go through
+  // POST /v1/agent and MCP status through /v1/mcp/*, both admin-only.
+  const { isAdmin } = useAuth()
+  const { servers: mcpServers, isLoading: mcpLoading } = useMcpStatus(isAdmin && open && (submenu === 'connectors' || submenu === 'plugins'))
   const { skills, createSkill, deleteSkill } = useSkills()
 
   useEffect(() => {
@@ -128,6 +133,7 @@ export function PlusMenu({
   }, [])
 
   const close = () => { setOpen(false); setSubmenu(null) }
+  const menuRef = useDialogFocus(open, close)
 
   const setAgentMode = (label: string, effort?: string, hint?: string, allowedTools?: string[]) => {
     onModeChange(mode.kind === 'agent' && mode.label === label ? { kind: 'chat' } : { kind: 'agent', label, effort, hint, allowedTools })
@@ -150,13 +156,16 @@ export function PlusMenu({
         onClick={() => setOpen(o => !o)}
         disabled={disabled}
         className="flex-shrink-0 p-3 pb-3.5 text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary disabled:opacity-40 transition-colors rounded-l-2xl hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label="Add photos, files, and more"
         title="Add photos, files, and more"
       >
         <Plus className="w-5 h-5" />
       </button>
 
       {open && (
-        <div className="absolute left-0 bottom-full mb-2 w-64 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in">
+        <div ref={menuRef} role="dialog" aria-label="Add photos, files, and more" tabIndex={-1} className="absolute left-0 bottom-full mb-2 w-64 rounded-xl bg-surface dark:bg-surface-dark-secondary border border-border dark:border-border-dark shadow-lg z-40 py-1 animate-fade-in">
           <MenuItem icon={<Paperclip className="w-4 h-4" />} label="Add photos & files"
             onClick={() => { onAttachFiles(); close() }} />
           <MenuItem icon={<Camera className="w-4 h-4" />} label="Take screenshot"
@@ -182,6 +191,7 @@ export function PlusMenu({
           <MenuItem icon={<Wand2 className="w-4 h-4" />} label="Create an image" active={mode.kind === 'image'}
             onClick={() => { onModeChange(mode.kind === 'image' ? { kind: 'chat' } : { kind: 'image' }); close() }} />
 
+          {isAdmin ? <>
           <MenuItem icon={<Globe className="w-4 h-4" />} label="Web search"
             active={mode.kind === 'agent' && mode.label === 'Web search'}
             onClick={() => setAgentMode('Web search')} />
@@ -242,6 +252,14 @@ export function PlusMenu({
               'and cite where each fact came from before giving a final answer.'
             )} />
 
+          </> : <>
+            {/* Regular users: show what exists, but locked, instead of a mode that fails on send. */}
+            <MenuItem icon={<Globe className="w-4 h-4" />} label="Web search" disabled />
+            <MenuItem icon={<Plug className="w-4 h-4" />} label="Connectors" disabled />
+            <MenuItem icon={<Puzzle className="w-4 h-4" />} label="Plugins" disabled />
+            <MenuItem icon={<Telescope className="w-4 h-4" />} label="Research" disabled />
+          </>}
+
           <Submenu label="Skills" icon={<Sparkles className="w-4 h-4" />}
             open={submenu === 'skills'} onToggle={() => setSubmenu(s => s === 'skills' ? null : 'skills')}>
             {skills.length === 0 ? (
@@ -281,22 +299,29 @@ export function PlusMenu({
   )
 }
 
-function MenuItem({ icon, label, onClick, active, trailing }: {
+function MenuItem({ icon, label, onClick, active, trailing, disabled }: {
   icon: React.ReactNode; label: string; onClick?: () => void; active?: boolean; trailing?: React.ReactNode
+  /** Admin-only feature for a regular user: shown with a lock, not clickable. */
+  disabled?: boolean
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={disabled ? 'Owner only' : undefined}
+      aria-label={disabled ? `${label} (owner only)` : undefined}
       className={cn(
         'w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors',
-        active ? 'bg-accent/10' : 'hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
+        disabled ? 'opacity-50 cursor-not-allowed'
+          : active ? 'bg-accent/10' : 'hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
       )}
     >
       <span className={cn('flex items-center gap-2.5 text-xs', active ? 'text-accent font-medium' : 'text-text-primary dark:text-text-dark-primary')}>
         {icon}
         {label}
       </span>
-      {active ? <Check className="w-3.5 h-3.5 text-accent" /> : trailing}
+      {disabled ? <Lock className="w-3 h-3 text-text-tertiary" aria-hidden="true" />
+        : active ? <Check className="w-3.5 h-3.5 text-accent" /> : trailing}
     </button>
   )
 }

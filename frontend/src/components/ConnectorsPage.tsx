@@ -39,7 +39,7 @@ function ConnectorIcon({ connector }: { connector: SuggestedConnector }) {
     return <span className="text-[17px] font-extrabold leading-none tracking-[-0.08em] text-[#0A66C2]">in</span>
   }
   if (connector.customBrand === 'microsoft') {
-    if (connector.brandLabel) return <span className="text-base font-bold text-[#2563eb]">{connector.brandLabel}</span>
+    if (connector.brandLabel) return <span className="text-base font-semibold text-[#2563eb]">{connector.brandLabel}</span>
     return (
       <span className="grid h-5 w-5 grid-cols-2 gap-0.5">
         <span className="bg-[#f25022]" /><span className="bg-[#7fba00]" />
@@ -48,10 +48,10 @@ function ConnectorIcon({ connector }: { connector: SuggestedConnector }) {
     )
   }
   if (connector.customBrand === 'aws') {
-    return <span className="relative text-[13px] font-bold tracking-tight text-[#232f3e] dark:text-white">aws<span className="absolute -bottom-1 left-1 h-0.5 w-5 -rotate-6 rounded-full bg-[#ff9900]" /></span>
+    return <span className="relative text-[13px] font-semibold tracking-tight text-[#232f3e] dark:text-white">aws<span className="absolute -bottom-1 left-1 h-0.5 w-5 -rotate-6 rounded-full bg-[#ff9900]" /></span>
   }
   if (connector.customBrand === 'azure') {
-    return <span className="text-base font-bold tracking-[-0.1em] text-[#0078d4]">AZ</span>
+    return <span className="text-base font-semibold tracking-[-0.1em] text-[#0078d4]">AZ</span>
   }
   if (connector.brand) {
     return (
@@ -228,7 +228,7 @@ const SUGGESTED_CONNECTORS: SuggestedConnector[] = [
     id: 'vercel', name: 'Vercel', category: 'Cloud', icon: Cloud, brand: siVercel,
     description: 'Inspect projects, deployments, domains, and runtime logs.',
     note: 'Enter the MCP command or endpoint supplied by your Vercel workspace.',
-    iconClass: 'text-black', tileClass: 'bg-gray-100 dark:bg-white',
+    iconClass: 'text-black', tileClass: 'bg-surface-tertiary dark:bg-white',
   },
   {
     id: 'netlify', name: 'Netlify', category: 'Cloud', icon: Cloud, brand: siNetlify,
@@ -279,7 +279,7 @@ const SUGGESTED_CONNECTORS: SuggestedConnector[] = [
     id: 'microsoft365', name: 'Microsoft 365', category: 'Microsoft', icon: Boxes, customBrand: 'microsoft',
     description: 'Connect work across Microsoft documents, mail, meetings, and files.',
     note: 'Enter your Microsoft 365 MCP command and complete Microsoft identity authorization.',
-    iconClass: 'text-blue-600', tileClass: 'bg-gray-50 dark:bg-gray-900',
+    iconClass: 'text-blue-600', tileClass: 'bg-surface-secondary dark:bg-surface-dark-tertiary',
   },
   {
     id: 'teams', name: 'Microsoft Teams', category: 'Microsoft', icon: MessageCircle, customBrand: 'microsoft', brandLabel: 'T',
@@ -553,7 +553,7 @@ export function ConnectorsPage({ onOpenSkills }: ConnectorsPageProps) {
         <section className="mb-9">
           <div className="mb-3 flex items-center gap-2">
             <h2 className="text-xs font-semibold text-text-primary dark:text-text-dark-primary">Installed</h2>
-            <span className="text-[10px] text-text-tertiary">{servers.length}</span>
+            <span className="text-xs text-text-tertiary">{servers.length}</span>
             <button onClick={reload} className="ml-auto rounded-md p-1 text-text-tertiary transition-colors hover:text-text-primary dark:hover:text-text-dark-primary" title="Refresh"><RefreshCw className="h-3.5 w-3.5" /></button>
           </div>
           {isLoading ? (

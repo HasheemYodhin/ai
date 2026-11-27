@@ -39,3 +39,13 @@ attachments/
 # Stray empty artifacts from shell mishaps
 /dabba black
 /dabba-chat@1.0.0
+
+# Local llama.cpp source checkout; cloud deployments use Python packages/rule-based mode.
+/llama.cpp/
+
+# Local runtime data and credentials
+.dabba-data/
+.env
+.env.*
+!.env.example
+frontend/dist-ssr/

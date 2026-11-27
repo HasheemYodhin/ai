@@ -1,14 +1,35 @@
+import type { DocumentTemplate } from '@/lib/documents/templates'
+import type { DocumentFormat } from '@/lib/download'
+
+export interface DocumentRequest {
+  formats: DocumentFormat[]
+  template: DocumentTemplate
+}
+
+export interface DocumentProgress {
+  stage: 'drafting' | 'building' | 'finished' | 'failed' | 'stopped'
+  formats: Partial<Record<DocumentFormat, 'building' | 'ready' | 'failed'>>
+}
+
 export interface TokenUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
 }
 
+export type ChatSource =
+  | { kind: 'web'; title: string; url: string }
+  | { kind: 'file'; title: string; messageId: string; pages?: number[] }
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: number
+  interrupted?: boolean
+  recoveryRequestId?: string
+  sources?: ChatSource[]
+  reasoning?: string
   error?: boolean
   model?: string
   usage?: TokenUsage
@@ -22,8 +43,15 @@ export interface Message {
   documentAttachments?: DocumentAttachment[]
   /** Real binary documents generated from an assistant reply. */
   generatedFiles?: GeneratedFile[]
+  documentRequest?: DocumentRequest
+  documentProgress?: DocumentProgress
+  /** Generated document body kept for follow-up requests. */
+  documentOutput?: string
+  /** Brief text shown beside a generated file. */
+  documentSummary?: string
   /** Images the model generated in response to this message (data URLs). */
   generatedImages?: string[]
+  imageGeneration?: boolean
   /** True while this message represents an in-flight image generation request. */
   isGeneratingImage?: boolean
   /**
@@ -118,9 +146,12 @@ export interface ScheduledSkill {
   name: string
   skillName: string
   instructions: string
+  /** Model the schedule runs with; empty uses the server default. */
+  model?: string | null
   cadence: ScheduleCadence
   intervalMinutes?: number | null
   timeOfDay?: string | null
+  timeZone?: string
   weekdays: number[]
   enabled: boolean
   nextRunAt?: number | null
@@ -136,7 +167,7 @@ export interface ScheduledSkillRun {
   taskId?: string | null
   status: string
   triggeredBy: string
-  output?: { message?: string } | null
+  output?: { content?: string; message?: string } | null
   error?: string | null
   startedAt: number
   completedAt?: number | null
@@ -241,6 +272,12 @@ export interface ModelInfo {
   tier: string
   description: string
   has_key: boolean
+  keySource?: string | null
+  contextWindow?: number
+  maxOutputTokens?: number
+  supportsThinking?: boolean
+  supportsVision?: boolean
+  fallbackModels?: string[]
 }
 
 export interface ModelCatalog {
@@ -256,6 +293,8 @@ export interface McpServer {
   connected: boolean
   processRunning?: boolean
   authenticated?: boolean
+  authenticationStatus?: 'configured' | 'missing' | 'unverified'
+  checkedAt?: number
   verifiedStatus?: 'connected' | 'degraded' | 'authentication_required' | 'stopped' | 'unknown'
   message?: string | null
   tools: string[]
@@ -271,10 +310,19 @@ export interface Conversation {
   pinned?: boolean
   customTitle?: boolean
   projectId?: string | null
+  /** Number of messages on the server; set by the lightweight list. */
+  revision?: number
+  messageCount?: number
+  /**
+   * False for sidebar entries whose messages haven't been fetched yet
+   * (`messages` is then []). Undefined/true means `messages` is complete.
+   */
+  messagesLoaded?: boolean
 }
 
 export interface StreamChunk {
   content: string
+  reasoning?: string
   finishReason?: 'stop' | 'length' | null
   usage?: TokenUsage
 }

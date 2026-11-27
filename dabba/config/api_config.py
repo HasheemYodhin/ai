@@ -2,6 +2,8 @@
 API server configuration for FastAPI-based serving.
 """
 
+import os
+
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -14,10 +16,18 @@ class ApiConfig:
     """
 
     # Server
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     workers: int = 1
-    cors_origins: List[str] = field(default_factory=lambda: ["*"])
+    cors_origins: List[str] = field(
+        default_factory=lambda: [
+            origin.strip().rstrip("/")
+            for origin in os.environ.get(
+                "DABBA_CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+            ).split(",")
+            if origin.strip()
+        ]
+    )
 
     # Model serving
     default_model: str = "dabba"
@@ -33,6 +43,8 @@ class ApiConfig:
     jwt_secret: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_expiry_hours: int = 24
+
+    enable_local_code_execution: bool = False
 
     # Rate limiting
     rate_limit_enabled: bool = True

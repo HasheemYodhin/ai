@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import type { Conversation, Project } from '@/types'
 import { ConversationList } from './ConversationList'
 import { ProjectModal } from './ProjectModal'
 import { cn } from '@/lib/utils'
 import {
-  Plus, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
+  SquarePen, PanelLeftClose, Settings, Search, Ghost, LogOut, MoreHorizontal,
   MessageSquare, Folder, Bot, Wrench, Plug, BookOpen, Telescope, FolderPlus,
-  ChevronDown, X, Pin, BriefcaseBusiness, CalendarClock, ListChecks, Webhook,
+  ChevronDown, X, BriefcaseBusiness, CalendarClock, ListChecks, Webhook, Lock,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useMcpStatus } from '@/hooks/useMcpStatus'
 import type { ProjectInput } from '@/hooks/useProjects'
 import type { SidebarView } from '@/App'
+import { ADMIN_ONLY_VIEWS } from '@/lib/adminViews'
+
+const PRIMARY_VIEWS: SidebarView[] = ['chat', 'projects', 'cowork', 'agents']
 import logo from '../icon.svg'
 
 interface SidebarProps {
@@ -23,7 +26,7 @@ interface SidebarProps {
   view: SidebarView
   onChangeView: (view: SidebarView) => void
   onToggle: () => void
-  onSelect: (id: string) => void
+  onSelect: (id: string, messageId?: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onTogglePin: (id: string) => void
@@ -55,19 +58,29 @@ export function Sidebar({
   onOpenSettings,
   onStartResearch,
 }: SidebarProps) {
-  const { currentUser, logout } = useAuth()
+  const { currentUser, isAdmin, logout } = useAuth()
   const [projectModalOpen, setProjectModalOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const openSearch = () => {
+    setSearchOpen(true)
+    requestAnimationFrame(() => searchRef.current?.focus())
+  }
   const [profileMenuOpen, setProfileMenuOpen] = useState(false)
-  const [navigationOpen, setNavigationOpen] = useState(true)
-  const [projectsOpen, setProjectsOpen] = useState(true)
+  const isSecondaryView = !PRIMARY_VIEWS.includes(view)
+  const [moreOpen, setMoreOpen] = useState(isSecondaryView)
+  // Opening a page that lives under More reveals its item; the toggle stays the user's after that.
+  useEffect(() => {
+    if (isSecondaryView) setMoreOpen(true)
+  }, [isSecondaryView, view])
+  const [projectsOpen, setProjectsOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
   // Cheap always-on check just for the little "connected" dot next to Connectors.
-  const { servers } = useMcpStatus(true)
+  // /v1/mcp/* is admin-only, so regular users skip this request entirely.
+  const { servers } = useMcpStatus(isAdmin)
   const anyConnected = servers.some(s => s.connected)
   const connectedCount = servers.filter(s => s.connected).length
-  const pinnedCount = useMemo(() => conversations.filter(c => c.pinned).length, [conversations])
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -79,6 +92,7 @@ export function Sidebar({
         e.preventDefault()
         if (!isOpen) onToggle()
         onChangeView('chat')
+        setSearchOpen(true)
         requestAnimationFrame(() => searchRef.current?.focus())
       }
     }
@@ -98,10 +112,12 @@ export function Sidebar({
 
   const navItem = (v: SidebarView, icon: React.ReactNode, label: string, trailing?: React.ReactNode) => (
     <button
-      onClick={() => onChangeView(v)}
+      onClick={() => navigateFromSidebar(v)}
       aria-current={view === v ? 'page' : undefined}
+      aria-label={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? `${label} (owner only)` : label}
+      title={!isAdmin && ADMIN_ONLY_VIEWS.has(v) ? 'Owner only' : undefined}
       className={cn(
-        'w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors',
+        'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors',
         view === v
           ? 'bg-accent/10 text-accent'
           : 'text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary'
@@ -109,9 +125,16 @@ export function Sidebar({
     >
       {icon}
       <span className="flex-1 text-left truncate">{label}</span>
-      {trailing}
+      {!isAdmin && ADMIN_ONLY_VIEWS.has(v)
+        ? <Lock className="w-3 h-3 flex-shrink-0 text-text-tertiary dark:text-text-dark-tertiary" aria-hidden="true" />
+        : trailing}
     </button>
   )
+
+  const navigateFromSidebar = (nextView: SidebarView) => {
+    onChangeView(nextView)
+    if (isOpen && !window.matchMedia('(min-width: 768px)').matches) onToggle()
+  }
 
   const initials = currentUser?.name.trim().split(/\s+/).slice(0, 2).map(w => w[0]?.toUpperCase()).join('') || '?'
 
@@ -126,153 +149,183 @@ export function Sidebar({
 
       <aside
         className={cn(
-          'fixed md:relative z-30 h-full flex flex-col transition-all duration-200 ease-in-out',
+          'fixed md:relative z-30 h-full flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] [&_svg]:stroke-[1.5]',
           'bg-surface-secondary dark:bg-surface-dark-secondary border-r border-border dark:border-border-dark',
-          isOpen ? 'w-[248px] translate-x-0' : 'w-[248px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
+          isOpen ? 'w-[248px] max-w-[calc(100%-3rem)] shrink-0 translate-x-0' : 'invisible w-[248px] -translate-x-full md:w-0 md:translate-x-0 md:overflow-hidden md:border-r-0',
         )}
       >
         {/* Brand header */}
-        <div className="flex items-center justify-between px-3 py-2.5 border-b border-border dark:border-border-dark">
+        <div className="flex items-center justify-between h-14 pl-4 pr-2.5">
           <div className="flex items-center gap-2">
-            <img src={logo} alt="Dabba Logo" className="w-5 h-5 object-contain rounded-md" />
-            <span className="font-semibold text-sm text-text-primary dark:text-text-dark-primary">Dabba</span>
+            <img src={logo} alt="" className="w-5 h-5 object-contain rounded-md" />
+            <span className="font-semibold text-base text-text-primary dark:text-text-dark-primary">Dabba</span>
           </div>
-          <button
-            onClick={onToggle}
-            className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
-            title="Close sidebar (Ctrl+B)"
-          >
-            <PanelLeftClose className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="px-2.5 pt-2.5 space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={onNew}
-              className="flex-1 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-[13px] font-medium transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              New Chat
-            </button>
+          <div className="flex items-center gap-0.5">
             <button
               onClick={onNewTemporary}
-              title="New temporary chat — not saved to history"
-              className="p-1.5 rounded-lg border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              aria-label="New temporary chat, not saved to history" title="New temporary chat, not saved to history"
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
             >
               <Ghost className="w-4 h-4" />
             </button>
+            <button
+              onClick={onToggle}
+              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary transition-colors"
+              aria-label="Close sidebar (Ctrl+B)" title="Close sidebar (Ctrl+B)"
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Search — deliberately given breathing room below New Chat */}
-        <div className="px-2.5 pt-2.5 pb-0.5">
+        <div className="px-2.5 space-y-0.5">
+          <button
+            onClick={onNew}
+            className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-text-primary dark:text-text-dark-primary hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
+          >
+            <SquarePen className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1 text-left">New chat</span>
+          </button>
+
+          {!searchOpen && !search ? (
+            <button
+              onClick={openSearch}
+              className="w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+            >
+              <Search className="w-4 h-4 flex-shrink-0" />
+              <span className="flex-1 text-left">Search chats</span>
+              <kbd className="hidden sm:inline-flex px-1 rounded border border-border dark:border-border-dark text-[11px] leading-4 text-text-tertiary font-mono">Ctrl K</kbd>
+            </button>
+          ) : (
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary dark:text-text-dark-tertiary" />
             <input
               ref={searchRef}
+              autoFocus
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
+              onBlur={() => { if (!search) setSearchOpen(false) }}
               onKeyDown={e => {
                 if (e.key === 'Escape') {
                   setSearch('')
-                  e.currentTarget.blur()
+                  setSearchOpen(false)
                 }
               }}
-              placeholder="Search chats…"
+              placeholder="Search chats"
               aria-label="Search conversations"
-              className="w-full pl-8 pr-14 py-1.5 text-[13px] rounded-lg glass-input
+              className="w-full h-8 pl-9 pr-9 text-[13px] rounded-lg glass-input
                 text-text-primary dark:text-text-dark-primary placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary
                 focus:border-accent/50 outline-none transition-colors"
             />
-            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-              {search ? (
-                <button
-                  onClick={() => { setSearch(''); searchRef.current?.focus() }}
-                  className="p-1 rounded text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
-                  aria-label="Clear search"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              ) : (
-                <kbd className="hidden sm:inline-flex px-1.5 py-0.5 rounded border border-border dark:border-border-dark text-[9px] text-text-tertiary font-sans">Ctrl K</kbd>
-              )}
-            </div>
+            {search && (
+              <button
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => { setSearch(''); searchRef.current?.focus() }}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+          )}
         </div>
 
         {/* Navigation */}
-        <div className="px-2.5 pt-2.5">
-          <button
-            onClick={() => setNavigationOpen(o => !o)}
-            className="w-full flex items-center justify-between px-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary"
-            aria-expanded={navigationOpen}
-          >
-            <span>Navigation</span>
-            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !navigationOpen && '-rotate-90')} />
-          </button>
-          {navigationOpen && <nav>
+        <div className="px-2.5 pt-4">
+          <nav className="space-y-0.5">
             {navItem('chat', <MessageSquare className="w-4 h-4 flex-shrink-0" />, 'Chats',
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary flex-shrink-0">{conversations.length}</span>)}
-            {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects')}
+              <span className="text-xs font-mono tabular-nums text-text-tertiary dark:text-text-dark-tertiary flex-shrink-0">{conversations.length}</span>)}
+            {/* One Projects entry: the nav row (opens the Projects page), a +
+                for a new project, and project shortcuts folded underneath. This
+                replaces the separate "Projects N / New project" section. */}
+            <div className="group relative flex items-center">
+              <div className="flex-1 min-w-0">
+                {navItem('projects', <Folder className="w-4 h-4 flex-shrink-0" />, 'Projects',
+                  <span className="w-12 flex-shrink-0" aria-hidden="true" />)}
+              </div>
+              <div className="absolute right-1 flex items-center gap-0.5">
+                {projects.length > 0 && (
+                  <button
+                    onClick={() => setProjectsOpen(o => !o)}
+                    aria-expanded={projectsOpen}
+                    aria-label={projectsOpen ? 'Hide project shortcuts' : `Show ${projects.length} project shortcut${projects.length === 1 ? '' : 's'}`}
+                    title={projectsOpen ? 'Hide projects' : 'Show projects'}
+                    className="w-6 h-6 flex items-center justify-center rounded-md text-text-tertiary dark:text-text-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                  >
+                    <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !projectsOpen && '-rotate-90')} />
+                  </button>
+                )}
+                <button
+                  onClick={() => setProjectModalOpen(true)}
+                  aria-label="New project"
+                  title="New project"
+                  className="w-6 h-6 flex items-center justify-center rounded-md text-text-tertiary dark:text-text-dark-tertiary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary hover:text-accent transition-colors"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            {projectsOpen && projects.length > 0 && (
+              <div className="max-h-28 overflow-y-auto scrollbar-thin space-y-0.5 pl-4">
+                {projects.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => navigateFromSidebar('projects')}
+                    className="w-full h-7 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
+                  >
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} aria-hidden="true" />
+                    <span className="flex-1 text-left truncate">{p.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {navItem('cowork', <BriefcaseBusiness className="w-4 h-4 flex-shrink-0" />, 'Cowork')}
+            {navItem('agents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Agents')}
+          </nav>
+          {moreOpen && <nav className="space-y-0.5 mt-0.5">
             {navItem('scheduled-skills', <CalendarClock className="w-4 h-4 flex-shrink-0" />, 'Scheduled skills')}
             {navItem('tasks', <ListChecks className="w-4 h-4 flex-shrink-0" />, 'Task center')}
-            {navItem('agents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Agents')}
             {navItem('tools', <Wrench className="w-4 h-4 flex-shrink-0" />, 'Tools')}
             {navItem('connectors', <Plug className="w-4 h-4 flex-shrink-0" />, 'Connectors',
-              anyConnected && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-600 dark:text-green-400 flex-shrink-0">{connectedCount} live</span>)}
+              anyConnected && (
+                <span className="flex items-center gap-1.5 text-xs text-text-tertiary dark:text-text-dark-tertiary flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-600 dark:bg-green-400" />
+                  {connectedCount} live
+                </span>
+              ))}
             {navItem('skills', <BookOpen className="w-4 h-4 flex-shrink-0" />, 'Prompt library')}
             {navItem('hooks', <Webhook className="w-4 h-4 flex-shrink-0" />, 'Hooks')}
             {navItem('subagents', <Bot className="w-4 h-4 flex-shrink-0" />, 'Subagent types')}
+            {/* Research runs through the admin-only agent loop (POST /v1/agent). */}
             <button
-              onClick={onStartResearch}
-              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
+              onClick={isAdmin ? onStartResearch : undefined}
+              disabled={!isAdmin}
+              title={isAdmin ? undefined : 'Owner only'}
+              aria-label={isAdmin ? 'Research mode' : 'Research mode (owner only)'}
+              className={cn(
+                'w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary',
+                isAdmin ? 'hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary' : 'opacity-50 cursor-not-allowed'
+              )}
             >
               <Telescope className="w-4 h-4 flex-shrink-0" />
               <span className="flex-1 text-left">Research mode</span>
+              {!isAdmin && <Lock className="w-3 h-3 flex-shrink-0 text-text-tertiary dark:text-text-dark-tertiary" aria-hidden="true" />}
             </button>
           </nav>}
-        </div>
-
-        {/* Projects quick list */}
-        <div className="px-2.5 pt-2.5">
           <button
-            onClick={() => setProjectsOpen(o => !o)}
-            className="w-full flex items-center justify-between px-1 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary"
-            aria-expanded={projectsOpen}
+            onClick={() => setMoreOpen(o => !o)}
+            aria-expanded={moreOpen}
+            aria-label={moreOpen ? 'Show fewer pages' : 'Show more pages'}
+            className="mt-0.5 w-full h-8 flex items-center gap-2.5 px-2.5 rounded-lg text-[13px] font-medium transition-colors text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary"
           >
-            <span>Projects <span className="ml-1 opacity-70">{projects.length}</span></span>
-            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', !projectsOpen && '-rotate-90')} />
+            <ChevronDown className={cn('w-4 h-4 flex-shrink-0 transition-transform', moreOpen && 'rotate-180')} />
+            <span className="flex-1 text-left">{moreOpen ? 'Less' : 'More'}</span>
           </button>
-          {projectsOpen && <div className="max-h-24 overflow-y-auto scrollbar-thin">
-            {projects.map(p => (
-              <button
-                key={p.id}
-                onClick={() => onChangeView('projects')}
-                className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-medium text-text-secondary dark:text-text-dark-secondary hover:bg-surface dark:hover:bg-surface-dark-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
-              >
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: p.color }} />
-                <span className="flex-1 text-left truncate">{p.name}</span>
-              </button>
-            ))}
-            <button
-              onClick={() => setProjectModalOpen(true)}
-              className="w-full flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-medium text-accent hover:bg-surface dark:hover:bg-surface-dark-tertiary transition-colors"
-            >
-              <FolderPlus className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="flex-1 text-left">New project</span>
-            </button>
-          </div>}
         </div>
 
-        <div className="flex-1 min-h-0 mt-1.5 border-t border-border dark:border-border-dark relative">
-          {pinnedCount > 0 && (
-            <div className="absolute right-3 top-2 z-10 flex items-center gap-1 text-[9px] text-text-tertiary" title={`${pinnedCount} pinned conversation${pinnedCount === 1 ? '' : 's'}`}>
-              <Pin className="w-2.5 h-2.5" /> {pinnedCount}
-            </div>
-          )}
+        <div className="flex-1 min-h-0 mt-4 border-t border-border dark:border-border-dark relative">
           <ConversationList
             conversations={conversations}
             projects={projects}
@@ -291,10 +344,13 @@ export function Sidebar({
         <div className="p-2 border-t border-border dark:border-border-dark relative" ref={profileRef}>
           <button
             onClick={() => setProfileMenuOpen(o => !o)}
+            aria-label={`Account menu for ${currentUser?.name ?? 'Guest'}`}
+            aria-haspopup="menu"
+            aria-expanded={profileMenuOpen}
             className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
           >
             <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-medium flex-shrink-0"
               style={{ background: currentUser?.avatarColor ?? '#c96442' }}
             >
               {initials}

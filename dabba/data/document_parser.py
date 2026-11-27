@@ -51,7 +51,7 @@ class DocumentParser:
         self.csv_text_column = csv_text_column
         self.max_file_size_mb = max_file_size_mb
 
-    def parse_file(self, path: str) -> List[str]:
+    def parse_file(self, path: str, *, label_pdf_pages: bool = False) -> List[str]:
         """
         Parse a single file and extract text.
 
@@ -94,6 +94,8 @@ class DocumentParser:
         if parser is None:
             return []
 
+        if suffix == ".pdf" and label_pdf_pages:
+            return self._parse_pdf(file_path, label_pages=True)
         return parser(file_path)
 
     def _parse_text(self, path: Path) -> List[str]:
@@ -197,7 +199,7 @@ class DocumentParser:
                         texts.append(row_text)
         return texts
 
-    def _parse_pdf(self, path: Path) -> List[str]:
+    def _parse_pdf(self, path: Path, *, label_pages: bool = False) -> List[str]:
         """
         Parse a PDF file and extract text.
 
@@ -214,12 +216,13 @@ class DocumentParser:
         try:
             import fitz
 
-            doc = fitz.open(str(path))
-            for page in doc:
-                text = page.get_text().strip()
-                if text:
-                    texts.append(text)
-            doc.close()
+            with fitz.open(str(path)) as doc:
+                for number, page in enumerate(doc, 1):
+                    text = page.get_text().strip()
+                    if text:
+                        texts.append(
+                            f"[Page {number}]\n{text}" if label_pages else text
+                        )
         except ImportError:
             try:
                 from pdfminer.high_level import extract_text

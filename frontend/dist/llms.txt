@@ -1,0 +1,25 @@
+# Dabba
+
+> Dabba is a self hosted AI workspace. It brings 43 AI models from 8 providers (Anthropic, OpenAI, Google, NVIDIA, Hugging Face, Ollama and more) into one chat, with agents, connectors, saved skills, projects and scheduled automations.
+
+## What it does
+
+- Chat with Claude, GPT, Gemini, NVIDIA Nemotron and local models, and set how much reasoning each reply gets.
+- Cowork: describe a result, point Dabba at a project folder, and it works through the task and reports back.
+- 60 connectors through MCP, including GitHub, Google Drive, Google Docs, Microsoft 365, Slack, Notion, Jira and Gmail.
+- Saved skills (reusable instructions) and scheduled skills that run on a schedule with run history.
+- Export answers to PDF, Word, Excel and PowerPoint.
+
+## Hosting and data
+
+- Free to run on your own server; you pay model providers directly for the API keys you add.
+- One Docker image serves the app and the API, with ready setups for Render and Kubernetes (Helm).
+- Accounts, chats and projects are stored on your own server. Provider keys stay on the server.
+- The first account created on a server becomes its owner; features that run commands on the server are limited to the owner.
+
+## Pages
+
+- [Home](/): product overview and FAQ
+- [Try Dabba](/try): chat in the browser without an account
+- [Create an account](/signup)
+- [Log in](/login)

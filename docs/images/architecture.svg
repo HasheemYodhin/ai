@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="884" viewBox="0 0 1200 884" font-family="Inter, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2f9e5c"/>
+    </marker>
+    <filter id="sh" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#1f2937" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <!-- Background + title -->
+  <rect width="1200" height="884" fill="#f7f6f3"/>
+  <text x="600" y="48" text-anchor="middle" font-size="26" font-weight="700" fill="#1c1c1c">Dabba — System Architecture</text>
+  <text x="600" y="74" text-anchor="middle" font-size="14" fill="#6b6b6b">One backend, four clients, pluggable model providers</text>
+
+  <!-- Layer 1: clients -->
+  <text x="60" y="118" font-size="12" font-weight="700" fill="#2f9e5c" letter-spacing="1.5">USER INTERFACES</text>
+  <g filter="url(#sh)">
+    <rect x="60"  y="130" width="250" height="84" rx="14" fill="#fff" stroke="#dcdad4"/>
+    <rect x="337" y="130" width="250" height="84" rx="14" fill="#fff" stroke="#dcdad4"/>
+    <rect x="614" y="130" width="250" height="84" rx="14" fill="#fff" stroke="#dcdad4"/>
+    <rect x="891" y="130" width="250" height="84" rx="14" fill="#fff" stroke="#dcdad4"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="185"  y="166" font-size="17" font-weight="600" fill="#1c1c1c">Web app</text>
+    <text x="185"  y="190" font-size="13" fill="#6b6b6b">React · Vite · Tailwind</text>
+    <text x="462"  y="166" font-size="17" font-weight="600" fill="#1c1c1c">Terminal TUI</text>
+    <text x="462"  y="190" font-size="13" fill="#6b6b6b">Textual · bin/dabba</text>
+    <text x="739"  y="166" font-size="17" font-weight="600" fill="#1c1c1c">VS Code extension</text>
+    <text x="739"  y="190" font-size="13" fill="#6b6b6b">Side panel</text>
+    <text x="1016" y="166" font-size="17" font-weight="600" fill="#1c1c1c">Chrome extension</text>
+    <text x="1016" y="190" font-size="13" fill="#6b6b6b">Sidebar</text>
+  </g>
+
+  <!-- Clients join one bus, single arrow into the API -->
+  <g stroke="#2f9e5c" stroke-width="2" fill="none">
+    <path d="M185,214 V246 H1016 V214"/>
+    <path d="M462,214 V246"/>
+    <path d="M739,214 V246"/>
+  </g>
+  <path d="M600,246 V278" stroke="#2f9e5c" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- Layer 2: API -->
+  <text x="60" y="270" font-size="12" font-weight="700" fill="#2f9e5c" letter-spacing="1.5">API</text>
+  <rect x="60" y="282" width="1081" height="88" rx="14" fill="#2f9e5c" filter="url(#sh)"/>
+  <text x="600" y="318" text-anchor="middle" font-size="19" font-weight="700" fill="#fff">FastAPI server  ·  dabba/api</text>
+  <text x="600" y="346" text-anchor="middle" font-size="14" fill="#e3f4ea">OpenAI-compatible  ·  Streaming  ·  Session auth  ·  Rate limiting  ·  Encrypted provider keys</text>
+
+  <path d="M600,370 V412" stroke="#2f9e5c" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- Layer 3: runtime -->
+  <text x="60" y="410" font-size="12" font-weight="700" fill="#2f9e5c" letter-spacing="1.5">PLATFORM + AGENT RUNTIME</text>
+  <rect x="60" y="420" width="1081" height="150" rx="16" fill="#e9f5ee" stroke="#b9dfc8"/>
+  <g filter="url(#sh)">
+    <rect x="84"  y="444" width="330" height="102" rx="12" fill="#fff" stroke="#dcdad4"/>
+    <rect x="436" y="444" width="330" height="102" rx="12" fill="#fff" stroke="#dcdad4"/>
+    <rect x="788" y="444" width="330" height="102" rx="12" fill="#fff" stroke="#dcdad4"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="249" y="478" font-size="17" font-weight="600" fill="#1c1c1c">Agent loop</text>
+    <text x="249" y="502" font-size="13" fill="#6b6b6b">Planner · Executor · Tool registry</text>
+    <text x="249" y="522" font-size="13" fill="#6b6b6b">Subagents · Permissions</text>
+    <text x="601" y="478" font-size="17" font-weight="600" fill="#1c1c1c">Tools &amp; connectors</text>
+    <text x="601" y="502" font-size="13" fill="#6b6b6b">MCP client · Hooks</text>
+    <text x="601" y="522" font-size="13" fill="#6b6b6b">File · Shell · Web · Docker · SSH</text>
+    <text x="953" y="478" font-size="17" font-weight="600" fill="#1c1c1c">Platform services</text>
+    <text x="953" y="502" font-size="13" fill="#6b6b6b">Accounts · Projects · Skills</text>
+    <text x="953" y="522" font-size="13" fill="#6b6b6b">Schedules · Task center</text>
+  </g>
+
+  <path d="M600,570 V640" stroke="#2f9e5c" stroke-width="2" fill="none" marker-end="url(#arr)"/>
+
+  <!-- Layer 4: models + knowledge -->
+  <text x="60" y="634" font-size="12" font-weight="700" fill="#2f9e5c" letter-spacing="1.5">MODELS + KNOWLEDGE</text>
+  <rect x="60" y="644" width="1081" height="176" rx="16" fill="#efeeea" stroke="#dcdad4"/>
+  <g filter="url(#sh)">
+    <rect x="84"  y="668" width="330" height="128" rx="12" fill="#fff" stroke="#dcdad4"/>
+    <rect x="436" y="668" width="330" height="128" rx="12" fill="#fff" stroke="#dcdad4"/>
+    <rect x="788" y="668" width="330" height="128" rx="12" fill="#fff" stroke="#dcdad4"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="249" y="702" font-size="17" font-weight="600" fill="#1c1c1c">Provider gateway</text>
+    <text x="249" y="728" font-size="13" fill="#6b6b6b">Anthropic · OpenAI · Google</text>
+    <text x="249" y="748" font-size="13" fill="#6b6b6b">NVIDIA NIM · Ollama</text>
+    <text x="249" y="768" font-size="13" fill="#6b6b6b">Hugging Face · Local GGUF</text>
+    <text x="601" y="702" font-size="17" font-weight="600" fill="#1c1c1c">RAG pipeline</text>
+    <text x="601" y="728" font-size="13" fill="#6b6b6b">Document indexer · Embeddings</text>
+    <text x="601" y="748" font-size="13" fill="#6b6b6b">Vector store · Hybrid search</text>
+    <text x="601" y="768" font-size="13" fill="#6b6b6b">Reranker</text>
+    <text x="953" y="702" font-size="17" font-weight="600" fill="#1c1c1c">Dabba model stack</text>
+    <text x="953" y="728" font-size="13" fill="#6b6b6b">BPE tokenizer · Transformer</text>
+    <text x="953" y="748" font-size="13" fill="#6b6b6b">Trainer · Inference</text>
+    <text x="953" y="768" font-size="13" fill="#6b6b6b">Vision · Audio encoders</text>
+  </g>
+
+  <text x="600" y="858" text-anchor="middle" font-size="12" fill="#9a9a9a">Storage: DABBA_DATA_DIR (accounts, chats, indexes)  ·  Deploy: Docker · Render · Helm</text>
+</svg>

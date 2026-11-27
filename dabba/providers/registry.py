@@ -3,6 +3,9 @@ Provider registry — resolves a model ID to the right provider + routes chat ca
 """
 
 from __future__ import annotations
+
+import os
+from threading import Event
 from typing import Dict, Iterator, List, Optional, TYPE_CHECKING
 
 from dabba.providers.base import BaseProvider, ModelInfo, EFFORT_PARAMS
@@ -10,11 +13,23 @@ from dabba.providers.anthropic_provider import AnthropicProvider
 from dabba.providers.openai_provider import OpenAIProvider
 from dabba.providers.google_provider import GoogleProvider
 from dabba.providers.ollama_provider import OllamaProvider
-from dabba.providers.nvidia_provider import NvidiaProvider
+from dabba.providers.nvidia_provider import DEFAULT_CAPACITY_FALLBACK, NvidiaProvider
 from dabba.providers.huggingface_provider import HuggingFaceProvider
 from dabba.providers.dabba_provider import DabbaProvider
 from dabba.providers.local_provider import LocalOpenAIProvider
+from dabba.providers.vyceai_provider import VyceAIProvider
 from dabba.platform.provider_gateway import ProviderGateway
+
+# Environment variables checked, in order, when no key is saved in
+# cli_config.yaml for a provider. The first non-empty one wins.
+PROVIDER_KEY_ENV_VARS: Dict[str, tuple] = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    "nvidia": ("NVIDIA_API_KEY",),
+    "huggingface": ("HF_TOKEN", "HUGGINGFACE_API_KEY"),
+    "vyceai": ("VYCEAI_API_KEY",),
+}
 
 if TYPE_CHECKING:
     from dabba.cli.config import CliConfig
@@ -28,6 +43,7 @@ _OLLAMA = OllamaProvider()
 _NVIDIA = NvidiaProvider()
 _HUGGINGFACE = HuggingFaceProvider()
 _LOCAL = LocalOpenAIProvider()
+_VYCEAI = VyceAIProvider()
 
 
 def _make_dabba(endpoint: str) -> DabbaProvider:
@@ -40,6 +56,7 @@ MODEL_CATALOG: List[ModelInfo] = (
     + _GOOGLE.list_models()
     + _NVIDIA.list_models()
     + _HUGGINGFACE.list_models()
+    + _VYCEAI.list_models()
     + _OLLAMA.list_models()
     + _LOCAL.list_models()
     + DabbaProvider().list_models()
@@ -69,16 +86,33 @@ class ProviderRegistry:
             "nvidia": _NVIDIA,
             "huggingface": _HUGGINGFACE,
             "local": _LOCAL,
+            "vyceai": _VYCEAI,
             "dabba": self._dabba,
         }
         provider = provider_map.get(provider_name, self._dabba)
-        # Check model-specific API key first, then fall back to provider key
-        api_key = self.config.api_keys.get(model, "") or self.config.api_keys.get(
-            model.lower(), ""
-        )
-        if not api_key and provider_name != "local":
-            api_key = self.config.api_keys.get(provider_name, "")
+        api_key, _ = self.resolve_api_key(model)
         return provider, api_key
+
+    def resolve_api_key(self, model: str) -> tuple[str, Optional[str]]:
+        keys = self.config.api_keys
+        provider = self.provider_name(model)
+        for source in (model, model.lower()):
+            if source != "local" and keys.get(source):
+                return keys[source], source
+        return self.resolve_provider_key(provider)
+
+    def resolve_provider_key(self, provider: str) -> tuple[str, Optional[str]]:
+        if provider in PROVIDER_KEY_ENV_VARS:
+            for source, key in self.config.api_keys.items():
+                if source.casefold() == provider and key:
+                    return key, source
+        # Fall back to the host's environment (e.g. Render's Environment tab),
+        # so keys can be configured without an admin saving them in the app.
+        for env_name in PROVIDER_KEY_ENV_VARS.get(provider, ()):
+            key = os.environ.get(env_name, "").strip()
+            if key:
+                return key, env_name
+        return "", None
 
     def _guess_provider(self, model: str) -> str:
         model_l = model.lower()
@@ -86,6 +120,8 @@ class ProviderRegistry:
             return "anthropic"
         if model_l.startswith(("gpt", "o1", "o3", "text-")):
             return "openai"
+        if model_l.startswith("vyceai/"):
+            return "vyceai"
         if model_l.startswith("gemini"):
             return "google"
         # Explicit "hf/" prefix routes to Hugging Face — must be checked before
@@ -153,10 +189,18 @@ class ProviderRegistry:
 
         # Enable thinking for Claude on high+ effort
         info = _MODEL_MAP.get(model)
+        if info:
+            output_limit = info.max_output_tokens or max(1, info.context_window // 2)
+            params["max_tokens"] = min(params["max_tokens"], output_limit)
+            messages = self._fit_context(
+                messages, info.context_window - params["max_tokens"]
+            )
         if info and info.supports_thinking and effort in ("high", "xhigh", "max"):
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
+        if provider in (_ANTHROPIC, _OPENAI, _GOOGLE):
+            params["effort"] = effort
         return provider.chat(
             messages, model, api_key=api_key, usage_out=usage_out, **params
         )
@@ -167,6 +211,8 @@ class ProviderRegistry:
         model: Optional[str] = None,
         effort: Optional[str] = None,
         usage_out: Optional[Dict[str, int]] = None,
+        cancel_event: Optional[Event] = None,
+        include_reasoning: bool = False,
         **kwargs,
     ) -> Iterator[str]:
         """See chat()'s docstring for usage_out."""
@@ -178,6 +224,8 @@ class ProviderRegistry:
                 selected,
                 effort=effort,
                 usage_out=usage_out,
+                cancel_event=cancel_event,
+                include_reasoning=include_reasoning,
                 **kwargs,
             ),
             provider_for=self.provider_name,
@@ -189,6 +237,8 @@ class ProviderRegistry:
         model: str,
         effort: Optional[str] = None,
         usage_out: Optional[Dict[str, int]] = None,
+        cancel_event: Optional[Event] = None,
+        include_reasoning: bool = False,
         **kwargs,
     ) -> Iterator[str]:
         effort = effort or getattr(self.config, "effort", "medium")
@@ -199,10 +249,23 @@ class ProviderRegistry:
         # Keep streaming behavior consistent with chat(): reasoning-capable
         # providers should only enter their long thinking mode at high effort.
         info = _MODEL_MAP.get(model)
+        if info:
+            output_limit = info.max_output_tokens or max(1, info.context_window // 2)
+            params["max_tokens"] = min(params["max_tokens"], output_limit)
+            messages = self._fit_context(
+                messages, info.context_window - params["max_tokens"]
+            )
         if info and info.supports_thinking and effort in ("high", "xhigh", "max"):
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
+        if provider in (_ANTHROPIC, _OPENAI, _GOOGLE):
+            params["effort"] = effort
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        if provider in (_NVIDIA, _GOOGLE, _VYCEAI):
+            params["cancel_event"] = cancel_event
+            params["include_reasoning"] = include_reasoning
         stream_chat = getattr(provider, "stream_chat", None)
         if stream_chat is None:
             yield provider.chat(
@@ -213,6 +276,50 @@ class ProviderRegistry:
         yield from stream_chat(
             messages, model, api_key=api_key, usage_out=usage_out, **params
         )
+
+    @staticmethod
+    def _fit_context(messages: List[Dict], budget: int) -> List[Dict]:
+        def tokens(message: Dict) -> int:
+            content = message.get("content", "")
+            if isinstance(content, str):
+                return 4 + (len(content) + 3) // 4
+            return 4 + sum(
+                (
+                    1024
+                    if part.get("type") == "image_url"
+                    else (len(str(part.get("text") or "")) + 3) // 4
+                )
+                for part in (content or [])
+                if isinstance(part, dict)
+            )
+
+        counts = [tokens(message) for message in messages]
+        remaining = sum(counts)
+        if remaining <= budget:
+            return messages
+
+        # Preserve leading instructions and remove complete turns. The latest
+        # turn is retained even if sending it alone exceeds the budget.
+        start = 0
+        while start < len(messages) and messages[start].get("role") in {
+            "system",
+            "developer",
+        }:
+            start += 1
+        for index in range(start + 1, len(messages)):
+            remaining -= counts[index - 1]
+            if messages[index].get("role") == "user" and remaining <= budget:
+                return messages[:start] + messages[index:]
+
+        latest_user = next(
+            (
+                index
+                for index in range(len(messages) - 1, start, -1)
+                if messages[index].get("role") == "user"
+            ),
+            start,
+        )
+        return messages[:start] + messages[latest_user:]
 
     def provider_name(self, model: str) -> str:
         info = _MODEL_MAP.get(model)
@@ -227,9 +334,20 @@ class ProviderRegistry:
             + _GOOGLE.list_models()
             + _NVIDIA.list_models()
             + _HUGGINGFACE.list_models()
+            + _VYCEAI.list_models()
             + _OLLAMA.list_models()
             + _LOCAL.list_models()
         )
+
+    def catalog_fallbacks(self, model_id: str) -> list[str]:
+        candidates = self.gateway.fallback_chain(model_id)
+        if self.provider_name(model_id) == "nvidia":
+            candidates.append(DEFAULT_CAPACITY_FALLBACK)
+        return [
+            candidate
+            for candidate in dict.fromkeys(candidates)
+            if candidate in _MODEL_MAP and candidate != model_id
+        ]
 
     def get_model_info(self, model_id: str) -> Optional[ModelInfo]:
         return _MODEL_MAP.get(model_id)

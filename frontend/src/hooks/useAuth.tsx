@@ -1,10 +1,11 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
-import { apiClient, type PlatformUser } from '@/api/client'
+import { apiClient, type PlatformUser, type ProfileDetails } from '@/api/client'
 
 export interface UserProfile {
   id: string
   name: string
   email: string
+  bio: string
   avatarColor: string
   createdAt: number
   role: string
@@ -14,22 +15,29 @@ const AVATAR_COLORS = ['#c96442', '#2f9e5c', '#3b82f6', '#8b5cf6', '#eab308', '#
 
 function toProfile(user: PlatformUser): UserProfile {
   const colorIndex = [...user.id].reduce((total, char) => total + char.charCodeAt(0), 0) % AVATAR_COLORS.length
-  return { ...user, avatarColor: AVATAR_COLORS[colorIndex] }
+  return { ...user, bio: user.bio ?? '', avatarColor: AVATAR_COLORS[colorIndex] }
 }
 
 interface AuthContextType {
   currentUser: UserProfile | null
+  /** True when the server granted this account the admin role. Admin-only
+   *  endpoints (code execution, Cowork, MCP, hooks, schedules, background
+   *  processes) return 403 for everyone else, so the UI hides or disables them. */
+  isAdmin: boolean
   isReady: boolean
   signup: (name: string, email: string, password: string) => Promise<void>
   login: (email: string, password: string) => Promise<void>
+  updateProfile: (profile: ProfileDetails) => Promise<void>
   logout: () => void
 }
 
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
+  isAdmin: false,
   isReady: false,
   signup: async () => {},
   login: async () => {},
+  updateProfile: async () => {},
   logout: () => {},
 })
 
@@ -40,9 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const controller = new AbortController()
     apiClient.currentUser(controller.signal)
-      .then(user => setCurrentUser(user ? toProfile(user) : null))
-      .catch(() => setCurrentUser(null))
-      .finally(() => setReady(true))
+      .then(user => { if (!controller.signal.aborted) setCurrentUser(user ? toProfile(user) : null) })
+      .catch(() => { if (!controller.signal.aborted) setCurrentUser(null) })
+      .finally(() => { if (!controller.signal.aborted) setReady(true) })
     return () => controller.abort()
   }, [])
 
@@ -64,8 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setCurrentUser(null)
   }, [])
 
+  const updateProfile = useCallback(async (profile: ProfileDetails) => {
+    const user = await apiClient.updateProfile(profile)
+    setCurrentUser(current => current?.id === user.id ? toProfile(user) : current)
+  }, [])
+
   return (
-    <AuthContext.Provider value={{ currentUser, isReady, signup, login, logout }}>
+    <AuthContext.Provider value={{ currentUser, isAdmin: currentUser?.role === 'admin', isReady, signup, login, updateProfile, logout }}>
       {children}
     </AuthContext.Provider>
   )

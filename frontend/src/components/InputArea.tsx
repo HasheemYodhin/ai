@@ -1,13 +1,16 @@
-import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
-import { Send, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, type KeyboardEvent, type ChangeEvent } from 'react'
+import { ArrowUp, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
 import { captureScreenshot } from '@/lib/screenshot'
-import { startRecording, type VoiceRecorder } from '@/lib/voice'
+import { friendlyVoiceError, startVoiceInput, type VoiceInput } from '@/lib/voice'
 import { apiClient } from '@/api/client'
 import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
+import { ModelSwitcher } from './ModelSwitcher'
 import { useSkills } from '@/hooks/useSkills'
+import { useSettings } from '@/hooks/useSettings'
+import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import type { UploadedFile, Project, ExtractedDocument, DocumentAttachment } from '@/types'
 
 interface InputAreaProps {
@@ -28,8 +31,8 @@ interface InputAreaProps {
 
 const MAX_FILES = 5
 const MAX_IMAGE_FILE_SIZE = 10 * 1024 * 1024
-const MAX_DOCUMENT_FILE_SIZE = 100 * 1024 * 1024
-const MAX_ZIP_FILE_SIZE = 10 * 1024 * 1024 * 1024
+const MAX_DOCUMENT_FILE_SIZE = 25 * 1024 * 1024
+const MAX_ZIP_FILE_SIZE = 100 * 1024 * 1024
 
 function isZipFile(file: File): boolean {
   return file.type === 'application/zip'
@@ -44,9 +47,9 @@ function attachmentLimit(file: File): number {
 }
 
 function attachmentLimitLabel(file: File): string {
-  if (isZipFile(file)) return '10 GB ZIP attachment limit'
+  if (isZipFile(file)) return '100 MiB ZIP attachment limit'
   if (file.type.startsWith('image/')) return '10 MB image attachment limit'
-  return '100 MB document attachment limit'
+  return '25 MiB document attachment limit'
 }
 
 export function InputArea({
@@ -63,6 +66,7 @@ export function InputArea({
   initialMode,
   onInitialModeConsumed,
 }: InputAreaProps) {
+  const { settings } = useSettings()
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
@@ -74,11 +78,18 @@ export function InputArea({
   const [isQuickRecording, setIsQuickRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [isExtractingDocuments, setIsExtractingDocuments] = useState(false)
+  const [extractingFile, setExtractingFile] = useState<string | null>(null)
+  const extractedFiles = useRef(new Map<string, ExtractedDocument>())
   const [voiceModalOpen, setVoiceModalOpen] = useState(false)
   const [voiceError, setVoiceError] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const quickRecorderRef = useRef<VoiceRecorder | null>(null)
+  const quickRecorderRef = useRef<VoiceInput | null>(null)
+  const quickVoiceController = useRef<AbortController | null>(null)
+  useEffect(() => () => {
+    quickVoiceController.current?.abort()
+    quickRecorderRef.current?.cancel()
+  }, [])
   // Set whenever text comes in via mic/voice-mode — tells the reply to speak
   // itself back automatically. Cleared once the message is actually sent.
   const [pendingViaVoice, setPendingViaVoice] = useState(false)
@@ -94,28 +105,37 @@ export function InputArea({
     if (isQuickRecording) {
       // Second click: stop recording and transcribe what was captured.
       const recorder = quickRecorderRef.current
-      quickRecorderRef.current = null
+      const controller = quickVoiceController.current
       setIsQuickRecording(false)
       if (!recorder) return
       setIsTranscribing(true)
       try {
-        const blob = await recorder.stop()
-        const text = await apiClient.transcribeAudio(blob)
+        const text = await recorder.stop()
+        if (controller?.signal.aborted) return
         if (text) insertTranscript(text)
+        else setVoiceError('No speech detected. Try again.')
       } catch (err) {
-        setVoiceError((err as Error).message || 'Transcription failed')
+        if (!controller?.signal.aborted) setVoiceError(friendlyVoiceError((err as Error).message || 'Transcription failed').text)
       } finally {
-        setIsTranscribing(false)
+        quickRecorderRef.current = null
+        if (!controller?.signal.aborted) setIsTranscribing(false)
       }
       return
     }
 
     setVoiceError(null)
+    setIsTranscribing(true)
+    const controller = new AbortController()
+    quickVoiceController.current = controller
     try {
-      quickRecorderRef.current = await startRecording()
+      const recorder = await startVoiceInput(controller.signal)
+      if (controller.signal.aborted) { recorder.cancel(); return }
+      quickRecorderRef.current = recorder
       setIsQuickRecording(true)
     } catch (err) {
-      setVoiceError((err as Error).message || 'Could not access the microphone')
+      if (!controller.signal.aborted) setVoiceError((err as Error).message || 'Could not access the microphone')
+    } finally {
+      if (!controller.signal.aborted) setIsTranscribing(false)
     }
   }, [isQuickRecording, insertTranscript])
 
@@ -126,16 +146,13 @@ export function InputArea({
     }
   }, [initialMode, onInitialModeConsumed])
 
-  const adjustHeight = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = '0'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [])
-
-  useEffect(() => {
-    adjustHeight()
-  }, [value, adjustHeight])
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+    if (!value) textarea.scrollTop = 0
+  }, [value])
 
   const handleFiles = useCallback(async (fileList: FileList) => {
     setFileError(null)
@@ -150,7 +167,7 @@ export function InputArea({
       return true
     })
 
-    // Only small images are base64 encoded. Documents and multi-GB ZIP files
+    // Only small images are base64 encoded. Documents and ZIP files
     // retain their browser File handle and are streamed as multipart uploads.
     const next: UploadedFile[] = await Promise.all(
       accepted.map(async f => {
@@ -200,6 +217,7 @@ export function InputArea({
   }, [])
 
   const removeFile = useCallback((id: string) => {
+    extractedFiles.current.delete(id)
     setFiles(prev => prev.filter(f => f.id !== id))
   }, [])
 
@@ -210,13 +228,19 @@ export function InputArea({
     e.target.value = ''
   }, [handleFiles])
 
+  const imageMode = mode.kind === 'image' || (mode.kind === 'chat' && settings.model === FLUX_IMAGE_MODEL)
+
   const handleSend = useCallback(async () => {
     const trimmed = value.trim()
     if ((!trimmed && files.length === 0) || isLoading || isExtractingDocuments || disabled) return
 
     if (mode.kind === 'agent') {
       onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, allowedTools: mode.allowedTools, viaVoice: pendingViaVoice, planMode: planModeEnabled })
-    } else if (mode.kind === 'image') {
+    } else if (imageMode) {
+      if (files.length) {
+        setFileError('Image generation uses a text prompt. Remove the attachments to continue.')
+        return
+      }
       onGenerateImage(trimmed)
     } else {
       const imageFiles = files.filter(f => f.type.startsWith('image/') && f.dataUrl)
@@ -228,13 +252,32 @@ export function InputArea({
         setIsExtractingDocuments(true)
         setFileError(null)
         try {
-          documents = await apiClient.extractDocuments(otherFiles)
+          documents = []
+          let remainingCharacters = 500_000
+          for (const [index, file] of otherFiles.entries()) {
+            setExtractingFile(`Reading file ${index + 1} of ${otherFiles.length} · ${file.name}`)
+            let document = extractedFiles.current.get(file.id)
+            if (!document) {
+              const [result] = await apiClient.extractDocuments([file]).catch(error => {
+                throw new Error(`${file.name} · ${error instanceof Error ? error.message : 'Could not read the file'}. Send again to retry.`)
+              })
+              if (!result) throw new Error(`No document was returned for ${file.name}.`)
+              extractedFiles.current.set(file.id, result)
+              document = result
+            }
+            if (remainingCharacters < document.text.length) {
+              throw new Error('The combined document text is too large for one message. Remove a file or send the documents in separate messages.')
+            }
+            remainingCharacters -= document.text.length
+            documents.push(document)
+          }
         } catch (err) {
           setFileError((err as Error).message || 'Could not read the attached document')
-          setIsExtractingDocuments(false)
           return
+        } finally {
+          setIsExtractingDocuments(false)
+          setExtractingFile(null)
         }
-        setIsExtractingDocuments(false)
       }
       const systemPromptOverride = mode.kind === 'skill'
         ? skills.find(s => s.id === mode.skillId)?.instructions
@@ -254,12 +297,10 @@ export function InputArea({
     }
 
     setValue('')
+    extractedFiles.current.clear()
     setFiles([])
     setPendingViaVoice(false)
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
-  }, [value, files, isLoading, isExtractingDocuments, disabled, mode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
+  }, [value, files, isLoading, isExtractingDocuments, disabled, mode, imageMode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     // IME keyboards emit Enter while composing; never submit partial text.
@@ -289,11 +330,11 @@ export function InputArea({
       : mode.kind === 'skill'
         ? { icon: Sparkles, label: mode.name, placeholder }
         : null
-  const effectivePlaceholder = modeChip?.placeholder ?? placeholder
+  const effectivePlaceholder = modeChip?.placeholder ?? (imageMode ? 'Describe the image to generate…' : placeholder)
 
   return (
-    <div className="bg-transparent border-t border-border dark:border-border-dark">
-      <div className="max-w-4xl mx-auto px-4 py-4">
+    <div className="bg-transparent">
+      <div className="max-w-3xl mx-auto px-1 pt-2 pb-4 sm:px-4">
         {modeChip && (
           <div className="flex items-center gap-1.5 mb-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-accent/10 text-accent text-xs font-medium">
@@ -301,7 +342,7 @@ export function InputArea({
                 ? <ConnectorMenuIcon name={connectorName} compact />
                 : <modeChip.icon className="w-3.5 h-3.5" />}
               {modeChip.label}
-              <button onClick={() => setMode({ kind: 'chat' })} className="ml-0.5 hover:text-accent-hover">
+              <button onClick={() => setMode({ kind: 'chat' })} aria-label={`Turn off ${modeChip.label}`} title={`Turn off ${modeChip.label}`} className="ml-0.5 hover:text-accent-hover">
                 <X className="w-3 h-3" />
               </button>
             </span>
@@ -309,6 +350,7 @@ export function InputArea({
               <button
                 type="button"
                 onClick={() => setPlanModeEnabled(v => !v)}
+                aria-pressed={planModeEnabled}
                 title="Propose a plan and wait for your approval before it runs"
                 className={cn(
                   'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors',
@@ -354,6 +396,7 @@ export function InputArea({
           </div>
         )}
 
+        {extractingFile && <p role="status" className="mb-2 text-xs text-text-secondary">{extractingFile}</p>}
         {fileError && (
           <p className="text-xs text-red-500 mb-2">{fileError}</p>
         )}
@@ -362,11 +405,7 @@ export function InputArea({
           <p className="text-xs text-red-500 mb-2">{voiceError}</p>
         )}
 
-        <div className={cn(
-          'relative flex items-end gap-2 rounded-2xl transition-colors',
-          'glass-input',
-          'focus-within:border-accent/50',
-        )}>
+        <div className="composer relative flex flex-col rounded-3xl transition-colors focus-within:border-accent/40">
           <input
             ref={fileInputRef}
             type="file"
@@ -375,6 +414,26 @@ export function InputArea({
             className="hidden"
             onChange={handleFileInputChange}
           />
+
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder={effectivePlaceholder}
+            aria-label={effectivePlaceholder}
+            rows={1}
+            disabled={disabled}
+            maxLength={maxChars + 100}
+            className={cn(
+              'w-full min-h-[3.25rem] max-h-[200px] shrink-0 resize-none overflow-y-auto bg-transparent px-5 pt-4 pb-2 text-base leading-7 outline-none',
+              'text-text-primary dark:text-text-dark-primary',
+              'placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary',
+              'disabled:opacity-50 scrollbar-thin'
+            )}
+          />
+
+          <div className="flex items-center gap-0.5 px-2 pb-2.5 sm:gap-1 sm:px-2.5">
           <PlusMenu
             disabled={isLoading || isExtractingDocuments || disabled}
             mode={mode}
@@ -392,25 +451,8 @@ export function InputArea({
             </span>
           )}
 
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            placeholder={effectivePlaceholder}
-            aria-label={effectivePlaceholder}
-            rows={1}
-            disabled={disabled}
-            maxLength={maxChars + 100}
-            className={cn(
-              'flex-1 resize-none bg-transparent py-3 text-[15px] leading-relaxed outline-none',
-              'text-text-primary dark:text-text-dark-primary',
-              'placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary',
-              'disabled:opacity-50 scrollbar-thin'
-            )}
-          />
-
-          <div className="flex items-center gap-1 pr-2.5 pb-2">
+          <div className="flex-1" />
+          <ModelSwitcher placement="up" />
             <button
               type="button"
               onClick={handleMicClick}
@@ -418,7 +460,7 @@ export function InputArea({
               title={isQuickRecording ? 'Stop and transcribe' : 'Voice input'}
               aria-label={isQuickRecording ? 'Stop recording and transcribe' : 'Start voice input'}
               className={cn(
-                'flex items-center justify-center p-2 rounded-lg transition-colors disabled:opacity-40',
+                'w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-colors disabled:opacity-40',
                 isQuickRecording
                   ? 'bg-red-500 hover:bg-red-600 text-white'
                   : 'text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary'
@@ -429,10 +471,10 @@ export function InputArea({
             <button
               type="button"
               onClick={() => setVoiceModalOpen(true)}
-              disabled={isLoading || isExtractingDocuments || disabled}
+              disabled={isLoading || isExtractingDocuments || disabled || isTranscribing || isQuickRecording}
               title="Voice mode"
               aria-label="Open voice mode"
-              className="flex items-center justify-center p-2 rounded-lg text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
+              className="w-9 h-9 shrink-0 flex items-center justify-center rounded-full text-text-tertiary hover:text-text-primary dark:text-text-dark-tertiary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors disabled:opacity-40"
             >
               <AudioLines className="w-4 h-4" />
             </button>
@@ -440,11 +482,11 @@ export function InputArea({
               <button
                 type="button"
                 onClick={onStop}
-                className="flex items-center gap-1.5 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium transition-colors"
+                className="ml-1 w-9 h-9 shrink-0 flex items-center justify-center rounded-full bg-text-primary dark:bg-text-dark-primary text-surface dark:text-surface-dark hover:opacity-90 active:scale-[0.97] transition-[opacity,transform]"
                 title="Stop generation"
                 aria-label="Stop generation"
               >
-                <Square className="w-4 h-4 fill-current" />
+                <Square className="w-3.5 h-3.5 fill-current" />
               </button>
             ) : (
               <button
@@ -452,36 +494,41 @@ export function InputArea({
                 onClick={() => void handleSend()}
                 disabled={(!value.trim() && files.length === 0) || isExtractingDocuments || disabled}
                 className={cn(
-                  'flex items-center gap-1.5 p-2 rounded-lg transition-colors',
+                  'ml-1 w-9 h-9 shrink-0 flex items-center justify-center rounded-full transition-[background-color,transform]',
                   (value.trim() || files.length > 0)
-                    ? 'bg-accent hover:bg-accent-hover text-white'
-                    : 'bg-surface-tertiary dark:bg-surface-dark-tertiary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
+                    ? 'bg-accent hover:bg-accent-hover text-white active:scale-[0.97]'
+                    : 'bg-surface-tertiary dark:bg-surface-dark-secondary text-text-tertiary dark:text-text-dark-tertiary cursor-not-allowed'
                 )}
                 title="Send message"
                 aria-label="Send message"
               >
                 {isExtractingDocuments
                   ? <Loader2 className="w-4 h-4 animate-spin" />
-                  : <Send className="w-4 h-4" />}
+                  : <ArrowUp className="w-5 h-5" strokeWidth={2} />}
               </button>
             )}
           </div>
         </div>
 
-        <div className="flex items-center justify-between mt-1.5 px-1">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-text-tertiary dark:text-text-dark-tertiary">
-              Enter to send · Shift+Enter for new line
-            </span>
+        <div className="flex items-center justify-between mt-2 px-1">
+          <div className="flex items-center gap-1 text-xs text-text-tertiary dark:text-text-dark-tertiary">
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
+            <span className="mr-2">send</span>
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Shift</kbd>
+            <kbd className="px-1 rounded border border-border dark:border-border-dark font-mono text-[11px] leading-4">Enter</kbd>
+            <span>new line</span>
           </div>
-          {/* Only surface the counter once it's actually relevant — at a 50k
-              cap, showing "23/50000" on every short message is just noise. */}
-          {isNearLimit && (
+          {/* Hidden for whitespace-only input, which isn't sendable anyway. */}
+          {value.trim().length > 0 && (
             <span className={cn(
-              'text-[11px] tabular-nums',
-              isOverLimit ? 'text-red-500' : 'text-amber-500'
+              'text-xs font-mono tabular-nums text-text-tertiary dark:text-text-dark-tertiary',
+              isOverLimit && 'text-red-500',
+              isNearLimit && !isOverLimit && 'text-amber-500',
             )}>
-              {charCount}/{maxChars}
+              {isNearLimit ? `${charCount}/${maxChars} characters` : (() => {
+                const tokens = Math.ceil(charCount / 4)
+                return `~${tokens} ${tokens === 1 ? 'token' : 'tokens'}`
+              })()}
             </span>
           )}
         </div>

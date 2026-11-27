@@ -1,3 +1,5 @@
+import type { DocumentTemplate } from './documents/templates'
+
 /**
  * Export helpers for chat content.
  *
@@ -12,13 +14,22 @@ export interface TextFormat {
   mime: string
 }
 
-export type DocumentFormat = 'pdf' | 'docx' | 'xlsx' | 'pptx'
+export type DocumentFormat = 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'md'
+
+export const DOCUMENT_FORMAT_LABELS: Record<DocumentFormat, string> = {
+  pdf: 'PDF',
+  docx: 'Word',
+  xlsx: 'Excel',
+  pptx: 'PowerPoint',
+  md: 'Markdown',
+}
 
 const DOCUMENT_MIME_TYPES: Record<DocumentFormat, string> = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  md: 'text/markdown',
 }
 
 // Broad set of text-based formats. Add more here as needed.
@@ -66,6 +77,17 @@ function triggerDownload(filename: string, data: Blob | string, mime = 'text/pla
   URL.revokeObjectURL(url)
 }
 
+export function javaSourceFileName(source: string): string {
+  const declarations = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+  const type = /\bpublic\s+(?:(?:final|abstract|sealed|non-sealed|strictfp)\s+)*(?:class|record|enum|interface)\s+([A-Za-z_$][\w$]*)/.exec(declarations)
+    ?? /^\s*(?:final\s+)?class\s+([A-Za-z_$][\w$]*)/m.exec(declarations)
+  return `${type?.[1] ?? 'Main'}.java`
+}
+
+export function downloadJavaSource(source: string) {
+  triggerDownload(javaSourceFileName(source), source, 'text/x-java')
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -94,9 +116,11 @@ function stripForCode(content: string, ext: string): string {
 
 const CODE_EXTS = ['py', 'js', 'ts', 'sh', 'html', 'css', 'sql', 'java', 'c', 'cpp', 'go', 'rs']
 
-export function downloadText(content: string, fmt: TextFormat, baseName: string) {
+export async function downloadText(content: string, fmt: TextFormat, baseName: string) {
   // For code-ish formats, unwrap a dominant fenced block so the file is runnable.
   let body = CODE_EXTS.includes(fmt.ext) ? stripForCode(content, fmt.ext) : content
+  // Markdown files drop the chat lead-in and closing line and end with one newline.
+  if (fmt.ext === 'md') body = (await import('./documents/parse')).toMarkdownFile(content)
 
   // If exporting HTML and the content isn't already a full document, wrap it.
   if (fmt.ext === 'html' && !/^\s*<(!doctype|html)/i.test(body)) {
@@ -111,43 +135,23 @@ function escapeHtml(s: string): string {
 }
 
 export async function downloadPdf(content: string, baseName: string) {
-  const blob = await createPdfBlob(content)
+  const blob = await createPdfBlob(content, baseName)
   triggerDownload(safeFileName(baseName, 'pdf'), blob, DOCUMENT_MIME_TYPES.pdf)
 }
 
-export async function createPdfBlob(content: string): Promise<Blob> {
-  const { jsPDF } = await import('jspdf')
-  const doc = new jsPDF({ unit: 'pt', format: 'a4' })
-  const margin = 40
-  const maxWidth = doc.internal.pageSize.getWidth() - margin * 2
-  const pageHeight = doc.internal.pageSize.getHeight() - margin
-  doc.setFont('helvetica', 'normal')
-  doc.setFontSize(11)
-  const lines = doc.splitTextToSize(content, maxWidth) as string[]
-  let y = margin
-  for (const line of lines) {
-    if (y > pageHeight) {
-      doc.addPage()
-      y = margin
-    }
-    doc.text(line, margin, y)
-    y += 15
-  }
-  return doc.output('blob')
+/** A laid out PDF: title, headings, lists, tables, code and page numbers (see documents/pdf.ts). */
+export async function createPdfBlob(content: string, fallbackTitle = '', template?: DocumentTemplate): Promise<Blob> {
+  return (await import('./documents/pdf')).createPdfBlob(content, fallbackTitle, template)
 }
 
 export async function downloadDocx(content: string, baseName: string) {
-  const blob = await createDocxBlob(content)
+  const blob = await createDocxBlob(content, baseName)
   triggerDownload(safeFileName(baseName, 'docx'), blob, DOCUMENT_MIME_TYPES.docx)
 }
 
-export async function createDocxBlob(content: string): Promise<Blob> {
-  const { Document, Packer, Paragraph, TextRun } = await import('docx')
-  const paragraphs = content.split('\n').map(
-    line => new Paragraph({ children: [new TextRun(line)] })
-  )
-  const doc = new Document({ sections: [{ children: paragraphs }] })
-  return Packer.toBlob(doc)
+/** A styled Word document: Title, Heading styles, real lists and tables, page numbers (see documents/docx.ts). */
+export async function createDocxBlob(content: string, fallbackTitle = '', template?: DocumentTemplate): Promise<Blob> {
+  return (await import('./documents/docx')).createDocxBlob(content, fallbackTitle, template)
 }
 
 /**
@@ -279,10 +283,12 @@ export async function createGeneratedDocument(
   content: string,
   baseName: string,
   format: DocumentFormat,
+  template?: DocumentTemplate,
 ) {
   const creators: Record<DocumentFormat, () => Promise<Blob>> = {
-    pdf: () => createPdfBlob(content),
-    docx: () => createDocxBlob(content),
+    pdf: () => createPdfBlob(content, baseName, template),
+    docx: () => createDocxBlob(content, baseName, template),
+    md: async () => new Blob([(await import('./documents/parse')).toMarkdownFile(content)], { type: DOCUMENT_MIME_TYPES.md }),
     xlsx: () => createXlsxBlob(content),
     pptx: () => createPptxBlob(content, baseName),
   }

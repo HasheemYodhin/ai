@@ -12,6 +12,7 @@ export interface SkillInput {
 interface UseSkillsReturn {
   skills: Skill[]
   createSkill: (input: SkillInput) => Promise<string>
+  importSkill: (source: { url?: string; content?: string }) => Promise<Skill>
   deleteSkill: (id: string) => Promise<void>
 }
 
@@ -29,8 +30,9 @@ interface UseSkillsReturn {
 export function useSkills(): UseSkillsReturn {
   const [skills, setSkills] = useState<Skill[]>([])
 
-  const refresh = useCallback(async () => {
-    try { setSkills(await apiClient.listSkills()) }
+  // force bypasses the client's short shared cache (used after a failed write).
+  const refresh = useCallback(async (force = false) => {
+    try { setSkills(await apiClient.listSkills({ force })) }
     catch { /* best-effort — the "+" menu just shows no skills until this succeeds */ }
   }, [])
   useEffect(() => { void refresh() }, [refresh])
@@ -46,10 +48,16 @@ export function useSkills(): UseSkillsReturn {
     return created.id
   }, [])
 
+  const importSkill = useCallback(async (source: { url?: string; content?: string }): Promise<Skill> => {
+    const created = await apiClient.importSkillPackage(source)
+    setSkills(prev => [created, ...prev])
+    return created
+  }, [])
+
   const deleteSkill = useCallback(async (id: string) => {
     setSkills(prev => prev.filter(s => s.id !== id))
-    await apiClient.deleteSkillPackage(id).catch(() => void refresh())
+    await apiClient.deleteSkillPackage(id).catch(() => void refresh(true))
   }, [refresh])
 
-  return { skills, createSkill, deleteSkill }
+  return { skills, createSkill, importSkill, deleteSkill }
 }

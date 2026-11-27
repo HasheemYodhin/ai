@@ -6,12 +6,13 @@ import base64
 import binascii
 import asyncio
 import contextlib
+import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dabba.platform import (
     AgentDefinitionService,
@@ -33,6 +34,11 @@ from dabba.platform import (
     WorktreeService,
 )
 from dabba.platform.provider_gateway import ProviderGateway
+from dabba.platform.skill_import import (
+    SkillImportError,
+    fetch_skill_markdown,
+    parse_skill_markdown,
+)
 
 
 class SignupRequest(BaseModel):
@@ -44,6 +50,13 @@ class SignupRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    bio: str = Field(max_length=280)
 
 
 class TaskCreateRequest(BaseModel):
@@ -237,6 +250,11 @@ class SkillPackageCreateRequest(BaseModel):
     script: Optional[str] = None
 
 
+class SkillImportRequest(BaseModel):
+    url: Optional[str] = Field(default=None, max_length=2048)
+    content: Optional[str] = Field(default=None, max_length=512 * 1024)
+
+
 class SkillPackageUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -291,9 +309,11 @@ class ScheduledSkillCreateRequest(BaseModel):
     name: str
     skillName: str
     instructions: str
+    model: Optional[str] = None
     cadence: str = "daily"
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = "09:00"
+    timeZone: str = Field(default="UTC", max_length=64)
     weekdays: List[int] = Field(default_factory=list)
     enabled: bool = True
     nextRunAt: Optional[int] = None
@@ -303,9 +323,11 @@ class ScheduledSkillUpdateRequest(BaseModel):
     name: Optional[str] = None
     skillName: Optional[str] = None
     instructions: Optional[str] = None
+    model: Optional[str] = None
     cadence: Optional[str] = None
     intervalMinutes: Optional[int] = None
     timeOfDay: Optional[str] = None
+    timeZone: Optional[str] = Field(default=None, max_length=64)
     weekdays: Optional[List[int]] = None
     enabled: Optional[bool] = None
     nextRunAt: Optional[int] = None
@@ -349,6 +371,7 @@ def create_platform_router() -> APIRouter:
     skill_packages = SkillPackageService()
     scheduler_task: Optional[asyncio.Task[Any]] = None
     background_tasks: set[asyncio.Task[Any]] = set()
+    low_memory = os.getenv("DABBA_LOW_MEMORY", "").lower() in {"1", "true"}
 
     def launch(coro: Any) -> None:
         task = asyncio.create_task(coro)
@@ -472,9 +495,9 @@ def create_platform_router() -> APIRouter:
             # the catalog made long implementation tasks both slow and prone
             # to emitting unusable tool syntax.
             preferred_fallbacks = (
-                "qwen/qwen2.5-coder-32b-instruct",
-                "deepseek-ai/deepseek-v4-flash",
-                "meta/llama-3.1-8b-instruct",
+                "poolside/laguna-xs-2.1",
+                "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "minimaxai/minimax-m3.1-flash",
             )
             available = []
             for info in provider_registry.list_all_models():
@@ -735,31 +758,47 @@ def create_platform_router() -> APIRouter:
         finally:
             proxy.close()
 
-    def execute_skill(instructions: str) -> str:
+    def skill_executor_for(run: Dict[str, Any]) -> Callable[[str], str]:
+        """Executor for one run: uses the schedule's own model (not the server's
+        tiny default) and a prompt that carries today's date and earlier results."""
+        schedule = scheduled_skills.get(run["scheduleId"], run["userId"])
+        prompt = scheduled_skills.prompt_with_context(
+            schedule, run["userId"], run["id"]
+        )
+        return lambda _instructions: execute_skill(prompt, schedule.get("model"))
+
+    def execute_skill(instructions: str, model: Optional[str] = None) -> str:
         from dabba.api.agent_endpoints import _get_agent_proxy
 
         proxy = _get_agent_proxy()
         return proxy._get_provider_registry().chat(
-            [
+            model=model or None,
+            messages=[
                 {"role": "system", "content": instructions},
                 {
                     "role": "user",
                     "content": "Run this scheduled skill now and return its result.",
                 },
-            ]
+            ],
         )
 
     async def scheduler_loop() -> None:
         while True:
+            if low_memory and background_tasks:
+                await asyncio.sleep(30)
+                continue
             try:
-                due_runs = await asyncio.to_thread(scheduled_skills.dispatch_due)
-                for run in due_runs:
+                await asyncio.to_thread(scheduled_skills.dispatch_due)
+                queued_runs = await asyncio.to_thread(
+                    scheduled_skills.queued_runs, 1 if low_memory else 25
+                )
+                for run in queued_runs:
                     launch(
                         asyncio.to_thread(
                             scheduled_skills.execute,
                             run["id"],
                             run["userId"],
-                            execute_skill,
+                            skill_executor_for(run),
                         )
                     )
             except Exception:
@@ -767,7 +806,13 @@ def create_platform_router() -> APIRouter:
                 # the scheduler itself must stay alive for later schedules.
                 pass
             try:
-                due_cowork = await asyncio.to_thread(cowork.dispatch_due_schedules)
+                due_cowork = (
+                    []
+                    if low_memory and background_tasks
+                    else await asyncio.to_thread(
+                        cowork.dispatch_due_schedules, 1 if low_memory else 25
+                    )
+                )
                 for run in due_cowork:
                     launch(
                         asyncio.to_thread(
@@ -809,6 +854,11 @@ def create_platform_router() -> APIRouter:
         if not user:
             raise HTTPException(status_code=401, detail="Session is invalid or expired")
         return user
+
+    def verified_user(
+        request: Request, authorization: Optional[str] = Header(default=None)
+    ) -> Dict[str, Any]:
+        return getattr(request.state, "dabba_user", None) or current_user(authorization)
 
     @router.get("/capabilities")
     async def capabilities():
@@ -1066,6 +1116,12 @@ def create_platform_router() -> APIRouter:
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
+        if low_memory and background_tasks:
+            raise HTTPException(
+                status_code=429,
+                detail="Another background job is running. Try again when it finishes.",
+                headers={"Retry-After": "10"},
+            )
         try:
             run = cowork.dispatch(
                 item_id,
@@ -1151,6 +1207,27 @@ def create_platform_router() -> APIRouter:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @router.post("/skills/import", status_code=201)
+    async def import_skill_package(
+        body: SkillImportRequest,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        """Create a skill from a SKILL.md file, given as text or an https link."""
+        user = current_user(authorization)
+        try:
+            if body.content and body.content.strip():
+                text = body.content
+            elif body.url and body.url.strip():
+                text = await asyncio.to_thread(fetch_skill_markdown, body.url)
+            else:
+                raise SkillImportError("Paste a SKILL.md link or choose a file")
+            name, description, instructions = parse_skill_markdown(text)
+        except SkillImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return skill_packages.create(
+            user["id"], name, instructions, description=description
+        )
+
     @router.patch("/skills/{skill_id}")
     async def update_skill_package(
         skill_id: str,
@@ -1179,9 +1256,9 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Skill not found") from exc
 
     @router.post("/skills/match")
-    async def match_skill_package(
+    def match_skill_package(
         body: SkillMatchRequest,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
         """
         Best-matching skill for a free-text message, by relevance — lets the
@@ -1189,7 +1266,6 @@ def create_platform_router() -> APIRouter:
         user to pick one manually every time. Returns {"skill": null} when
         nothing scores highly enough to be a confident match.
         """
-        user = current_user(authorization)
         return {"skill": skill_packages.find_matching(user["id"], body.message)}
 
     @router.get("/agent-definitions")
@@ -1342,9 +1418,11 @@ def create_platform_router() -> APIRouter:
                 cadence=body.cadence,
                 interval_minutes=body.intervalMinutes,
                 time_of_day=body.timeOfDay,
+                time_zone=body.timeZone,
                 weekdays=body.weekdays,
                 enabled=body.enabled,
                 next_run_at=body.nextRunAt,
+                model=body.model,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1382,11 +1460,20 @@ def create_platform_router() -> APIRouter:
         authorization: Optional[str] = Header(default=None),
     ):
         user = current_user(authorization)
+        if low_memory and background_tasks:
+            raise HTTPException(
+                status_code=429,
+                detail="Another background job is running. Try again when it finishes.",
+                headers={"Retry-After": "10"},
+            )
         try:
             run = scheduled_skills.dispatch(schedule_id, user["id"])
             launch(
                 asyncio.to_thread(
-                    scheduled_skills.execute, run["id"], user["id"], execute_skill
+                    scheduled_skills.execute,
+                    run["id"],
+                    user["id"],
+                    skill_executor_for(run),
                 )
             )
             return run
@@ -1409,8 +1496,18 @@ def create_platform_router() -> APIRouter:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
 
+    @router.get("/usage")
+    def usage_summary(user: Dict[str, Any] = Depends(verified_user)):
+        """The signed-in user's token usage, totalled per model."""
+        from dabba.api.conversations_endpoints import conversation_usage_counts
+
+        return {
+            **tasks.usage_summary(user["id"]),
+            **conversation_usage_counts(user["id"]),
+        }
+
     @router.post("/identity/signup", status_code=201)
-    async def signup(body: SignupRequest):
+    def signup(body: SignupRequest):
         try:
             user = identity.signup(body.name, body.email, body.password)
             session = identity.login(body.email, body.password)
@@ -1419,18 +1516,40 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/identity/login")
-    async def login(body: LoginRequest):
+    def login(body: LoginRequest):
         try:
             return identity.login(body.email, body.password)
         except ValueError as exc:
             raise HTTPException(status_code=401, detail=str(exc)) from exc
 
     @router.get("/identity/me")
-    async def me(authorization: Optional[str] = Header(default=None)):
-        return current_user(authorization)
+    async def me(
+        request: Request,
+        response: Response,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        response.headers["Cache-Control"] = "no-store"
+        return getattr(request.state, "dabba_user", None) or current_user(authorization)
+
+    @router.patch("/identity/me")
+    async def update_profile(
+        body: ProfileUpdateRequest,
+        request: Request,
+        response: Response,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user = getattr(request.state, "dabba_user", None) or current_user(authorization)
+        try:
+            profile = await asyncio.to_thread(
+                identity.update_profile, user["id"], body.name, body.bio
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        response.headers["Cache-Control"] = "no-store"
+        return profile
 
     @router.post("/identity/logout")
-    async def logout(authorization: Optional[str] = Header(default=None)):
+    def logout(authorization: Optional[str] = Header(default=None)):
         identity.logout(_bearer(authorization))
         return {"ok": True}
 
@@ -1800,14 +1919,20 @@ def create_platform_router() -> APIRouter:
                 detail="This link doesn't point to a published artifact",
             ) from exc
         artifact = published["artifact"]
-        return FileResponse(artifact["path"], media_type=artifact["mediaType"])
+        return FileResponse(
+            artifact["path"],
+            media_type=artifact["mediaType"],
+            headers={
+                "Content-Security-Policy": "sandbox allow-scripts",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
 
     @router.put("/memory")
-    async def put_memory(
+    def put_memory(
         body: MemoryPutRequest,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
-        user = current_user(authorization)
         try:
             return memory.put(
                 body.scope,
@@ -1822,13 +1947,12 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/memory")
-    async def list_memory(
+    def list_memory(
         scope: Optional[str] = None,
         workspace_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
-        user = current_user(authorization)
         return {
             "memories": memory.list(
                 scope=scope,
@@ -1839,10 +1963,7 @@ def create_platform_router() -> APIRouter:
         }
 
     @router.delete("/memory/{memory_id}", status_code=204)
-    async def delete_memory(
-        memory_id: str, authorization: Optional[str] = Header(default=None)
-    ):
-        user = current_user(authorization)
+    def delete_memory(memory_id: str, user: Dict[str, Any] = Depends(verified_user)):
         try:
             memory.delete(memory_id, user["id"])
         except KeyError as exc:

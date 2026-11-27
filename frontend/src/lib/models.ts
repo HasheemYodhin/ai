@@ -1,14 +1,14 @@
 import type { ModelInfo, EffortTier } from '@/types'
 
+export const FLUX_IMAGE_MODEL = 'black-forest-labs/flux.1-dev'
+
 /**
  * Static fallback list used only when the Dabba server's /v1/agent/models
  * endpoint is unreachable. The live catalog (43+ models across providers)
  * is loaded at runtime via useModels().
  */
 export const FALLBACK_MODELS: ModelInfo[] = [
-  { id: 'dabba-10m', name: 'dabba-10M', provider: 'dabba', tier: 'medium', description: 'Scratch-trained local transformer', has_key: true },
-  { id: 'dabba-100m', name: 'dabba-100M', provider: 'dabba', tier: 'medium', description: 'High-capacity local', has_key: true },
-  { id: 'dabba-1b', name: 'dabba-1B', provider: 'dabba', tier: 'high', description: 'Instruction finetuned preview', has_key: true },
+  { id: 'dabba', name: 'Dabba', provider: 'dabba', tier: 'medium', description: 'Scratch-trained local transformer', has_key: true },
 ]
 
 export const EFFORT_TIERS: { id: EffortTier; label: string; hint: string }[] = [
@@ -27,6 +27,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
   nvidia: 'NVIDIA',
   huggingface: 'Hugging Face',
+  vyceai: 'VyceAI',
   ollama: 'Ollama',
 }
 
@@ -34,21 +35,25 @@ export function providerLabel(provider: string): string {
   return PROVIDER_LABELS[provider] ?? provider
 }
 
-/**
- * Whether a model can accept image input (vision). Based on well-known
- * vision-capable model families; the backend catalog doesn't expose a
- * per-model vision flag, so we match on id/provider patterns.
- */
-export function isVisionModel(modelId: string, provider?: string): boolean {
-  const id = modelId.toLowerCase()
-  // OpenAI: gpt-4o / gpt-4-turbo / gpt-4.1 / gpt-5.x see images; o-series reasoning models do too.
-  if (/^gpt-4o/.test(id) || /^gpt-4\.1/.test(id) || /^gpt-4-turbo/.test(id) || /^gpt-5/.test(id) || /^o[0-9]/.test(id)) return true
-  // Anthropic Claude 3+ are all vision-capable.
-  if (id.startsWith('claude')) return true
-  // Google Gemini 1.5+/2.x are multimodal.
-  if (id.startsWith('gemini')) return true
-  // Some NVIDIA/HF vision models advertise it in the id.
-  if (/vision|vl|llava|multimodal/.test(id)) return true
-  void provider
-  return false
+// Last-known display names by model ID. The live catalog can briefly be empty
+// (e.g. while /v1/agent/models reloads during a streaming reply); this cache
+// keeps the picker and reply labels showing "Nemotron 3.5 Super VL 120B"
+// instead of flashing the raw "nvidia/nemotron-..." ID.
+const knownModelNames = new Map<string, string>()
+
+export function rememberModelNames(models: Pick<ModelInfo, 'id' | 'name'>[]): void {
+  for (const m of models) if (m.name) knownModelNames.set(m.id, m.name)
+}
+
+/** Display name for a model ID: catalog name if known, else the ID without its vendor prefix. */
+export function modelDisplayName(id: string): string {
+  return knownModelNames.get(id) ?? id.slice(id.lastIndexOf('/') + 1)
+}
+
+/** "200k context" / "1M context"; small windows in tokens; undefined when unknown (never "0k"). */
+export function formatContextWindow(tokens?: number | null): string | undefined {
+  if (!tokens || tokens <= 0) return undefined
+  if (tokens >= 1_000_000) return `${+(tokens / 1_000_000).toFixed(tokens % 1_000_000 ? 2 : 0)}M context`
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k context`
+  return `${tokens} token context`
 }

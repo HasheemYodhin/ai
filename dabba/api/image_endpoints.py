@@ -18,16 +18,30 @@ from __future__ import annotations
 import asyncio
 import base64
 import time
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+from dabba.platform.provider_gateway import normalize_provider_error
+from dabba.providers.nvidia_provider import FLUX_IMAGE_MODEL
 
 
 class ImageGenerationRequest(BaseModel):
     prompt: str
     model: Optional[str] = None
-    size: Optional[str] = "1024x1024"
+    size: Optional[
+        Literal[
+            "auto",
+            "256x256",
+            "512x512",
+            "1024x1024",
+            "1024x1792",
+            "1792x1024",
+            "1024x1536",
+            "1536x1024",
+        ]
+    ] = "1024x1024"
     n: int = 1
 
 
@@ -178,11 +192,32 @@ def create_image_router() -> APIRouter:
         from dabba.api.agent_endpoints import _get_agent_proxy
 
         proxy = _get_agent_proxy()
-        keys = getattr(proxy.cli_config, "api_keys", {}) or {}
-        # Model-specific FLUX key takes priority over the generic NVIDIA key
-        nvidia_key = keys.get("black-forest-labs/flux.1-dev", "") or keys.get(
-            "nvidia", ""
-        )
+        registry = proxy._get_provider_registry()
+        nvidia_key, _ = registry.resolve_api_key(FLUX_IMAGE_MODEL)
+        if req.model and req.model.casefold() == FLUX_IMAGE_MODEL:
+            if not nvidia_key:
+                raise HTTPException(
+                    400,
+                    "FLUX.1-dev needs an NVIDIA API key. Add it in Settings → API Keys → NVIDIA or set NVIDIA_API_KEY on the server.",
+                )
+            if len(prompt) > 10_000:
+                raise HTTPException(
+                    422, "FLUX.1-dev accepts prompts up to 10,000 characters."
+                )
+            try:
+                return await asyncio.to_thread(
+                    _generate_via_nvidia, prompt, nvidia_key, 1
+                )
+            except Exception as exc:
+                failure = normalize_provider_error(
+                    exc, provider="nvidia", model=FLUX_IMAGE_MODEL
+                )
+                detail = failure.message
+                if failure.code == "provider_authentication":
+                    detail = "NVIDIA rejected the image request. Check that your NVIDIA API key has access to FLUX.1-dev."
+                raise HTTPException(failure.status_code, detail) from None
+
+        keys = registry.config.api_keys
         google_key = keys.get("google", "")
         openai_key = keys.get("openai", "")
         hf_key = keys.get("huggingface", "")
@@ -210,7 +245,9 @@ def create_image_router() -> APIRouter:
                     _generate_via_nvidia, prompt, nvidia_key, max(1, min(req.n, 1))
                 )
             except Exception as exc:
-                errors.append(f"NVIDIA (FLUX.1-dev): {exc}")
+                errors.append(
+                    f"NVIDIA (FLUX.1-dev): {normalize_provider_error(exc).message}"
+                )
 
         # 2. Google Imagen 3 — best quality (needs Google AI Studio key)
         if google_key and not is_explicit_hf and not is_explicit_openai:
@@ -222,7 +259,7 @@ def create_image_router() -> APIRouter:
                     max(1, min(req.n, 4)),
                 )
             except Exception as exc:
-                errors.append(f"Google Imagen: {exc}")
+                errors.append(f"Google Imagen: {normalize_provider_error(exc).message}")
 
         # 3. OpenAI DALL-E / gpt-image-1
         if openai_key and not is_explicit_hf:
@@ -236,7 +273,7 @@ def create_image_router() -> APIRouter:
                     max(1, min(req.n, 4)),
                 )
             except Exception as exc:
-                errors.append(f"OpenAI: {exc}")
+                errors.append(f"OpenAI: {normalize_provider_error(exc).message}")
 
         # 4. Hugging Face — free-tier fallback
         if hf_key:
@@ -249,7 +286,7 @@ def create_image_router() -> APIRouter:
                     explicit_hf_model,
                 )
             except Exception as exc:
-                errors.append(f"Hugging Face: {exc}")
+                errors.append(f"Hugging Face: {normalize_provider_error(exc).message}")
 
         raise HTTPException(
             status_code=502, detail="Image generation failed — " + " | ".join(errors)

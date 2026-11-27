@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { apiClient, DEFAULT_API_URL } from '@/api/client'
+import { applyAccent, DEFAULT_ACCENT, normalizeAccent } from '@/lib/accent'
+import { normalizeDocumentTemplate, type DocumentTemplate } from '@/lib/documents/templates'
 
 /** Generation params that can be remembered per-model. */
 export interface ModelParams {
@@ -10,6 +12,8 @@ export interface ModelParams {
 }
 
 export interface AppSettings {
+  /** Accent color (hex) used for buttons, links and highlights. */
+  accentColor: string
   baseUrl: string
   apiKey: string
   model: string
@@ -21,6 +25,7 @@ export interface AppSettings {
   frequencyPenalty: number
   stop: string[]
   streaming: boolean
+  documentTemplate: DocumentTemplate
   typingSpeed: number // ms delay per token on the server-side typewriter (informational)
   systemPrompt: string
   /** Remembered params keyed by model id — restored when you switch back. */
@@ -47,11 +52,12 @@ export interface AppSettings {
   contextCompactionKeepRecent: number
 }
 
-const DEFAULT_SETTINGS: AppSettings = {
+export const DEFAULT_SETTINGS: AppSettings = {
+  accentColor: DEFAULT_ACCENT,
   // Relative URLs work locally; Cloudflare Pages injects the Render URL at build time.
   baseUrl: DEFAULT_API_URL,
   apiKey: '',
-  model: 'dabba-10m',
+  model: 'dabba',
   effort: 'medium',
   temperature: 0.7,
   maxTokens: 8192,
@@ -60,7 +66,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   frequencyPenalty: 0,
   stop: [],
   streaming: true,
-  typingSpeed: 10,
+  documentTemplate: 'professional',
+  typingSpeed: 0,
   systemPrompt: 'You are Dabba, a production-grade custom transformer assistant.',
   modelDefaults: {},
   defaultPermissionMode: 'ask',
@@ -76,12 +83,14 @@ interface SettingsContextType {
   settings: AppSettings
   updateSettings: (newSettings: Partial<AppSettings>) => void
   resetSettings: () => void
+  replaceSettings: (settings: AppSettings) => void
 }
 
 const SettingsContext = createContext<SettingsContextType>({
   settings: DEFAULT_SETTINGS,
   updateSettings: () => {},
   resetSettings: () => {},
+  replaceSettings: () => {},
 })
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
@@ -91,11 +100,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (stored) {
         const parsed = JSON.parse(stored) as Partial<AppSettings>
         // Migrate the old hardcoded default. Explicit non-default API URLs are preserved.
+        if (parsed.model === 'dabba-10m') parsed.model = 'dabba'
         if (parsed.baseUrl === 'http://localhost:8080') parsed.baseUrl = DEFAULT_API_URL
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
           baseUrl: parsed.baseUrl || DEFAULT_API_URL,
+          // A missing or invalid saved color falls back to the default.
+          accentColor: normalizeAccent(parsed.accentColor ?? DEFAULT_ACCENT),
+          documentTemplate: normalizeDocumentTemplate(parsed.documentTemplate),
         }
       }
     } catch {
@@ -110,6 +123,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     apiClient.setApiKey(settings.apiKey)
     localStorage.setItem('dabba-settings', JSON.stringify(settings))
   }, [settings])
+
+  useEffect(() => { applyAccent(settings.accentColor) }, [settings.accentColor])
 
   const updateSettings = useCallback((newSettings: Partial<AppSettings>) => {
     setSettingsState(prev => {
@@ -145,7 +160,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings, resetSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSettings, resetSettings, replaceSettings: setSettingsState }}>
       {children}
     </SettingsContext.Provider>
   )

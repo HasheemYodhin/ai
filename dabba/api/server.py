@@ -5,11 +5,13 @@ Creates and configures the FastAPI app with all routes, middleware,
 authentication, rate limiting, CORS, and health checks.
 """
 
+import asyncio
+import json
 import logging
 import os
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import List, Optional
 
@@ -17,6 +19,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import MutableHeaders
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from dabba.config.api_config import ApiConfig
 from dabba.api.auth import ApiKeyAuth
@@ -24,6 +28,7 @@ from dabba.api.rate_limiter import RateLimiter
 from dabba.api.chat_endpoints import create_chat_router
 from dabba.api.embedding_endpoints import create_embedding_router
 from dabba.api.model_endpoints import create_model_router
+from dabba.platform.postgres import close_postgres_pool, database_url
 
 
 class ModelEngine:
@@ -566,9 +571,151 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             app.state.logger.warning(f"Could not load model: {e}")
 
-    yield
+    try:
+        from dabba.platform.core import utc_ms
+        from dabba.platform.services import TaskOrchestrator
 
-    app.state.logger.info("Server shutting down")
+        stale_after_seconds = max(3600, config.stream_timeout_seconds * 2)
+        TaskOrchestrator().fail_stale_chat_tasks(utc_ms() - stale_after_seconds * 1000)
+    except Exception:
+        app.state.logger.exception("Could not recover stale chat tasks")
+
+    try:
+        yield
+    finally:
+        if database_url():
+            await asyncio.to_thread(close_postgres_pool)
+        app.state.logger.info("Server shutting down")
+
+
+# Enforced on HTML (the served SPA). Deliberately limited to directives that
+# cannot break the app: artifact previews are model-written HTML rendered in
+# srcdoc iframes, which inherit this page's CSP, so a strict script-src would
+# block their inline/CDN scripts. OCR also loads tesseract's worker from
+# cdn.jsdelivr.net, and the API base URL is user-configurable.
+HTML_CSP = "; ".join(
+    [
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+    ]
+)
+# The stricter target policy, sent report-only so violations show in the
+# browser console without blocking anything. Promote to enforced once artifact
+# previews are served from a separate origin.
+HTML_CSP_REPORT_ONLY = "; ".join(
+    [
+        "default-src 'self'",
+        "script-src 'self' https://cdn.jsdelivr.net 'wasm-unsafe-eval'",
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' data: https://fonts.gstatic.com",
+        "img-src 'self' data: blob: https:",
+        "connect-src 'self' https://cdn.jsdelivr.net blob: data:",
+        "worker-src 'self' blob:",
+        "frame-src 'self' blob: data:",
+        "frame-ancestors 'none'",
+        "object-src 'none'",
+        "base-uri 'self'",
+    ]
+)
+
+
+class SPAStaticFiles(StaticFiles):
+    """Static files that fall back to index.html for client-side routes.
+
+    The web app has real URLs (/c/<id>, /agents, ...) handled in the browser.
+    Without this, opening or refreshing one of them returns 404. Paths that
+    look like files (contain a dot) and unknown /v1/ API paths still 404.
+    """
+
+    @staticmethod
+    def _is_app_route(path: str) -> bool:
+        path = path.lstrip("/")
+        last_segment = path.rsplit("/", 1)[-1]
+        return not path.startswith("v1/") and path != "v1" and "." not in last_segment
+
+    async def get_response(self, path: str, scope):
+        try:
+            response = await super().get_response(path, scope)
+        except StarletteHTTPException as exc:
+            # Newer Starlette raises for missing files instead of returning 404.
+            if exc.status_code != 404 or not self._is_app_route(path):
+                raise
+            response = await super().get_response("index.html", scope)
+        if response.status_code == 404 and self._is_app_route(path):
+            response = await super().get_response("index.html", scope)
+        if self._is_app_route(path) or path in {".", "index.html"}:
+            response.headers["Cache-Control"] = "no-cache"
+        if path.lstrip("/").startswith("share/"):
+            response.headers["X-Robots-Tag"] = "noindex"
+            response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+
+class SecurityHeadersMiddleware:
+    """Add baseline security headers without overriding ones a route sets.
+
+    Pure ASGI (not BaseHTTPMiddleware) so streaming responses are untouched.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Render and other proxies terminate TLS and forward the scheme.
+        forwarded = dict(scope.get("headers") or []).get(b"x-forwarded-proto", b"")
+        is_https = (
+            scope.get("scheme") == "https"
+            or forwarded.split(b",")[0].strip() == b"https"
+        )
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                present = {name.lower() for name, _ in headers}
+
+                def setdefault(name: bytes, value: str) -> None:
+                    if name not in present:
+                        headers.append((name, value.encode("latin-1")))
+                        present.add(name)
+
+                setdefault(b"x-content-type-options", "nosniff")
+                setdefault(b"referrer-policy", "strict-origin-when-cross-origin")
+                is_code_runner = scope.get("path") == "/code-runner.html"
+                setdefault(
+                    b"x-frame-options", "SAMEORIGIN" if is_code_runner else "DENY"
+                )
+                if is_https:
+                    setdefault(
+                        b"strict-transport-security",
+                        "max-age=31536000; includeSubDomains",
+                    )
+                content_type = dict(headers).get(b"content-type", b"")
+                # Routes with their own CSP (e.g. published artifacts, which are
+                # sandboxed) keep it as-is and get no report-only policy either.
+                if (
+                    content_type.startswith(b"text/html")
+                    and b"content-security-policy" not in present
+                ):
+                    if is_code_runner:
+                        setdefault(
+                            b"content-security-policy",
+                            "frame-ancestors 'self'; sandbox allow-scripts",
+                        )
+                    else:
+                        setdefault(b"content-security-policy", HTML_CSP)
+                        setdefault(
+                            b"content-security-policy-report-only", HTML_CSP_REPORT_ONLY
+                        )
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def create_app(
@@ -606,6 +753,29 @@ def create_app(
     logger = py_logging.getLogger("dabba.api")
     logger.setLevel(getattr(py_logging, config.log_level.upper()))
 
+    def database_unavailable() -> JSONResponse:
+        return JSONResponse(
+            {"detail": "The database is temporarily unavailable. Please try again."},
+            status_code=503,
+            headers={"Retry-After": "3"},
+        )
+
+    database_errors: tuple[type[Exception], ...] = ()
+    if database_url():
+        from psycopg import OperationalError
+
+        database_errors = (OperationalError,)
+
+        async def handle_database_error(request: Request, exc: OperationalError):
+            logger.warning(
+                "Database operation failed for %s (%s)",
+                request.url.path,
+                type(exc).__name__,
+            )
+            return database_unavailable()
+
+        app.add_exception_handler(OperationalError, handle_database_error)
+
     app.state.config = config
     app.state.logger = logger
 
@@ -628,13 +798,106 @@ def create_app(
         )
     app.state.rate_limiter = rate_limiter
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=config.cors_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    async def protect_api(request: Request):
+        from dabba.platform.services import IdentityService
+
+        path = request.scope["path"].rstrip("/")
+        if not path.startswith("/v1/"):
+            return None
+
+        public = (
+            (
+                request.method == "POST"
+                and path
+                in {"/v1/platform/identity/signup", "/v1/platform/identity/login"}
+            )
+            or (
+                request.method in {"GET", "HEAD"}
+                and path.startswith(
+                    (
+                        "/v1/platform/public/artifacts/",
+                        "/v1/conversations/public/shares/",
+                    )
+                )
+            )
+            or (
+                # Free guest prompts for signed-out visitors; limits are enforced
+                # inside the endpoint (see dabba/api/guest_endpoints.py).
+                (request.method == "POST" and path == "/v1/guest/chat")
+                or (request.method in {"GET", "HEAD"} and path == "/v1/guest/status")
+            )
+        )
+
+        user = None
+        if not public:
+            scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+            bearer = bearer if scheme.lower() == "bearer" else ""
+            if path.startswith(("/v1/platform/", "/v1/conversations")):
+                token = bearer
+            else:
+                token = request.headers.get("x-dabba-session") or bearer
+            if token:
+                try:
+                    user = await asyncio.to_thread(
+                        lambda: IdentityService().authenticate(token)
+                    )
+                except database_errors as exc:
+                    logger.warning(
+                        "Database unavailable during session lookup (%s)",
+                        type(exc).__name__,
+                    )
+                    return database_unavailable()
+            if not user:
+                if (
+                    request.method == "GET"
+                    and path == "/v1/platform/identity/me"
+                    and request.query_params.get("restore") == "true"
+                ):
+                    return JSONResponse(None, headers={"Cache-Control": "no-store"})
+                return JSONResponse(
+                    {"detail": "A valid Dabba session is required"}, status_code=401
+                )
+            request.state.dabba_user = user
+            admin_only = (
+                path.startswith(
+                    (
+                        "/v1/mcp/",
+                        "/v1/platform/filesystem/",
+                        "/v1/platform/workspaces",
+                        "/v1/platform/checkpoints/",
+                        "/v1/platform/browser/",
+                        "/v1/platform/cowork/",
+                        "/v1/platform/scheduled-skills",
+                        "/v1/platform/agent-definitions",
+                        "/v1/platform/documents/",
+                    )
+                )
+                or path in {"/v1/hooks", "/v1/code/execute"}
+                or path.startswith("/v1/hooks/")
+                or (path.startswith("/v1/agent") and path != "/v1/agent/models")
+            )
+            if admin_only and user["role"] != "admin":
+                return JSONResponse(
+                    {"detail": "Only the workspace owner can use this feature"},
+                    status_code=403,
+                )
+
+        if rate_limiter and (
+            request.method not in {"GET", "HEAD", "OPTIONS"}
+            or path.startswith("/v1/audio/")
+        ):
+            try:
+                if user:
+                    await rate_limiter.check(api_key=user["id"])
+                else:
+                    await rate_limiter.check_request(request)
+            except HTTPException as exc:
+                return JSONResponse(
+                    {"detail": exc.detail},
+                    status_code=exc.status_code,
+                    headers=exc.headers,
+                )
+        return None
 
     try:
         from dabba.platform.services import TelemetryService
@@ -643,38 +906,160 @@ def create_app(
     except Exception:
         telemetry = None
 
-    @app.middleware("http")
-    async def log_requests(request: Request, call_next):
-        """Trace incoming requests and correlate logs with a request id."""
-        request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
-        start = time.time()
-        if telemetry:
-            with telemetry.span(
-                "http.request",
-                **{
-                    "http.method": request.method,
-                    "http.route": request.url.path,
-                    "dabba.request_id": request_id,
-                },
-            ):
-                response = await call_next(request)
-        else:
-            response = await call_next(request)
-        duration = time.time() - start
-        if telemetry:
-            telemetry.record_http(
-                request.method,
-                request.url.path,
-                response.status_code,
-                duration * 1000,
+    low_memory = os.getenv("DABBA_LOW_MEMORY", "").lower() in {"1", "true"}
+    active_work = {"generation": 0, "upload": 0}
+    active_generation_users: set[str] = set()
+    generation_paths = {
+        "/v1/chat/completions",
+        "/v1/chat/completions/stream",
+        "/v1/guest/chat",
+        "/v1/agent",
+        "/v1/images/generations",
+        "/v1/agent/keys/test",
+    }
+    upload_limits = {
+        "/v1/documents/extract": 36 * 1024 * 1024,
+        "/v1/documents/extract-upload": 26 * 1024 * 1024,
+        "/v1/transcribe": 9 * 1024 * 1024,
+        "/v1/speech": 64 * 1024,
+    }
+
+    class ApiMiddleware:
+        def __init__(self, app):
+            self.app = app
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] != "http":
+                await self.app(scope, receive, send)
+                return
+
+            request = Request(scope)
+            request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
+            start = time.perf_counter()
+
+            async def trace_response(message):
+                if message["type"] == "http.response.start":
+                    headers = MutableHeaders(scope=message)
+                    headers["X-Request-ID"] = request_id
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if telemetry:
+                        telemetry.record_http(
+                            request.method,
+                            request.url.path,
+                            message["status"],
+                            duration_ms,
+                        )
+                    if config.log_requests:
+                        user = getattr(request.state, "dabba_user", {})
+                        logger.info(
+                            json.dumps(
+                                {
+                                    "request_id": request_id,
+                                    "method": request.method,
+                                    "path": request.url.path,
+                                    "status": message["status"],
+                                    "latency_ms": round(duration_ms, 2),
+                                    "user_id": user.get("id"),
+                                }
+                            )
+                        )
+                await send(message)
+
+            span = (
+                telemetry.span(
+                    "http.request",
+                    **{
+                        "http.method": request.method,
+                        "http.route": request.url.path,
+                        "dabba.request_id": request_id,
+                    },
+                )
+                if telemetry
+                else nullcontext()
             )
-        response.headers["X-Request-ID"] = request_id
-        if config.log_requests:
-            logger.info(
-                f"request_id={request_id} {request.method} {request.url.path} "
-                f"{response.status_code} {duration:.3f}s"
-            )
-        return response
+            with span:
+                rejected = await protect_api(request)
+                if rejected is not None:
+                    await rejected(scope, receive, trace_response)
+                    return
+                path = scope["path"].rstrip("/")
+                group = None
+                if low_memory and request.method == "POST":
+                    if path in generation_paths:
+                        group = "generation"
+                    elif path in upload_limits:
+                        group = "upload"
+                if not group:
+                    await self.app(scope, receive, trace_response)
+                    return
+
+                user_id = getattr(request.state, "dabba_user", {}).get("id")
+                generation_user = user_id if group == "generation" else None
+                limit = 2 if group == "generation" else 1
+                if (
+                    active_work[group] >= limit
+                    or generation_user in active_generation_users
+                ):
+                    busy = JSONResponse(
+                        {
+                            "detail": "Dabba is busy. Wait for the current request to finish and retry."
+                        },
+                        status_code=429,
+                        headers={"Retry-After": "3"},
+                    )
+                    await busy(scope, receive, trace_response)
+                    return
+
+                body_limit = upload_limits.get(path)
+                content_length = request.headers.get("content-length", "")
+                if (
+                    body_limit
+                    and content_length.isdecimal()
+                    and int(content_length) > body_limit
+                ):
+                    too_large = JSONResponse(
+                        {
+                            "detail": "The upload exceeds this server's size limit. Try a smaller file or shorter recording."
+                        },
+                        status_code=413,
+                    )
+                    await too_large(scope, receive, trace_response)
+                    return
+
+                read_bytes = 0
+
+                async def receive_bounded():
+                    nonlocal read_bytes
+                    message = await receive()
+                    if body_limit and message["type"] == "http.request":
+                        read_bytes += len(message.get("body", b""))
+                        if read_bytes > body_limit:
+                            raise HTTPException(
+                                status_code=413,
+                                detail="The upload exceeds this server's size limit.",
+                            )
+                    return message
+
+                active_work[group] += 1
+                if generation_user:
+                    active_generation_users.add(generation_user)
+                try:
+                    await self.app(scope, receive_bounded, trace_response)
+                finally:
+                    active_work[group] -= 1
+                    if generation_user:
+                        active_generation_users.discard(generation_user)
+
+    app.add_middleware(ApiMiddleware)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin for origin in config.cors_origins if "*" not in origin],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    # Added last so it is the outermost layer and also covers CORS preflights.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     @app.get("/health")
     async def health_check():
@@ -691,7 +1076,9 @@ def create_app(
         try:
             from dabba.platform.core import get_platform_store
 
-            get_platform_store().fetchone("SELECT 1 AS ok")
+            await asyncio.to_thread(
+                lambda: get_platform_store().fetchone("SELECT 1 AS ok")
+            )
             storage_ready = True
         except Exception:
             storage_ready = False
@@ -708,6 +1095,7 @@ def create_app(
         """Custom exception handler for HTTP errors."""
         return JSONResponse(
             status_code=exc.status_code,
+            headers=exc.headers,
             content={
                 "error": {
                     "message": exc.detail,
@@ -755,29 +1143,24 @@ def create_app(
     app.include_router(
         create_chat_router(
             model_engine=app.state.model_engine,
-            auth=auth,
-            rate_limiter=rate_limiter,
         )
     )
 
     app.include_router(
         create_embedding_router(
             embedding_engine=app.state.embedding_engine,
-            auth=auth,
-            rate_limiter=rate_limiter,
         )
     )
 
     app.include_router(
         create_model_router(
             available_models=models,
-            auth=auth,
         )
     )
 
     from dabba.api.execution_endpoints import create_execution_router
 
-    app.include_router(create_execution_router(auth=auth, rate_limiter=rate_limiter))
+    app.include_router(create_execution_router())
 
     # Agent streaming endpoint for the VSCode extension (tool-using agent loop)
     try:
@@ -803,13 +1186,25 @@ def create_app(
     except Exception as _image_exc:
         logger.warning(f"Image endpoints unavailable: {_image_exc}")
 
-    # Server-side conversation storage for the web frontend (SQLite, scoped by user_id)
+    # Server-side conversation storage for the web frontend, scoped by user_id.
     try:
         from dabba.api.conversations_endpoints import create_conversations_router
 
         app.include_router(create_conversations_router())
     except Exception as _conv_exc:
+        if database_url():
+            raise RuntimeError(
+                "PostgreSQL conversation storage could not initialize."
+            ) from None
         logger.warning(f"Conversation endpoints unavailable: {_conv_exc}")
+
+    # Free prompts for signed-out visitors on the public /try page.
+    try:
+        from dabba.api.guest_endpoints import create_guest_router
+
+        app.include_router(create_guest_router())
+    except Exception as _guest_exc:
+        logger.warning(f"Guest chat endpoints unavailable: {_guest_exc}")
 
     # Text-to-speech for spoken replies (offline Piper TTS)
     try:
@@ -833,6 +1228,10 @@ def create_app(
 
         app.include_router(create_platform_router())
     except Exception as _platform_exc:
+        if database_url():
+            raise RuntimeError(
+                "PostgreSQL platform endpoints could not initialize."
+            ) from None
         logger.warning(f"Platform endpoints unavailable: {_platform_exc}")
 
     # User-configurable event hooks (session/tool-call shell commands)
@@ -845,7 +1244,9 @@ def create_app(
 
     frontend_dir = os.environ.get("DABBA_FRONTEND_DIR")
     if frontend_dir and Path(frontend_dir).is_dir():
-        app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+        app.mount(
+            "/", SPAStaticFiles(directory=frontend_dir, html=True), name="frontend"
+        )
     else:
 
         @app.get("/")
@@ -871,7 +1272,7 @@ def create_app(
 def run_server(
     config_path: Optional[str] = None,
     model_path: Optional[str] = None,
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8080,
     reload: bool = False,
 ):
@@ -930,7 +1331,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the dabba API server")
     parser.add_argument("--config", type=str, help="Path to config file")
     parser.add_argument("--model", type=str, help="Path to model")
-    parser.add_argument("--host", type=str, default="0.0.0.0")
+    parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--reload", action="store_true")
     args = parser.parse_args()

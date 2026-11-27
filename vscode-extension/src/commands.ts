@@ -66,6 +66,52 @@ export function registerAllCommands(
     }
   });
 
+  const signIn = vscode.commands.registerCommand('dabba.signIn', async () => {
+    const email = await vscode.window.showInputBox({ prompt: 'Dabba account email', ignoreFocusOut: true });
+    if (!email?.trim()) return;
+    const password = await vscode.window.showInputBox({ prompt: 'Dabba account password', password: true, ignoreFocusOut: true });
+    if (!password) return;
+    try {
+      const endpoint = settings.getSettings().apiEndpoint;
+      const url = accountUrl(endpoint, 'login');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), password }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) throw new Error('Check your account credentials and server address.');
+      const { token } = await response.json() as { token?: string };
+      if (!token) throw new Error('The server did not return a Dabba session.');
+      await settings.setSession(endpoint, token);
+      vscode.window.showInformationMessage('Signed in to Dabba.');
+    } catch (error) {
+      vscode.window.showErrorMessage(`Dabba sign-in failed. ${(error as Error).message}`);
+    }
+  });
+
+  const signOut = vscode.commands.registerCommand('dabba.signOut', async () => {
+    try {
+      const endpoint = settings.getSettings().apiEndpoint;
+      const token = await settings.getApiKey();
+      if (token) {
+        const response = await fetch(accountUrl(endpoint, 'logout'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          redirect: 'error',
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!response.ok && response.status !== 401) throw new Error('Could not revoke the session.');
+      }
+      await settings.clearSession(endpoint);
+      await settings.clearApiKey();
+      vscode.window.showInformationMessage('Signed out of Dabba.');
+    } catch (error) {
+      vscode.window.showErrorMessage(`Dabba sign-out failed. ${(error as Error).message}`);
+    }
+  });
+
   const clearConversation = vscode.commands.registerCommand('dabba.clearConversation', async () => {
     // Call ChatViewProvider's own clear path directly — workbench.action.webview.sendMessage
     // targets whichever webview currently has focus, not necessarily dabba.chat, and
@@ -90,8 +136,17 @@ export function registerAllCommands(
 
   context.subscriptions.push(
     openChat, focusPanel, newSession, inlineChatCmd, explainCode,
-    refactorCode, reviewFile, setApiKey, clearConversation, executeCodeActionCmd,
+    refactorCode, reviewFile, setApiKey, signIn, signOut, clearConversation, executeCodeActionCmd,
   );
+}
+
+function accountUrl(endpoint: string, action: 'login' | 'logout'): URL {
+  const url = new URL(endpoint);
+  if (url.protocol !== 'https:' &&
+      !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) {
+    throw new Error('Use HTTPS or a local Dabba server.');
+  }
+  return new URL(`/v1/platform/identity/${action}`, url);
 }
 
 async function executeCodeAction(kind: ActionKind, inlineChat: InlineChat): Promise<void> {

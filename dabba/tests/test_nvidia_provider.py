@@ -158,11 +158,11 @@ def test_deepseek_v4_falls_back_after_capacity_retries():
             api_key="dummy_key",
         )
 
-    assert "used `qwen/qwen2.5-coder-32b-instruct`" in result
+    assert "used `nvidia/nemotron-3.5-lightning-30b-a3b`" in result
     assert result.endswith("Fallback answer")
     assert (
         mock_client.chat.completions.create.call_args.kwargs["model"]
-        == "qwen/qwen2.5-coder-32b-instruct"
+        == "nvidia/nemotron-3.5-lightning-30b-a3b"
     )
 
 
@@ -214,7 +214,7 @@ def test_stream_chat_recovers_when_lazy_stream_fails_before_first_token():
     assert mock_client.chat.completions.create.call_count == 4
     assert (
         mock_client.chat.completions.create.call_args.kwargs["model"]
-        == "qwen/qwen2.5-coder-32b-instruct"
+        == "nvidia/nemotron-3.5-lightning-30b-a3b"
     )
 
 
@@ -271,7 +271,7 @@ def test_stream_chat_continues_partial_answer_on_capacity_fallback():
     assert chunks == ["First half", " and second half"]
     sleep.assert_not_called()
     fallback_call = mock_client.chat.completions.create.call_args.kwargs
-    assert fallback_call["model"] == "qwen/qwen2.5-coder-32b-instruct"
+    assert fallback_call["model"] == "nvidia/nemotron-3.5-lightning-30b-a3b"
     assert fallback_call["messages"][-2] == {
         "role": "assistant",
         "content": "First half",
@@ -310,7 +310,7 @@ def test_capacity_cooldown_skips_repeated_deepseek_probe():
     assert mock_client.chat.completions.create.call_count == 1
     assert (
         mock_client.chat.completions.create.call_args.kwargs["model"]
-        == "qwen/qwen2.5-coder-32b-instruct"
+        == "nvidia/nemotron-3.5-lightning-30b-a3b"
     )
 
 
@@ -353,5 +353,28 @@ def test_nemotron_ultra_capacity_uses_default_fallback():
     assert result.endswith("Updated document")
     assert (
         mock_client.chat.completions.create.call_args.kwargs["model"]
-        == "qwen/qwen2.5-coder-32b-instruct"
+        == "nvidia/nemotron-3.5-lightning-30b-a3b"
     )
+
+
+def test_inline_reasoning_is_separated_across_chunks():
+    from dabba.providers.base import ReasoningDelta
+    from dabba.providers.nvidia_provider import (
+        _ReasoningFilter,
+        _without_inline_reasoning,
+    )
+
+    filter_ = _ReasoningFilter()
+    result = []
+    for chunk in ("Before <th", "ink>secret</thi", "nk>after"):
+        result.extend(filter_.feed(chunk))
+    result.extend(filter_.feed("", final=True))
+
+    assert (
+        "".join(part for part in result if isinstance(part, ReasoningDelta)) == "secret"
+    )
+    assert (
+        "".join(part for part in result if not isinstance(part, ReasoningDelta))
+        == "Before after"
+    )
+    assert _without_inline_reasoning("answer<think>unfinished") == "answer"

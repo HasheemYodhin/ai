@@ -1,3 +1,4 @@
+import { useDialogFocus } from '@/hooks/useDialogFocus'
 import { useState, useEffect } from 'react'
 import { X, Sparkles } from 'lucide-react'
 import type { SkillInput } from '@/hooks/useSkills'
@@ -23,6 +24,8 @@ export function SkillModal({ isOpen, onClose, onSubmit }: SkillModalProps) {
     }
   }, [isOpen])
 
+  const dialogRef = useDialogFocus(isOpen, onClose)
+
   if (!isOpen) return null
 
   const canSubmit = name.trim() && instructions.trim()
@@ -37,13 +40,13 @@ export function SkillModal({ isOpen, onClose, onSubmit }: SkillModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in">
       <div className="fixed inset-0" onClick={onClose} />
 
-      <div className="bg-surface dark:bg-surface-dark-secondary max-w-md w-full rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="New skill" tabIndex={-1} className="bg-surface dark:bg-surface-dark-secondary max-w-md w-full rounded-2xl overflow-hidden relative z-10 border border-border dark:border-border-dark shadow-xl m-4">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border dark:border-border-dark">
           <h3 className="flex items-center gap-2 font-bold text-sm text-text-primary dark:text-text-dark-primary">
             <Sparkles className="w-4 h-4 text-accent" />
             New skill
           </h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
+          <button onClick={onClose} aria-label="Close dialog" className="p-1.5 rounded-lg hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-secondary transition-colors">
             <X className="w-4 h-4" />
           </button>
         </div>

@@ -29,16 +29,27 @@ class StorageManager {
   }
 
   static async getSettings() {
-    const settings = await chrome.storage.sync.get(Object.values(STORAGE_KEYS));
-    return { ...DEFAULT_SETTINGS, ...settings };
+    const { apiKey: syncedKey, ...settings } = await chrome.storage.sync.get(Object.values(STORAGE_KEYS));
+    const { apiKey: localKey } = await chrome.storage.local.get(STORAGE_KEYS.API_KEY);
+    if (syncedKey !== undefined) {
+      if (localKey === undefined) await chrome.storage.local.set({ apiKey: syncedKey });
+      await chrome.storage.sync.remove(STORAGE_KEYS.API_KEY);
+    }
+    return { ...DEFAULT_SETTINGS, ...settings, apiKey: localKey ?? syncedKey ?? '' };
   }
 
   static async saveSettings(settings) {
-    await chrome.storage.sync.set(settings);
+    const { apiKey, ...preferences } = settings;
+    if (apiKey !== undefined) {
+      await chrome.storage.local.set({ apiKey });
+      await chrome.storage.sync.remove(STORAGE_KEYS.API_KEY);
+    }
+    await chrome.storage.sync.set(preferences);
   }
 
   static async resetSettings() {
     await chrome.storage.sync.clear();
+    await chrome.storage.local.remove(STORAGE_KEYS.API_KEY);
   }
 }
 
@@ -63,6 +74,7 @@ class ApiClient {
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
     const response = await fetch(url, { headers });
+    if (response.status === 401) throw new Error('Your Dabba session is missing or expired. Sign in again in extension settings.');
     if (!response.ok) throw new Error(`Failed to fetch models: ${response.status}`);
     return response.json();
   }
@@ -76,21 +88,23 @@ class ApiClient {
     this.controller = new AbortController();
     const { signal } = this.controller;
 
+    const stream = options.stream ?? true;
     const body = JSON.stringify({
       model: options.model || model,
       messages,
-      stream: options.stream ?? true,
+      stream,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.max_tokens ?? 4096,
     });
 
     const response = await fetch(url, { method: 'POST', headers, body, signal });
     if (!response.ok) {
+      if (response.status === 401) throw new Error('Your Dabba session is missing or expired. Sign in again in extension settings.');
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.error?.message || `API error: ${response.status}`);
+      throw new Error(error.error?.message || error.detail || `API error: ${response.status}`);
     }
 
-    if (!options.stream) {
+    if (!stream) {
       return response.json();
     }
 
@@ -332,6 +346,8 @@ class MessageHandler {
     return null;
   }
 }
+
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {});
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   ContextMenuManager.createMenus();

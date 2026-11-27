@@ -312,6 +312,7 @@ PROVIDER_ORDER = [
     "google",
     "nvidia",
     "huggingface",
+    "vyceai",
     "ollama",
 ]
 PROVIDER_LABELS = {
@@ -321,6 +322,7 @@ PROVIDER_LABELS = {
     "google": "◉  GOOGLE",
     "nvidia": "▶  NVIDIA NIM",
     "huggingface": "🤗 HUGGING FACE",
+    "vyceai": "◇  VYCEAI",
     "ollama": "○  LOCAL (Ollama)",
 }
 TIER_COLOR = {
@@ -1025,6 +1027,7 @@ _PROVIDERS = [
     ("google", "Gemini (Google)", "AIza…"),
     ("nvidia", "NVIDIA NIM", "nvapi-…"),
     ("huggingface", "Hugging Face", "hf_…"),
+    ("vyceai", "VyceAI", "API key…"),
 ]
 
 
@@ -1093,8 +1096,7 @@ class SetKeyModal(ModalScreen):
     def on_delete(self) -> None:
         if not hasattr(self._config, "api_keys") or self._config.api_keys is None:
             self._config.api_keys = {}
-        self._config.api_keys.pop(self._pid, None)
-        self._config.save()
+        self._config.remove_provider_key(self._pid)
         self.dismiss(("deleted", self._pid))
 
     @on(Button.Pressed, "#setkey-cancel")
@@ -1801,7 +1803,7 @@ class DabbaTUI(App[None]):
                 )
                 if not entry:
                     self._post_system(
-                        f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface"
+                        f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface vyceai"
                     )
                     return
                 p, label, ph = entry
@@ -1824,8 +1826,7 @@ class DabbaTUI(App[None]):
             if hasattr(self.config, "api_keys") and provider in (
                 self.config.api_keys or {}
             ):
-                del self.config.api_keys[provider]
-                self.config.save()
+                self.config.remove_provider_key(provider)
                 if hasattr(self.agent, "_provider_registry"):
                     self.agent._provider_registry = None
                 self._post_system(f"Key removed for {provider}")

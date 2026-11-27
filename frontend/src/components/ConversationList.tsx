@@ -1,6 +1,19 @@
-import { useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
+import { Fragment, useState, useMemo, useCallback, useRef, useEffect, type KeyboardEvent } from 'react'
 import type { Conversation, Project } from '@/types'
+import { apiClient } from '@/api/client'
 import { cn, truncate } from '@/lib/utils'
+
+const DAY_MS = 86_400_000
+
+function dateGroup(conv: Conversation): string {
+  if (conv.pinned) return 'Pinned'
+  const startOfToday = new Date().setHours(0, 0, 0, 0)
+  if (conv.updatedAt >= startOfToday) return 'Today'
+  if (conv.updatedAt >= startOfToday - DAY_MS) return 'Yesterday'
+  if (conv.updatedAt >= startOfToday - 7 * DAY_MS) return 'Previous 7 days'
+  if (conv.updatedAt >= startOfToday - 30 * DAY_MS) return 'Previous 30 days'
+  return 'Older'
+}
 import {
   Trash2, MessageSquare, AlertTriangle, Pin, PinOff, Pencil,
   FolderMinus, MoreHorizontal,
@@ -14,7 +27,7 @@ interface ConversationListProps {
   runningConversationIds: string[]
   /** Controlled from the sidebar — its search box sits right under "New Chat" now, not in this list. */
   search: string
-  onSelect: (id: string) => void
+  onSelect: (id: string, messageId?: string) => void
   onDelete: (id: string) => void
   onRename: (id: string, title: string) => void
   onTogglePin: (id: string) => void
@@ -37,6 +50,19 @@ export function ConversationList({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null)
+  const [searchResults, setSearchResults] = useState<{ query: string; matches: Map<string, { snippet: string | null; messageId?: string | null }> } | null>(null)
+  const query = search.trim().toLowerCase()
+  useEffect(() => {
+    if (!query) return
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => {
+      void apiClient.searchConversations(query.slice(0, 120), controller.signal).then(matches => {
+        if (!controller.signal.aborted) setSearchResults({ query, matches: new Map(matches.map(match => [match.id, match])) })
+      }).catch(() => {})
+    }, 250)
+    return () => { window.clearTimeout(timer); controller.abort() }
+  }, [query])
+  const matches = searchResults?.query === query ? searchResults.matches : null
   const editInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -44,13 +70,12 @@ export function ConversationList({
   }, [editingId])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    const base = q ? conversations.filter(c => c.title.toLowerCase().includes(q)) : conversations
+    const base = query ? conversations.filter(c => c.title.toLowerCase().includes(query) || matches?.has(c.id)) : conversations
     return [...base].sort((a, b) => {
       if (!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1
       return b.updatedAt - a.updatedAt
     })
-  }, [conversations, search])
+  }, [conversations, query, matches])
 
   const handleDelete = useCallback((e: React.MouseEvent, id: string) => {
     e.stopPropagation()
@@ -64,8 +89,8 @@ export function ConversationList({
 
   const handleSelect = useCallback((id: string) => {
     setConfirmDelete(null)
-    onSelect(id)
-  }, [onSelect])
+    onSelect(id, matches?.get(id)?.messageId ?? undefined)
+  }, [onSelect, matches])
 
   const startRename = useCallback((e: React.MouseEvent, conv: Conversation) => {
     e.stopPropagation()
@@ -91,29 +116,31 @@ export function ConversationList({
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-text-tertiary dark:text-text-dark-tertiary">
-        <span>Recent</span>
-        <span className="font-normal tracking-normal">{filtered.length}</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2" onClick={() => setMoveMenuFor(null)}>
+      <div className="flex-1 overflow-y-auto scrollbar-thin px-2.5 pt-4 pb-2" onClick={() => setMoveMenuFor(null)}>
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-tertiary dark:text-text-dark-tertiary">
             <MessageSquare className="w-8 h-8 mb-2 opacity-30" />
             <p className="text-xs font-medium">{search.trim() ? 'No matching chats' : 'No conversations yet'}</p>
-            {search.trim() && <p className="mt-1 text-[10px] opacity-75">Try a different search</p>}
+            {search.trim() && <p className="mt-1 text-xs opacity-75">Try a different search</p>}
           </div>
         ) : (
           <div className="space-y-0.5">
-            {filtered.map((conv) => {
+            {filtered.map((conv, index) => {
               const project = conv.projectId ? projects.find(p => p.id === conv.projectId) : undefined
               const isRunning = runningConversationIds.includes(conv.id)
+              const group = dateGroup(conv)
+              const startsGroup = index === 0 || dateGroup(filtered[index - 1]) !== group
               return (
+                <Fragment key={conv.id}>
+                {startsGroup && (
+                  <div className={cn('px-2.5 pb-1 text-xs text-text-tertiary dark:text-text-dark-tertiary', index > 0 && 'pt-4')}>
+                    {group}
+                  </div>
+                )}
                 <div
-                  key={conv.id}
                   onClick={() => editingId !== conv.id && handleSelect(conv.id)}
                   className={cn(
-                    'w-full text-left px-2 py-1.5 rounded-lg transition-colors group relative cursor-pointer',
+                    'w-full min-h-8 flex flex-col justify-center text-left px-2.5 rounded-lg transition-colors group relative cursor-pointer',
                     conv.id === currentId
                       ? 'bg-surface dark:bg-surface-dark-tertiary text-text-primary dark:text-text-dark-primary'
                       : 'bg-transparent hover:bg-surface dark:hover:bg-surface-dark-tertiary text-text-secondary dark:text-text-dark-secondary hover:text-text-primary dark:hover:text-text-dark-primary'
@@ -136,12 +163,14 @@ export function ConversationList({
                           onKeyDown={handleRenameKeyDown}
                           onBlur={commitRename}
                           onClick={e => e.stopPropagation()}
+                          aria-label="Rename conversation"
                           className="w-full text-[13px] font-medium bg-transparent border-b border-accent outline-none text-text-primary dark:text-text-dark-primary"
                         />
                       ) : (
-                        <p className="text-[13px] leading-5 font-medium truncate">
-                          {truncate(conv.title, 40)}
-                        </p>
+                        <>
+                          <p className="text-[13px] leading-5 font-medium truncate">{truncate(conv.title, 40)}</p>
+                          {matches?.get(conv.id)?.snippet && <p className="truncate text-[11px] text-text-tertiary">{matches.get(conv.id)?.snippet}</p>}
+                        </>
                       )}
                     </div>
 
@@ -154,6 +183,9 @@ export function ConversationList({
                         onClick={(e) => { e.stopPropagation(); setMoveMenuFor(moveMenuFor === conv.id ? null : conv.id) }}
                         className="p-1 rounded-md hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary transition-colors"
                         title="Conversation actions"
+                        aria-label={`Actions for ${conv.title}`}
+                        aria-haspopup="menu"
+                        aria-expanded={moveMenuFor === conv.id}
                       >
                         <MoreHorizontal className="w-3.5 h-3.5" />
                       </button>
@@ -198,6 +230,7 @@ export function ConversationList({
                     </div>
                   </div>
                 </div>
+                </Fragment>
               )
             })}
           </div>

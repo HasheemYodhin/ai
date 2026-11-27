@@ -1,4 +1,4 @@
-import type { Conversation } from '@/types'
+import { apiClient, type ServerUsage } from '@/api/client'
 
 export interface UsageStats {
   totalConversations: number
@@ -6,47 +6,34 @@ export interface UsageStats {
   totalTokens: number
   promptTokens: number
   completionTokens: number
+  limits: NonNullable<ServerUsage['limits']>
   byModel: { model: string; tokens: number; replies: number }[]
 }
 
-/** Reads conversation history straight from localStorage — same store useHistory uses. */
-export function loadConversationsForUsage(): Conversation[] {
-  try {
-    const raw = localStorage.getItem('dabba-conversations')
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
+/**
+ * Combines the server's recorded token usage with the conversation list.
+ * Chats live on the server, so counts come from the (lightweight) list and
+ * tokens from the usage the server recorded for each finished reply.
+ */
+export function buildUsageStats(
+  usage: ServerUsage,
+  conversations: { messageCount?: number; messages?: unknown[] }[],
+): UsageStats {
+  return {
+    totalConversations: usage.conversationCount ?? conversations.length,
+    totalMessages: usage.messageCount ?? conversations.reduce((sum, conv) => sum + (conv.messageCount ?? conv.messages?.length ?? 0), 0),
+    totalTokens: usage.totalTokens,
+    promptTokens: usage.promptTokens,
+    completionTokens: usage.completionTokens,
+    limits: usage.limits ?? [],
+    byModel: usage.byModel.map(({ model, tokens, replies }) => ({ model, tokens, replies })),
   }
 }
 
-export function computeUsageStats(conversations: Conversation[]): UsageStats {
-  const byModel = new Map<string, { tokens: number; replies: number }>()
-  let promptTokens = 0
-  let completionTokens = 0
-  let totalMessages = 0
-
-  for (const conv of conversations) {
-    for (const msg of conv.messages) {
-      totalMessages++
-      if (msg.role !== 'assistant' || !msg.usage) continue
-      promptTokens += msg.usage.promptTokens
-      completionTokens += msg.usage.completionTokens
-      const key = msg.model ?? 'unknown'
-      const entry = byModel.get(key) ?? { tokens: 0, replies: 0 }
-      entry.tokens += msg.usage.totalTokens
-      entry.replies += 1
-      byModel.set(key, entry)
-    }
-  }
-
-  return {
-    totalConversations: conversations.length,
-    totalMessages,
-    totalTokens: promptTokens + completionTokens,
-    promptTokens,
-    completionTokens,
-    byModel: Array.from(byModel.entries())
-      .map(([model, v]) => ({ model, ...v }))
-      .sort((a, b) => b.tokens - a.tokens),
-  }
+export async function loadUsageStats(userId: string, signal?: AbortSignal): Promise<UsageStats> {
+  const usage = await apiClient.fetchUsage(signal)
+  const conversations = usage.conversationCount !== undefined && usage.messageCount !== undefined
+    ? []
+    : await apiClient.fetchConversations(userId, signal)
+  return buildUsageStats(usage, conversations)
 }

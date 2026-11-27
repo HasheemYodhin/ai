@@ -23,6 +23,13 @@ MAX_CODE_BYTES = 100_000
 MAX_STDIN_BYTES = 32_000
 MAX_OUTPUT_BYTES = 64_000
 MAX_TIMEOUT_SECONDS = 10
+JAVA_VM_OPTIONS = (
+    "-Xms16m",
+    "-Xmx128m",
+    "-XX:+UseSerialGC",
+    "-XX:ReservedCodeCacheSize=32m",
+    "-XX:CompressedClassSpaceSize=32m",
+)
 
 
 class ExecutionRequest(BaseModel):
@@ -45,7 +52,17 @@ LANGUAGES: Dict[str, LanguageSpec] = {
     "javascript": LanguageSpec(("js", "node"), ".js", ("node", "{source}")),
     "typescript": LanguageSpec(("ts", "tsx"), ".ts", ("tsx", "{source}")),
     "java": LanguageSpec(
-        (), ".java", ("java", "-cp", "{dir}", "{class}"), ("javac", "{source}")
+        (),
+        ".java",
+        ("java", *JAVA_VM_OPTIONS, "-cp", "{dir}", "{class}"),
+        (
+            "javac",
+            *(f"-J{option}" for option in JAVA_VM_OPTIONS),
+            "-proc:none",
+            "-d",
+            "{dir}",
+            "{source}",
+        ),
     ),
     "c": LanguageSpec(
         (), ".c", ("{binary}",), ("gcc", "{source}", "-O0", "-o", "{binary}")
@@ -150,10 +167,20 @@ def execute_code(req: ExecutionRequest) -> dict:
     with tempfile.TemporaryDirectory(prefix="dabba-run-") as tmp:
         tmp_path = Path(tmp)
         class_name = "Main"
+        entry_point = class_name
         if language == "java":
-            match = re.search(r"public\s+class\s+([A-Za-z_$][\w$]*)", req.code)
+            declarations = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", "", req.code)
+            match = re.search(
+                r"\bpublic\s+(?:(?:final|abstract|sealed|non-sealed|strictfp)\s+)*"
+                r"(?:class|record|enum|interface)\s+([A-Za-z_$][\w$]*)",
+                declarations,
+            ) or re.search(
+                r"(?m)^\s*(?:final\s+)?class\s+([A-Za-z_$][\w$]*)", declarations
+            )
             if match:
                 class_name = match.group(1)
+            package = re.search(r"(?m)^\s*package\s+([\w$.]+)\s*;", declarations)
+            entry_point = f"{package.group(1)}.{class_name}" if package else class_name
         source = (
             tmp_path / f"{class_name if language == 'java' else 'main'}{spec.extension}"
         )
@@ -165,7 +192,7 @@ def execute_code(req: ExecutionRequest) -> dict:
             "dir": str(tmp_path),
             "binary": str(binary),
             "jar": str(jar),
-            "class": class_name,
+            "class": entry_point,
         }
         run_kwargs = {
             "cwd": str(tmp_path),
@@ -242,9 +269,24 @@ def create_execution_router(
     async def authorize(request: Request) -> Optional[str]:
         return await auth(request) if auth else None
 
+    def execution_unavailable_reason(request: Request) -> Optional[str]:
+        if not request.app.state.config.enable_local_code_execution:
+            return "API code execution is disabled"
+        client_host = request.client.host if request.client else ""
+        try:
+            is_local = ipaddress.ip_address(client_host).is_loopback
+        except ValueError:
+            is_local = client_host == "localhost"
+        if not is_local:
+            return "Code execution is restricted to local clients"
+        return None
+
     @router.get("/languages")
-    async def languages(_: Optional[str] = Depends(authorize)):
-        return {"languages": available_languages()}
+    async def languages(request: Request, _: Optional[str] = Depends(authorize)):
+        return {
+            "languages": available_languages(),
+            "unavailableReason": execution_unavailable_reason(request),
+        }
 
     @router.post("/execute")
     async def execute(
@@ -252,15 +294,9 @@ def create_execution_router(
         request: Request,
         api_key: Optional[str] = Depends(authorize),
     ):
-        client_host = request.client.host if request.client else ""
-        try:
-            is_local = ipaddress.ip_address(client_host).is_loopback
-        except ValueError:
-            is_local = client_host == "localhost"
-        if not is_local:
-            raise HTTPException(
-                status_code=403, detail="Code execution is restricted to local clients"
-            )
+        unavailable_reason = execution_unavailable_reason(request)
+        if unavailable_reason:
+            raise HTTPException(status_code=403, detail=unavailable_reason)
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
         try:

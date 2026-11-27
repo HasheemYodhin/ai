@@ -6,10 +6,10 @@ httpx>=0.25,<1
 requests>=2.31,<3
 beautifulsoup4>=4.12,<5
 PyYAML>=6,<7
+tzdata>=2025.2
 numpy>=1.24,<3
-openai>=1.30,<3
-anthropic>=0.30,<1
-google-generativeai>=0.8,<1
+openai>=1.66,<3  # Responses API
+anthropic>=0.112,<1  # output_config.effort + refusal fallbacks
 mcp>=1,<2
 PyMuPDF>=1.23,<2
 pdfminer.six>=20221105
@@ -22,6 +22,7 @@ opentelemetry-api>=1.25,<2
 opentelemetry-sdk>=1.25,<2
 opentelemetry-exporter-otlp>=1.25,<2
 cryptography>=50,<51
+psycopg[binary,pool]>=3.2,<4
 
 # CLI (dabba/cli/tui.py, output_handler.py) — imported unconditionally at
 # module load, not behind a try/except, so a missing install here doesn't

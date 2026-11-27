@@ -1,4 +1,4 @@
-"""SQLite persistence and shared helpers for Dabba platform services."""
+"""Persistence and shared helpers for Dabba platform services."""
 
 from __future__ import annotations
 
@@ -8,11 +8,16 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
 from dabba.utils.paths import get_dabba_config_dir
+from dabba.platform.postgres import (
+    PostgresConnection,
+    database_url,
+    postgres_platform_schema,
+)
 
 
 def utc_ms() -> int:
@@ -96,6 +101,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency
 ON tasks(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_tasks_user_updated ON tasks(user_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS model_usage (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_tokens INTEGER NOT NULL,
+    completion_tokens INTEGER NOT NULL,
+    cost_usd REAL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_model_usage_user ON model_usage(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS guest_usage (
+    key TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    window_start INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS task_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id TEXT NOT NULL,
@@ -127,6 +149,7 @@ CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     email TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
+    bio TEXT NOT NULL DEFAULT '',
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'member',
     disabled INTEGER NOT NULL DEFAULT 0,
@@ -431,9 +454,11 @@ CREATE TABLE IF NOT EXISTS scheduled_skills (
     name TEXT NOT NULL,
     skill_name TEXT NOT NULL,
     instructions TEXT NOT NULL,
+    model TEXT,
     cadence TEXT NOT NULL,
     interval_minutes INTEGER,
     time_of_day TEXT,
+    time_zone TEXT NOT NULL DEFAULT 'UTC',
     weekdays_json TEXT NOT NULL DEFAULT '[]',
     enabled INTEGER NOT NULL DEFAULT 1,
     next_run_at INTEGER,
@@ -466,32 +491,69 @@ ON scheduled_skill_runs(schedule_id, started_at DESC);
 
 
 class PlatformStore:
-    """Small thread-safe SQLite store with explicit transaction boundaries."""
+    """Thread-safe platform store with explicit transaction boundaries."""
 
-    def __init__(self, path: Optional[Path] = None):
+    def __init__(
+        self, path: Optional[Path] = None, *, postgres_url: Optional[str] = None
+    ):
         self.path = Path(path or (get_platform_data_dir() / "platform.db"))
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.postgres_url = (
+            postgres_url
+            if postgres_url is not None
+            else (database_url() if path is None else "")
+        )
+        if not self.postgres_url:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._pool_postgres = postgres_url is None
         self.initialize()
 
-    def connect(self) -> sqlite3.Connection:
+    def connect(self) -> sqlite3.Connection | PostgresConnection:
+        if self.postgres_url:
+            return PostgresConnection(self.postgres_url, pooled=self._pool_postgres)
         conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
+    # Columns added after a table first shipped. CREATE TABLE IF NOT EXISTS does
+    # not touch a table that already exists, so databases created earlier get
+    # these added here. (table, column, SQL type); names are constants.
+    _ADDED_COLUMNS = (
+        ("users", "bio", "TEXT NOT NULL DEFAULT ''"),
+        ("scheduled_skills", "model", "TEXT"),
+        ("scheduled_skills", "time_zone", "TEXT NOT NULL DEFAULT 'UTC'"),
+    )
+
     def initialize(self) -> None:
+        if self.postgres_url:
+            with self.transaction() as conn:
+                conn.execute(postgres_platform_schema(SCHEMA))
+                for table, column, sql_type in self._ADDED_COLUMNS:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {sql_type}"
+                    )
+            return
         with self._lock, self.connect() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(SCHEMA)
+            for table, column, sql_type in self._ADDED_COLUMNS:
+                existing = {
+                    row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+                }
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
+    def transaction(self) -> Iterator[sqlite3.Connection | PostgresConnection]:
+        with nullcontext() if self.postgres_url else self._lock:
             conn = self.connect()
             try:
-                conn.execute("BEGIN IMMEDIATE")
+                if isinstance(conn, PostgresConnection):
+                    conn.begin_write()
+                else:
+                    conn.execute("BEGIN IMMEDIATE")
                 yield conn
                 conn.commit()
             except Exception:
@@ -503,14 +565,20 @@ class PlatformStore:
     def fetchone(
         self, query: str, params: tuple[Any, ...] = ()
     ) -> Optional[Dict[str, Any]]:
-        with self._lock, self.connect() as conn:
+        with (
+            nullcontext() if self.postgres_url else self._lock,
+            closing(self.connect()) as conn,
+        ):
             row = conn.execute(query, params).fetchone()
             return dict(row) if row else None
 
     def fetchall(
         self, query: str, params: tuple[Any, ...] = ()
     ) -> list[Dict[str, Any]]:
-        with self._lock, self.connect() as conn:
+        with (
+            nullcontext() if self.postgres_url else self._lock,
+            closing(self.connect()) as conn,
+        ):
             return [dict(row) for row in conn.execute(query, params).fetchall()]
 
     def audit(

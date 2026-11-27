@@ -3,7 +3,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
+from dabba.api.chat_endpoints import _create_chat_task
 from dabba.platform.coding import CodeIndexService
 from dabba.platform.core import PlatformStore
 from dabba.platform.provider_gateway import ProviderFailure, ProviderGateway
@@ -51,7 +53,27 @@ def test_server_identity_sessions_are_hashed_and_revocable(store):
     user = identity.signup("Hasheem", "hasheem@example.com", "a-secure-password")
     session = identity.login("hasheem@example.com", "a-secure-password")
 
+    before = store.fetchone(
+        "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+    )
     assert identity.authenticate(session["token"])["id"] == user["id"]
+    assert (
+        store.fetchone(
+            "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+        )
+        == before
+    )
+    with store.transaction() as conn:
+        conn.execute(
+            "UPDATE sessions SET last_seen_at=0 WHERE id=?", (session["sessionId"],)
+        )
+    assert identity.authenticate(session["token"])["id"] == user["id"]
+    assert (
+        store.fetchone(
+            "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+        )["last_seen_at"]
+        > 0
+    )
     row = store.fetchone("SELECT password_hash FROM users WHERE id=?", (user["id"],))
     assert "a-secure-password" not in row["password_hash"]
 
@@ -649,3 +671,270 @@ def test_scheduled_skill_dispatch_and_execution_history(store):
     assert completed["status"] == "completed"
     assert completed["output"]["content"] == "Done: Summarize project status"
     assert schedules.get(schedule["id"], user["id"])["lastStatus"] == "completed"
+
+
+def test_scheduled_skill_keeps_its_own_model(store):
+    user = IdentityService(store).signup(
+        "Scheduler", "model@example.com", "a-secure-password"
+    )
+    schedules = ScheduledSkillService(store)
+    schedule = schedules.create(
+        user["id"],
+        "Daily words",
+        "Words",
+        "Give 5 new words",
+        cadence="daily",
+        time_of_day="08:00",
+        model="some-provider/some-model",
+    )
+    assert schedule["model"] == "some-provider/some-model"
+    updated = schedules.update(schedule["id"], user["id"], {"model": "another-model"})
+    assert updated["model"] == "another-model"
+    # A blank model means "use the server default".
+    assert schedules.update(schedule["id"], user["id"], {"model": ""})["model"] is None
+
+
+def test_scheduled_skill_prompt_carries_the_date_and_earlier_results(store):
+    user = IdentityService(store).signup(
+        "Scheduler", "context@example.com", "a-secure-password"
+    )
+    schedules = ScheduledSkillService(store)
+    schedule = schedules.create(
+        user["id"],
+        "Daily words",
+        "Words",
+        "Give 5 new words",
+        cadence="interval",
+        interval_minutes=5,
+    )
+    first = schedules.dispatch(schedule["id"], user["id"])
+    schedules.execute(
+        first["id"], user["id"], lambda prompt: "1. ephemeral 2. ubiquitous"
+    )
+    second = schedules.dispatch(schedule["id"], user["id"])
+
+    prompt = schedules.prompt_with_context(schedule, user["id"], second["id"])
+
+    assert prompt.startswith("Give 5 new words")
+    assert "Today's date is" in prompt
+    assert "ephemeral" in prompt and "Do not repeat" in prompt
+    # The first run has nothing earlier to avoid.
+    assert "Earlier results" not in schedules.prompt_with_context(
+        schedule, user["id"], first["id"]
+    )
+
+
+def test_existing_database_gains_the_schedule_model_column(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """CREATE TABLE scheduled_skills (
+            id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL,
+            skill_name TEXT NOT NULL, instructions TEXT NOT NULL, cadence TEXT NOT NULL,
+            interval_minutes INTEGER, time_of_day TEXT,
+            weekdays_json TEXT NOT NULL DEFAULT '[]', enabled INTEGER NOT NULL DEFAULT 1,
+            next_run_at INTEGER, last_run_at INTEGER, last_status TEXT,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+        INSERT INTO scheduled_skills VALUES
+            ('old','u','Old','Old','do it','daily',NULL,'09:00','[]',1,1,NULL,NULL,1,1);"""
+    )
+    conn.commit()
+    conn.close()
+
+    store = PlatformStore(str(path))
+    store.initialize()
+    store.initialize()  # safe to run again on every start
+
+    row = store.fetchone("SELECT * FROM scheduled_skills WHERE id='old'")
+    assert row["model"] is None and row["name"] == "Old"
+
+
+def test_usage_summary_totals_recorded_tokens_per_model(store):
+    identity = IdentityService(store)
+    user = identity.signup("Counter", "counter@example.com", "a-secure-password")
+    other = identity.signup("Other", "other@example.com", "a-secure-password")
+    now = 1_700_000_000_000
+    with store.transaction() as conn:
+        for index, (owner, model, prompt, completion) in enumerate(
+            [
+                (user["id"], "model-a", 100, 50),
+                (user["id"], "model-a", 10, 5),
+                (user["id"], "model-b", 1, 2),
+                (
+                    other["id"],
+                    "model-a",
+                    999,
+                    999,
+                ),  # someone else's usage is never counted
+            ]
+        ):
+            conn.execute(
+                "INSERT INTO tasks (id,kind,status,request_json,progress,created_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (f"t{index}", "chat", "completed", "{}", 1.0, now, now),
+            )
+            conn.execute(
+                "INSERT INTO model_usage (task_id,user_id,model,prompt_tokens,completion_tokens,created_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (f"t{index}", owner, model, prompt, completion, now),
+            )
+
+    summary = TaskOrchestrator(store).usage_summary(user["id"])
+
+    assert summary["replies"] == 3
+    assert summary["promptTokens"] == 111 and summary["completionTokens"] == 57
+    assert summary["totalTokens"] == 168
+    assert [item["model"] for item in summary["byModel"]] == ["model-a", "model-b"]
+    assert (
+        summary["byModel"][0]["tokens"] == 165 and summary["byModel"][0]["replies"] == 2
+    )
+    assert TaskOrchestrator(store).usage_summary("nobody")["totalTokens"] == 0
+
+
+def test_chat_usage_limits_roll_forward_per_account(store, monkeypatch):
+    tasks = TaskOrchestrator(store)
+    now = 1_700_000_000_000
+    hour = 3_600_000
+    user = IdentityService(store).signup(
+        "Counter", "quota@example.com", "a-secure-password"
+    )
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_5H", "10")
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_DAILY", "0")
+    monkeypatch.setenv("DABBA_CHAT_TOKEN_LIMIT_WEEKLY", "1000")
+    monkeypatch.setattr("dabba.platform.services.TaskOrchestrator", lambda: tasks)
+    for age in (4, 5, 25, 168):
+        monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now - age * hour)
+        task = tasks.create("chat", {}, user_id=user["id"], model="test")
+        tasks.transition(task["id"], "running")
+        tasks.transition(
+            task["id"],
+            "completed",
+            result={
+                "usage": {"prompt_tokens": 6, "completion_tokens": 4},
+            },
+            record_model_usage=True,
+        )
+
+    monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now)
+    assert [limit["usedTokens"] for limit in tasks.chat_usage_limits(user["id"])] == [
+        10,
+        20,
+        30,
+    ]
+    assert [
+        limit["usedTokens"] for limit in tasks.chat_usage_limits("another-user")
+    ] == [0, 0, 0]
+    request = SimpleNamespace(state=SimpleNamespace(dabba_user=user), headers={})
+    chat = SimpleNamespace(stream=False, effort=None, model="test")
+    with pytest.raises(HTTPException, match="5-hour chat token limit") as error:
+        _create_chat_task(request, chat)
+    assert error.value.status_code == 429
+
+    monkeypatch.setattr("dabba.platform.services.utc_ms", lambda: now + hour)
+    assert _create_chat_task(request, chat) is not None
+
+
+def test_first_signup_becomes_owner_and_later_ones_are_members(store):
+    identity = IdentityService(store)
+    owner = identity.signup("Owner", "owner@example.com", "owner-password-1")
+    member = identity.signup("Guest", "guest@example.com", "guest-password-1")
+    assert owner["role"] == "admin"
+    assert member["role"] == "member"
+    # Logging in never changes roles while an owner exists.
+    assert (
+        identity.login("guest@example.com", "guest-password-1")["user"]["role"]
+        == "member"
+    )
+
+
+def test_oldest_account_claims_owner_when_install_has_none(store):
+    identity = IdentityService(store)
+    first = identity.signup("First", "first@example.com", "first-password-1")
+    second = identity.signup("Second", "second@example.com", "second-password-1")
+    # Simulate an install created before first-account-owner existed.
+    with store.transaction() as conn:
+        conn.execute("UPDATE users SET role='member'")
+
+    # A newer account logging in does not claim it...
+    assert (
+        identity.login("second@example.com", "second-password-1")["user"]["role"]
+        == "member"
+    )
+    # ...the oldest one does, and only once.
+    assert (
+        identity.login("first@example.com", "first-password-1")["user"]["role"]
+        == "admin"
+    )
+    assert identity.get_user(second["id"])["role"] == "member"
+    assert identity.get_user(first["id"])["role"] == "admin"
+
+
+def test_task_creation_can_reject_duplicate_request_ids(store):
+    tasks = TaskOrchestrator(store)
+    task = tasks.create("chat", {}, user_id="owner", idempotency_key="turn")
+    with pytest.raises(FileExistsError):
+        tasks.create(
+            "chat", {}, user_id="owner", idempotency_key="turn", reject_duplicate=True
+        )
+    assert (
+        tasks.create("chat", {}, user_id="owner", idempotency_key="turn")["id"]
+        == task["id"]
+    )
+
+
+def test_stale_scheduler_poll_does_not_dispatch_same_occurrence_twice(store):
+    user = IdentityService(store).signup(
+        "Scheduler", "poll@example.com", "a-secure-password"
+    )
+    schedules = ScheduledSkillService(store)
+    schedule = schedules.create(
+        user["id"],
+        "Daily brief",
+        "Brief",
+        "Summarize",
+        cadence="interval",
+        interval_minutes=5,
+        next_run_at=1,
+    )
+    assert len(schedules.dispatch_due()) == 1
+    with pytest.raises(KeyError):
+        schedules.dispatch(schedule["id"], user["id"], "schedule", expected_at=1)
+    assert len(schedules.runs(user["id"], schedule["id"], 10)) == 1
+    reopened = ScheduledSkillService(store)
+    (run,) = reopened.queued_runs()
+    assert (
+        reopened.execute(run["id"], user["id"], lambda _: "done")["status"]
+        == "completed"
+    )
+    assert reopened.queued_runs() == []
+    assert (
+        reopened.execute(run["id"], user["id"], lambda _: pytest.fail("ran twice"))[
+            "status"
+        ]
+        == "completed"
+    )
+
+
+def test_scheduled_skills_keep_wall_time_across_daylight_saving(store):
+    from datetime import datetime, timezone
+
+    def epoch(iso):
+        return int(
+            datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).timestamp() * 1000
+        )
+
+    schedules = ScheduledSkillService(store)
+    winter = schedules._next_run(
+        "daily", epoch("2026-01-01T00:00"), None, "08:00", None, "America/New_York"
+    )
+    summer = schedules._next_run(
+        "daily", epoch("2026-07-01T00:00"), None, "08:00", None, "America/New_York"
+    )
+    assert winter == epoch("2026-01-01T13:00")
+    assert summer == epoch("2026-07-01T12:00")
+    monday = schedules._next_run(
+        "weekly", epoch("2026-11-29T00:00"), None, "08:00", [0], "Asia/Kolkata"
+    )
+    assert monday == epoch("2026-11-30T02:30")

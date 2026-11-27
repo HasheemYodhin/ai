@@ -39,9 +39,9 @@ press **F2** in the TUI) to switch.
 
 | Provider | Example model | Needs API key? | Good for |
 |---|---|---|---|
-| Anthropic | `claude-sonnet-4-6` | Yes | **Real agentic work** — editing files, running commands, multi-step tasks |
+| Anthropic | `claude-sonnet-5-5` | Yes | **Real agentic work** — editing files, running commands, multi-step tasks |
 | NVIDIA NIM | `meta/llama-3.3-70b-instruct` | Yes (free tier) | Free alternative to Claude, reliable tool use |
-| OpenAI | `gpt-4o` | Yes | General coding, reasoning |
+| OpenAI | `gpt-6.2-sol` | Yes | General coding, reasoning |
 | Google | `gemini-2.5-pro` | Yes | Long-context tasks (1M tokens) |
 | Ollama | `llama3.3` (local) | No | Free, offline, moderate reliability |
 | **dabba** (own model) | `dabba` | No | Casual chat only — **see limitation below** |
@@ -56,7 +56,7 @@ generating a real answer. This is expected behavior for a model this size,
 not a bug.
 
 **For anything beyond casual chat — editing files, running shell commands,
-multi-step tasks — switch the model chip to `claude-sonnet-4-6` or
+multi-step tasks — switch the model chip to `claude-sonnet-5-5` or
 `meta/llama-3.3-70b-instruct`.** The `dabba` model will remain available for
 casual conversation and as the target of future fine-tuning (see
 `train_dabba_colab.ipynb`).
@@ -178,3 +178,24 @@ Runs 100% offline once loaded — no Ollama, no internet required.
 | VSCode extension icon missing | `Ctrl+Shift+P → Reload Window` after installing/updating the extension |
 | Wrong identity ("I'm Claude" instead of "I'm Dabba") | Fixed as of the persona system prompt update — restart the server if you still see this |
 | Chat history gone after reload | Should now persist automatically — if not, check `workspaceState` wasn't cleared |
+
+### API sessions and local administration
+
+Sign up in the web app first. To grant an existing account access to agent tools
+and server-wide settings, run this on the server with the same `DABBA_DATA_DIR`
+used by the API.
+
+```bash
+python3 -m dabba.platform.accounts you@example.com --role admin
+```
+
+API clients can call `POST /v1/platform/identity/login` with an email and password,
+then send the returned session `token` as `Authorization: Bearer <token>`. In the
+VS Code extension, set this token in the existing Authorization Key field.
+Reset an account's password and revoke its sessions with
+`python3 -m dabba.platform.accounts you@example.com --reset-password`.
+
+The server binds to loopback by default. Set `DABBA_CORS_ORIGINS` to a
+comma-separated list of frontend origins for deployments that serve the web
+app separately. Use `DABBA_MASTER_KEY` from your secret manager when provisioning
+a vault. Keep the same key for an existing vault so its secrets remain readable.

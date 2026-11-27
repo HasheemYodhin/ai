@@ -7,10 +7,16 @@ responses, fully compatible with the OpenAI API format.
 
 import asyncio
 import json
+import logging
 import re
+import time
+from contextlib import aclosing
+from threading import Event
 from typing import AsyncGenerator, Dict, Iterator, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+from typing import Literal
 
 from dabba.api.openai_compat import (
     ChatCompletionChoice,
@@ -22,6 +28,10 @@ from dabba.api.openai_compat import (
 from dabba.api.auth import ApiKeyAuth
 from dabba.api.rate_limiter import RateLimiter
 from dabba.api.streaming_handler import StreamingHandler
+from dabba.providers.base import ReasoningDelta
+from dabba.providers.nvidia_provider import FLUX_IMAGE_MODEL
+
+logger = logging.getLogger(__name__)
 
 
 def _content_to_text(content) -> str:
@@ -40,7 +50,7 @@ def _content_to_text(content) -> str:
             for p in content
             if isinstance(p, dict) and p.get("type") == "text"
         )
-    return str(content)
+    return "" if content is None else str(content)
 
 
 def _sampling_kwargs(req: ChatCompletionRequest) -> Dict:
@@ -89,6 +99,51 @@ class ChatEndpoint:
         )
 
 
+class ChatMessageInput(BaseModel):
+    role: Literal["system", "developer", "user", "assistant", "tool", "function"]
+    content: str | list[dict] | None = None
+    name: str | None = None
+    tool_calls: list[dict] | None = None
+    tool_call_id: str | None = None
+
+
+class ChatRequestInput(BaseModel):
+    model: str = Field(default="dabba", min_length=1, max_length=256)
+    messages: list[ChatMessageInput] = Field(min_length=1, max_length=1000)
+    temperature: float | None = Field(default=0.7, ge=0, le=2)
+    top_p: float | None = Field(default=0.9, ge=0, le=1)
+    max_tokens: int | None = Field(default=None, ge=1, le=32768)
+    stream: bool = False
+
+
+async def _read_chat_request(request: Request) -> ChatCompletionRequest:
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > 16 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Chat payload exceeds 16 MiB")
+        body.extend(chunk)
+
+    try:
+        payload = json.loads(body)
+        validated = ChatRequestInput.model_validate(payload)
+        for message in validated.messages:
+            if message.content is None and not (
+                message.role == "assistant" and message.tool_calls
+            ):
+                raise HTTPException(
+                    status_code=422, detail="Chat message content is required"
+                )
+            if len(_content_to_text(message.content)) > 600_000:
+                raise HTTPException(
+                    status_code=422, detail="Chat message exceeds 600,000 characters"
+                )
+        return ChatCompletionRequest.from_dict({**payload, **validated.model_dump()})
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=422, detail="Invalid chat completion request"
+        ) from exc
+
+
 def create_chat_router(
     model_engine: Optional[object] = None,
     auth: Optional[ApiKeyAuth] = None,
@@ -114,9 +169,8 @@ def create_chat_router(
 
     @router.post("/chat/completions")
     async def chat_completions(
-        body: Dict,
         request: Request,
-        api_key: Optional[str] = Depends(lambda: None),
+        api_key: Optional[str] = Depends(get_auth),
     ):
         """
         Create a chat completion.
@@ -125,22 +179,23 @@ def create_chat_router(
         the OpenAI chat completion format.
 
         Args:
-            body: Request body as a dictionary.
             request: FastAPI request object.
 
         Returns:
             ChatCompletionResponse for non-streaming, or
             StreamingResponse for streaming requests.
         """
-        try:
-            req = ChatCompletionRequest.from_dict(body)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        req = await _read_chat_request(request)
+        if req.model.casefold() == FLUX_IMAGE_MODEL:
+            raise HTTPException(
+                400,
+                "FLUX.1-dev generates images. Send the prompt to /v1/images/generations.",
+            )
 
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
 
-        task_context = _create_chat_task(request, req)
+        task_context = await asyncio.to_thread(_create_chat_task, request, req)
         if req.stream:
             return await _handle_streaming_chat(req, model_engine, task_context)
         else:
@@ -148,9 +203,8 @@ def create_chat_router(
 
     @router.post("/chat/completions/stream")
     async def chat_completions_stream(
-        body: Dict,
         request: Request,
-        api_key: Optional[str] = Depends(lambda: None),
+        api_key: Optional[str] = Depends(get_auth),
     ):
         """
         Streaming chat completion endpoint.
@@ -158,10 +212,12 @@ def create_chat_router(
         Forces streaming even if the request specifies stream=False.
         Useful for clients that want explicit streaming endpoints.
         """
-        try:
-            req = ChatCompletionRequest.from_dict(body)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        req = await _read_chat_request(request)
+        if req.model.casefold() == FLUX_IMAGE_MODEL:
+            raise HTTPException(
+                400,
+                "FLUX.1-dev generates images. Send the prompt to /v1/images/generations.",
+            )
 
         req.stream = True
 
@@ -169,7 +225,7 @@ def create_chat_router(
             await rate_limiter.check_request(request, api_key)
 
         return await _handle_streaming_chat(
-            req, model_engine, _create_chat_task(request, req)
+            req, model_engine, await asyncio.to_thread(_create_chat_task, request, req)
         )
 
     return router
@@ -206,7 +262,9 @@ async def _handle_nonstreaming_chat(
     # of any in-flight chat request).
     if task_context:
         tasks, task_id = task_context
-        tasks.transition(task_id, "running", current_step="Generating response")
+        await asyncio.to_thread(
+            tasks.transition, task_id, "running", current_step="Generating response"
+        )
     try:
         response_text = await asyncio.to_thread(
             _generate_response,
@@ -222,7 +280,9 @@ async def _handle_nonstreaming_chat(
             from dabba.platform.provider_gateway import normalize_provider_error
 
             failure = normalize_provider_error(exc, model=req.model)
-            tasks.transition(task_id, "failed", error=failure.as_dict())
+            await asyncio.to_thread(
+                tasks.transition, task_id, "failed", error=failure.as_dict()
+            )
         raise
 
     # Real usage when the provider reported it; a word-count estimate
@@ -258,9 +318,11 @@ async def _handle_nonstreaming_chat(
 
     payload = response.to_dict()
     if task_context:
-        tasks.transition(
+        await asyncio.to_thread(
+            tasks.transition,
             task_id,
             "completed",
+            record_model_usage=True,
             result={
                 "content": response_text,
                 "usage": usage_holder,
@@ -290,39 +352,78 @@ async def _handle_streaming_chat(
 
     # Preserve multimodal content (see the non-streaming handler for why).
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    tasks = task_id = None
+    if task_context:
+        tasks, task_id = task_context
+        await asyncio.to_thread(
+            tasks.transition, task_id, "running", current_step="Streaming response"
+        )
 
     async def event_stream() -> AsyncGenerator[str, None]:
         handler = StreamingHandler(model_name=req.model)
-        tasks = task_id = None
-        if task_context:
-            tasks, task_id = task_context
-            tasks.transition(task_id, "running", current_step="Streaming response")
+        if task_id:
             yield f": dabba-task-id={task_id}\n\n"
 
         if req.model and not req.model.startswith("dabba"):
             usage_holder: Dict[str, int] = {}
             complete_text = ""
             event_buffer = ""
+            started = last_checkpoint = time.monotonic()
+            first_seen = False
             try:
-                async for token in _stream_provider_response(
-                    req, messages, model_engine, usage_holder
-                ):
-                    complete_text += token
-                    event_buffer += token
-                    if tasks and len(event_buffer) >= 500:
-                        tasks.append_event(
-                            task_id, "task.output.delta", {"content": event_buffer}
-                        )
-                        event_buffer = ""
-                    yield handler.create_chunk(token, index=0)
+                async with aclosing(
+                    _stream_provider_response(req, messages, model_engine, usage_holder)
+                ) as upstream:
+                    async for token in upstream:
+                        if token is None:
+                            yield ": keepalive\n\n"
+                            continue
+                        if not first_seen:
+                            # Where "it is slow" comes from: how long the provider took to
+                            # start answering. A large model with a deep reasoning setting
+                            # can take many seconds here before any text exists.
+                            first_seen = True
+                            logger.info(
+                                "chat first output: model=%s after=%.1fs kind=%s",
+                                req.model,
+                                time.monotonic() - started,
+                                "reasoning"
+                                if isinstance(token, ReasoningDelta)
+                                else "text",
+                            )
+                        if isinstance(token, ReasoningDelta):
+                            yield handler.create_chunk("", reasoning=token)
+                            continue
+                        complete_text += token
+                        event_buffer += token
+                        yield handler.create_chunk(token, index=0)
+                        now = time.monotonic()
+                        if (
+                            tasks
+                            and len(event_buffer) >= 500
+                            and now - last_checkpoint >= 2
+                        ):
+                            await asyncio.to_thread(
+                                tasks.append_event,
+                                task_id,
+                                "task.output.delta",
+                                {"content": event_buffer},
+                            )
+                            event_buffer = ""
+                            last_checkpoint = now
                 if tasks:
                     if event_buffer:
-                        tasks.append_event(
-                            task_id, "task.output.delta", {"content": event_buffer}
+                        await asyncio.to_thread(
+                            tasks.append_event,
+                            task_id,
+                            "task.output.delta",
+                            {"content": event_buffer},
                         )
-                    tasks.transition(
+                    await asyncio.to_thread(
+                        tasks.transition,
                         task_id,
                         "completed",
+                        record_model_usage=True,
                         result={
                             "content": complete_text,
                             "usage": usage_holder,
@@ -335,14 +436,16 @@ async def _handle_streaming_chat(
                 yield "data: [DONE]\n\n"
             except asyncio.CancelledError:
                 if tasks:
-                    tasks.cancel(task_id)
+                    await asyncio.to_thread(tasks.cancel, task_id)
                 raise
             except Exception as exc:
                 from dabba.platform.provider_gateway import normalize_provider_error
 
                 failure = normalize_provider_error(exc, model=req.model)
                 if tasks:
-                    tasks.transition(task_id, "failed", error=failure.as_dict())
+                    await asyncio.to_thread(
+                        tasks.transition, task_id, "failed", error=failure.as_dict()
+                    )
                 yield f"data: {json.dumps({'error': failure.as_dict()})}\n\n"
                 yield "data: [DONE]\n\n"
             return
@@ -363,39 +466,30 @@ async def _handle_streaming_chat(
                 usage_holder,
             )
         )
-        while not response_task.done():
-            yield ": keepalive\n\n"
-            await asyncio.sleep(10)
-
         try:
+            while not response_task.done():
+                done, _ = await asyncio.wait({response_task}, timeout=10)
+                if not done:
+                    yield ": keepalive\n\n"
             response_text = await response_task
+        except (asyncio.CancelledError, GeneratorExit):
+            response_task.cancel()
+            if tasks:
+                await asyncio.to_thread(tasks.cancel, task_id)
+            raise
         except Exception as exc:
             if tasks:
                 from dabba.platform.provider_gateway import normalize_provider_error
 
-                tasks.transition(
+                await asyncio.to_thread(
+                    tasks.transition,
                     task_id,
                     "failed",
                     error=normalize_provider_error(exc, model=req.model).as_dict(),
                 )
             raise
 
-        # Chunk for the typewriter effect while PRESERVING all whitespace —
-        # newlines and indentation carry the structure of YAML/JSON/code, so
-        # `str.split()` (which collapses every run of whitespace into one space)
-        # would flatten a Pod manifest onto a single line. Splitting on the
-        # capture group keeps each whitespace run as its own token instead.
-        tokens = [t for t in re.split(r"(\s+)", response_text) if t != ""]
-
-        try:
-            for token in tokens:
-                yield handler.create_chunk(token, index=0)
-                await asyncio.sleep(0.01)
-        except asyncio.CancelledError:
-            if tasks:
-                tasks.cancel(task_id)
-            raise
-
+        # Save the completed response before playback so a lost stream can recover it.
         # Local dabba model never populates usage_holder — fall back to the
         # same word-count estimate the non-streaming path uses.
         if not usage_holder:
@@ -409,8 +503,14 @@ async def _handle_streaming_chat(
             }
 
         if tasks:
-            tasks.append_event(task_id, "task.output.delta", {"content": response_text})
-            tasks.transition(
+            await asyncio.to_thread(
+                tasks.append_event,
+                task_id,
+                "task.output.delta",
+                {"content": response_text},
+            )
+            await asyncio.to_thread(
+                tasks.transition,
                 task_id,
                 "completed",
                 result={
@@ -419,6 +519,16 @@ async def _handle_streaming_chat(
                     "model": req.model,
                 },
             )
+        # Chunk for the typewriter effect while PRESERVING all whitespace —
+        # newlines and indentation carry the structure of YAML/JSON/code, so
+        # `str.split()` (which collapses every run of whitespace into one space)
+        # would flatten a Pod manifest onto a single line. Splitting on the
+        # capture group keeps each whitespace run as its own token instead.
+        tokens = [t for t in re.split(r"(\s+)", response_text) if t != ""]
+        for token in tokens:
+            yield handler.create_chunk(token, index=0)
+            await asyncio.sleep(0.01)
+
         yield handler.create_chunk(
             "", index=0, finish_reason="stop", usage=usage_holder
         )
@@ -437,32 +547,55 @@ async def _handle_streaming_chat(
 
 def _create_chat_task(request: Request, req: ChatCompletionRequest):
     """Create a durable task when the caller supplies a valid Dabba session."""
-    token = request.headers.get("x-dabba-session", "")
-    if not token:
+    user = getattr(request.state, "dabba_user", None)
+    if not user:
         return None
-    try:
-        from dabba.platform.services import IdentityService, TaskOrchestrator
+    from dabba.platform.services import TaskOrchestrator
 
-        user = IdentityService().authenticate(token)
-        if not user:
-            return None
-        tasks = TaskOrchestrator()
+    tasks = TaskOrchestrator()
+    idempotency_key = request.headers.get("x-idempotency-key")
+    if idempotency_key and len(idempotency_key) > 128:
+        raise HTTPException(
+            status_code=400, detail="Chat request identifier is too long"
+        )
+    exhausted = [
+        limit
+        for limit in tasks.chat_usage_limits(user["id"])
+        if limit["limitTokens"] and limit["usedTokens"] >= limit["limitTokens"]
+    ]
+    if exhausted:
+        blocking = max(exhausted, key=lambda limit: limit.get("retryAt") or 0)
+        retry_at = blocking.get("retryAt")
+        headers = None
+        if retry_at:
+            seconds = max(1, (retry_at - int(time.time() * 1000) + 999) // 1000)
+            headers = {"Retry-After": str(seconds)}
+        raise HTTPException(
+            status_code=429,
+            detail=f"{blocking['label']} chat token limit reached. Try again when older usage expires.",
+            headers=headers,
+        )
+    try:
         task = tasks.create(
             "chat",
             {
-                "messages": [
-                    {"role": message.role, "content": message.content}
-                    for message in req.messages
-                ],
                 "stream": req.stream,
                 "effort": req.effort,
             },
             user_id=user["id"],
             model=req.model,
-            idempotency_key=request.headers.get("x-idempotency-key"),
+            idempotency_key=idempotency_key,
+            reject_duplicate=bool(idempotency_key),
         )
         return tasks, task["id"]
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="This chat request was already submitted. Open the existing turn or regenerate it.",
+        ) from exc
     except Exception:
+        if idempotency_key:
+            raise
         # Durable tracking must never make a previously valid chat unavailable.
         return None
 
@@ -472,7 +605,7 @@ async def _stream_provider_response(
     messages: list,
     model_engine: Optional[object],
     usage_out: Optional[Dict[str, int]] = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[Optional[str], None]:
     del model_engine
     from dabba.api.agent_endpoints import _get_agent_proxy
 
@@ -480,26 +613,43 @@ async def _stream_provider_response(
     registry = proxy._get_provider_registry()
     resolved_effort = req.effort or getattr(proxy.cli_config, "effort", "medium")
     overrides = {k: v for k, v in _sampling_kwargs(req).items() if v is not None}
+    cancelled = Event()
     iterator = registry.stream_chat(
         messages,
         model=req.model,
         effort=resolved_effort,
         usage_out=usage_out,
+        cancel_event=cancelled,
+        include_reasoning=True,
         **overrides,
     )
 
-    pending = asyncio.create_task(asyncio.to_thread(_next_stream_token, iterator))
-    while True:
-        done, _ = await asyncio.wait({pending}, timeout=10)
-        if not done:
-            yield ""
-            continue
+    pending = None
+    try:
+        while True:
+            pending = asyncio.create_task(
+                asyncio.to_thread(_next_stream_token, iterator)
+            )
+            while not pending.done():
+                done, _ = await asyncio.wait({pending}, timeout=10)
+                if not done:
+                    yield None
+            has_token, token = pending.result()
+            if not has_token:
+                break
+            yield token
+    finally:
+        cancelled.set()
 
-        has_token, token = pending.result()
-        if not has_token:
-            break
-        yield token
-        pending = asyncio.create_task(asyncio.to_thread(_next_stream_token, iterator))
+        def close_iterator(task=None):
+            if task is not None and not task.cancelled():
+                task.exception()
+            iterator.close()
+
+        if pending and not pending.done():
+            pending.add_done_callback(close_iterator)
+        else:
+            close_iterator()
 
 
 def _generate_response(

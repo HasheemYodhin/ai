@@ -1,14 +1,22 @@
-import { useMemo, useState, useCallback } from 'react'
+import { memo, useMemo, useState, useCallback, useDeferredValue, useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark, oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { SyntaxHighlighter } from '@/lib/syntaxHighlighter'
+import oneDark from 'react-syntax-highlighter/dist/esm/styles/prism/one-dark'
+import oneLight from 'react-syntax-highlighter/dist/esm/styles/prism/one-light'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import type { Components } from 'react-markdown'
-import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X } from 'lucide-react'
+import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loader2, TerminalSquare, X, Lock, CircleHelp, ExternalLink } from 'lucide-react'
 import { useTheme } from '@/hooks/useTheme'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
-import { apiClient } from '@/api/client'
+import { apiClient, type CodeExecutionStatus } from '@/api/client'
+import { downloadJavaSource } from '@/lib/download'
+import { javaPlaygroundUrl } from '@/lib/javaPlayground'
+import { useAuth } from '@/hooks/useAuth'
+import { runBrowserPython, type BrowserCodeResult } from '@/lib/browserPython'
 
 // Blocks at or above this size open as a compact artifact card (see
 // ArtifactPanel) instead of rendering the full code inline — keeps long
@@ -19,6 +27,11 @@ const RUNNABLE_LANGUAGES = new Set([
   'java', 'c', 'cpp', 'c++', 'cc', 'go', 'golang', 'rust', 'rs', 'ruby', 'rb',
   'php', 'bash', 'sh', 'shell', 'zsh', 'kotlin', 'kt', 'swift',
 ])
+const LANGUAGE_ALIASES: Record<string, string> = {
+  py: 'python', python3: 'python', js: 'javascript', node: 'javascript',
+  ts: 'typescript', tsx: 'typescript', 'c++': 'cpp', cc: 'cpp', golang: 'go',
+  rs: 'rust', rb: 'ruby', sh: 'bash', shell: 'bash', zsh: 'bash', kt: 'kotlin',
+}
 
 function guessTitle(language: string, code: string): string {
   const firstLine = code.split('\n', 1)[0]?.trim() ?? ''
@@ -32,7 +45,13 @@ interface MarkdownRendererProps {
   className?: string
 }
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+const REMARK_PLUGINS = [remarkGfm, remarkMath]
+
+export const MarkdownRenderer = memo(MarkdownRendererImpl)
+
+function MarkdownRendererImpl({ content, className }: MarkdownRendererProps) {
+  // Parsing a long reply is slow; deferring it keeps typing and scrolling responsive.
+  const deferredContent = useDeferredValue(content)
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
@@ -60,7 +79,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     },
     table({ children }) {
       return (
-        <div className="overflow-x-auto my-4">
+        <div tabIndex={0} role="region" aria-label="Table" className="my-4 max-w-full overflow-x-auto">
           <table className="min-w-full border-collapse border border-border dark:border-border-dark">
             {children}
           </table>
@@ -69,14 +88,14 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     },
     th({ children }) {
       return (
-        <th className="border border-border dark:border-border-dark bg-gray-50 dark:bg-gray-800 px-3 py-2 text-left text-sm font-semibold">
+        <th className="border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary min-w-[5.5rem] px-2 py-2 text-left text-xs font-semibold [overflow-wrap:anywhere] sm:px-3 sm:text-sm">
           {children}
         </th>
       )
     },
     td({ children }) {
       return (
-        <td className="border border-border dark:border-border-dark px-3 py-2 text-sm">
+        <td className="border border-border dark:border-border-dark min-w-[5.5rem] px-2 py-2 align-top text-xs [overflow-wrap:anywhere] sm:px-3 sm:text-sm">
           {children}
         </td>
       )
@@ -126,7 +145,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     },
     blockquote({ children }) {
       return (
-        <blockquote className="border-l-4 border-accent pl-4 my-2 italic text-text-secondary dark:text-text-dark-secondary">
+        <blockquote className="border-l-4 border-accent pl-4 my-2 text-text-secondary dark:text-text-dark-secondary">
           {children}
         </blockquote>
       )
@@ -137,12 +156,13 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
   }), [isDark])
 
   return (
-    <div className={cn('prose prose-sm max-w-none dark:prose-invert', className)}>
+    <div className={cn('prose prose-sm w-full min-w-0 max-w-full [overflow-wrap:anywhere] dark:prose-invert', className)}>
       <ReactMarkdown
         components={components}
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={[[rehypeKatex, { trust: false, maxExpand: 1000, maxSize: 20 }]]}
       >
-        {content}
+        {deferredContent}
       </ReactMarkdown>
     </div>
   )
@@ -154,10 +174,44 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [running, setRunning] = useState(false)
   const [stdinOpen, setStdinOpen] = useState(false)
   const [stdin, setStdin] = useState('')
-  const [result, setResult] = useState<{ exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated?: boolean; durationMs: number; phase?: string } | null>(null)
+  const [result, setResult] = useState<BrowserCodeResult | null>(null)
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
-  const canRun = RUNNABLE_LANGUAGES.has(language.toLowerCase())
+  const { isAdmin, currentUser } = useAuth()
+  const [executionAccess, setExecutionAccess] = useState<(CodeExecutionStatus & { userId: string }) | null>(null)
+  const userId = currentUser?.id
+  const languageLabel = language.toLowerCase()
+  const runtime = LANGUAGE_ALIASES[languageLabel] ?? languageLabel
+  const isRunnableLanguage = RUNNABLE_LANGUAGES.has(languageLabel)
+  const canRunInBrowser = runtime === 'python' && typeof WebAssembly !== 'undefined'
+  const runtimeStatus = executionAccess?.languages.find(item => typeof item === 'string' ? item === runtime : item.id === runtime)
+  const runtimeMissing = executionAccess?.languages.length && (!runtimeStatus || (typeof runtimeStatus === 'object' && !runtimeStatus.available))
+  const runController = useRef<AbortController | null>(null)
+  useEffect(() => () => runController.current?.abort(), [])
+  const runDisabledReason = !isAdmin
+    ? 'Only the workspace owner can run code'
+    : executionAccess && executionAccess.userId === userId
+      ? executionAccess.unavailableReason ?? (runtimeMissing
+        ? runtime === 'java' ? 'Java JDK is missing on the local Dabba server' : `${language} runtime is missing on the local Dabba server`
+        : null)
+      : 'Checking code execution availability'
+  const useBrowserRunner = canRunInBrowser && runDisabledReason !== null
+  const canRun = useBrowserRunner || (isRunnableLanguage && runDisabledReason === null)
+  const useJavaPlayground = runtime === 'java' && !canRun && (!isAdmin || executionAccess?.userId === userId)
+  const playgroundUrl = useMemo(() => useJavaPlayground ? javaPlaygroundUrl(code) : '', [code, useJavaPlayground])
+
+  useEffect(() => {
+    if (!isAdmin || !userId || !isRunnableLanguage) return
+    const controller = new AbortController()
+    apiClient.getCodeExecutionStatus(controller.signal)
+      .then(status => setExecutionAccess({ userId, ...status }))
+      .catch(error => {
+        if (!controller.signal.aborted) {
+          setExecutionAccess({ userId, languages: [], unavailableReason: error instanceof Error ? error.message : 'Could not check code execution availability' })
+        }
+      })
+    return () => controller.abort()
+  }, [isAdmin, userId, isRunnableLanguage])
 
   const handleCopy = useCallback(async () => {
     try {
@@ -176,25 +230,56 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   }, [openArtifact, code, language, title])
 
   const handleRun = useCallback(async () => {
+    if (!canRun || runController.current) return
+    const controller = new AbortController()
+    runController.current = controller
     setRunning(true)
     setRunError('')
     setResult(null)
     try {
-      setResult(await apiClient.executeCode(language, code, stdin))
+      const result = useBrowserRunner
+        ? await runBrowserPython(code, stdin, controller.signal)
+        : await apiClient.executeCode(language, code, stdin, controller.signal)
+      if (!controller.signal.aborted) setResult(result)
     } catch (error) {
-      setRunError(error instanceof Error ? error.message : 'Execution failed')
+      if (!controller.signal.aborted) setRunError(error instanceof Error ? error.message : 'Execution failed')
     } finally {
-      setRunning(false)
+      runController.current = null
+      if (!controller.signal.aborted) setRunning(false)
     }
-  }, [language, code, stdin])
+  }, [canRun, useBrowserRunner, language, code, stdin])
 
-  const runner = canRun ? (
+  const [showRunReason, setShowRunReason] = useState(false)
+  const runner = useJavaPlayground ? (
+    <>
+      <a href={playgroundUrl} target="_blank" rel="noopener noreferrer" aria-label="Run in JavaFiddle"
+        title="Open JavaFiddle with this code" className="flex items-center gap-1.5 rounded bg-accent px-2 py-1 text-xs font-medium text-white hover:bg-accent-hover">
+        <Play className="h-3.5 w-3.5" aria-hidden="true" /> Run <ExternalLink className="h-3 w-3" aria-hidden="true" />
+      </a>
+      <button type="button" onClick={() => setShowRunReason(value => !value)} aria-expanded={showRunReason}
+        aria-label="Java run options" title="Java run options" className="rounded p-1 text-accent hover:bg-accent/10">
+        <CircleHelp className="h-4 w-4" aria-hidden="true" />
+      </button>
+    </>
+  ) : isRunnableLanguage && !canRun && runDisabledReason ? (
+    <button
+      type="button"
+      onClick={() => setShowRunReason(value => !value)}
+      aria-expanded={showRunReason}
+      title={runDisabledReason}
+      aria-label={`Why Run is unavailable: ${runDisabledReason}`}
+      className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent/10 text-accent"
+    >
+      <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+      Run
+    </button>
+  ) : canRun ? (
     <>
       <button
         onClick={handleRun}
         disabled={running}
-        title={`Run ${language} locally`}
-        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-green-600 hover:bg-green-700 disabled:opacity-40 text-white transition-colors"
+        title={useBrowserRunner ? "Run Python in this browser" : `Run ${language} on the local server`}
+        className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium bg-accent hover:bg-accent-hover disabled:opacity-40 text-white transition-colors"
       >
         {running ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
         {running ? 'Running' : 'Run'}
@@ -209,7 +294,18 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
     </>
   ) : null
 
-  const executionPanel = canRun && (stdinOpen || result || runError) && (
+  const executionPanel = !canRun && showRunReason ? (
+    <div className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
+      <p role="status">{runDisabledReason}. {runtime === 'java'
+        ? 'Run opens JavaFiddle with your code in the editor.'
+        : 'Python snippets can run in a supported browser. Other runtimes require the owner’s local server.'}</p>
+      {runtime === 'java' && (
+        <div className="mt-2 flex flex-wrap gap-3">
+          <button type="button" onClick={() => downloadJavaSource(code)} className="font-medium text-accent underline">Download Java source</button>
+        </div>
+      )}
+    </div>
+  ) : canRun && (stdinOpen || result || runError) && (
     <div className="border-t border-border dark:border-border-dark bg-gray-950 text-gray-100">
       {stdinOpen && (
         <div className="p-3 border-b border-gray-800">
@@ -219,7 +315,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
             onChange={e => setStdin(e.target.value)}
             placeholder="Input passed to the program…"
             rows={3}
-            className="w-full resize-y rounded border border-gray-700 bg-gray-900 px-2.5 py-2 font-mono text-xs outline-none focus:border-green-500"
+            className="w-full resize-y rounded border border-gray-700 bg-gray-900 px-2.5 py-2 font-mono text-xs outline-none focus:border-accent"
           />
         </div>
       )}
@@ -273,7 +369,7 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
 
   return (
     <div className="my-4 rounded-lg overflow-hidden border border-border dark:border-border-dark">
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800/50 border-b border-border dark:border-border-dark">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary dark:bg-surface-dark-tertiary/50 border-b border-border dark:border-border-dark">
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCollapsed(!collapsed)}

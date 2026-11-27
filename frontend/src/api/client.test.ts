@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiClient } from './client'
+import { loadUsageStats } from '@/lib/usageStats'
 
 describe('ApiClient platform contracts', () => {
   beforeEach(() => {
@@ -33,6 +34,45 @@ describe('ApiClient platform contracts', () => {
 
     await expect(client.signup('New User', 'new@example.com', 'long-password'))
       .rejects.toThrow('Cannot reach the Dabba backend')
+  })
+
+  it('turns a Render HTML gateway page into a short usage error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html><body>Bad Gateway</body></html>', {
+      status: 502, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    })))
+    const client = new ApiClient('http://dabba.test')
+    await expect(client.fetchUsage()).rejects.toThrow('Dabba is temporarily unavailable (HTTP 502). Please try again.')
+  })
+
+  it('loads complete usage statistics in one request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      conversationCount: 2, messageCount: 8, totalTokens: 50,
+      promptTokens: 20, completionTokens: 30, byModel: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadUsageStats('user_1')).resolves.toMatchObject({
+      totalConversations: 2, totalMessages: 8, totalTokens: 50,
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([200, 401])('clears an expired session after a %s restore response', async status => {
+    localStorage.setItem('dabba-session-token', 'expired-token')
+    const fetchMock = vi.fn().mockResolvedValue(new Response('null', { status }))
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new ApiClient('http://dabba.test')
+
+    await expect(client.currentUser()).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://dabba.test/v1/platform/identity/me?restore=true',
+      expect.objectContaining({
+        cache: 'no-store',
+        headers: expect.objectContaining({ Authorization: 'Bearer expired-token' }),
+      }),
+    )
+    expect(localStorage.getItem('dabba-session-token')).toBeNull()
+    await expect(client.currentUser()).resolves.toBeNull()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('requests approval mode for web agent calls', async () => {

@@ -94,7 +94,7 @@ const PROCESS_TERMINAL = new Set(['exited', 'failed'])
  * Mount this once near the app root so it's active for every conversation,
  * independent of which page/tab is open.
  */
-export function useProcessNotifications(pollIntervalMs = 4000) {
+export function useProcessNotifications(enabled: boolean, pollIntervalMs = 4000) {
   const { settings } = useSettings()
   const seenStatus = useRef<Map<string, string>>(new Map())
   const [notices, setNotices] = useState<RunNotice[]>([])
@@ -104,11 +104,25 @@ export function useProcessNotifications(pollIntervalMs = 4000) {
   }, [])
 
   useEffect(() => {
+    // /v1/agent/processes is admin-only: polling it as a regular user only
+    // produced a stream of 403s, so non-admins never start the timer.
+    if (!enabled) return
     let cancelled = false
+    let failures = 0
+    let timer = 0
     const poll = async () => {
       let processes: Array<{ process_id: string; command: string; status: string }> = []
-      try { processes = await apiClient.listBackgroundProcesses() }
-      catch { return } // best-effort; a transient network error shouldn't spam anything
+      try {
+        processes = await apiClient.listBackgroundProcesses()
+        failures = 0
+      } catch {
+        // Best-effort: tolerate a transient network error, but stop after
+        // repeated failures (e.g. session expired or role revoked) instead of
+        // polling a failing endpoint forever.
+        failures += 1
+        if (failures >= 3) window.clearInterval(timer)
+        return
+      }
       if (cancelled) return
 
       const transitions: RunNotice[] = []
@@ -132,10 +146,10 @@ export function useProcessNotifications(pollIntervalMs = 4000) {
       if (transitions.length) setNotices(prev => [...transitions, ...prev].slice(0, 4))
     }
 
-    const timer = window.setInterval(poll, pollIntervalMs)
+    timer = window.setInterval(poll, pollIntervalMs)
     void poll()
     return () => { cancelled = true; window.clearInterval(timer) }
-  }, [pollIntervalMs, settings.desktopNotifications])
+  }, [enabled, pollIntervalMs, settings.desktopNotifications])
 
   return { notices, dismiss }
 }

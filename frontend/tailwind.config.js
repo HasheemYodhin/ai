@@ -9,40 +9,46 @@ export default {
     extend: {
       colors: {
         surface: {
+          // Landing page palette: white cards on an off-white page.
           DEFAULT: '#ffffff',
-          secondary: '#f7f6f4',
-          tertiary: '#eeece8',
+          secondary: '#f2f1ef',
+          tertiary: '#e7e5e1',
           dark: '#000000',
           'dark-secondary': '#0a0a0a',
           'dark-tertiary': '#171717',
         },
         border: {
-          DEFAULT: '#e5e2dc',
+          DEFAULT: '#e2dfd9',
           dark: '#262626',
         },
+        // The user's accent color. The variables are set from Settings (see
+        // src/lib/accent.ts); the defaults in globals.css are the original orange.
         accent: {
-          DEFAULT: '#2f9e5c',
-          hover: '#268049',
-          light: '#d7f0e0',
-          'dark-hover': '#4cbf7c',
+          DEFAULT: 'rgb(var(--accent-rgb) / <alpha-value>)',
+          hover: 'rgb(var(--accent-hover-rgb) / <alpha-value>)',
+          light: 'rgb(var(--accent-light-rgb) / <alpha-value>)',
+          'dark-hover': 'rgb(var(--accent-dark-hover-rgb) / <alpha-value>)',
         },
+        // Secondary/tertiary meet WCAG AA (4.5:1) on every surface color of
+        // their theme, including surface-tertiary hover/chip backgrounds.
         text: {
-          primary: '#1f1e1d',
-          secondary: '#6b6a66',
-          tertiary: '#9a988f',
+          primary: '#141414',
+          secondary: '#56554f', // ~7.4 white, ~6.6 secondary, ~5.9 tertiary
+          tertiary: '#615f5a', // ~6.4 white, ~5.7 secondary, ~5.1 tertiary
           'dark-primary': '#f5f5f5',
           'dark-secondary': '#a3a3a3',
-          'dark-tertiary': '#737373',
+          'dark-tertiary': '#858585', // 5.69 black, 5.37 dark-secondary, 4.86 dark-tertiary
         },
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Geist', 'system-ui', '-apple-system', 'sans-serif'],
+        display: ['"Inter Tight"', 'Geist', 'system-ui', 'sans-serif'],
+        mono: ['Geist Mono', 'ui-monospace', 'monospace'],
       },
       animation: {
-        'fade-in': 'fadeIn 0.15s ease-out',
-        'slide-up': 'slideUp 0.2s ease-out',
-        'slide-in-right': 'slideInRight 0.2s ease-out',
+        'fade-in': 'fadeIn 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-up': 'slideUp 300ms cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-in-right': 'slideInRight 300ms cubic-bezier(0.22, 1, 0.36, 1)',
         'pulse-dot': 'pulseDot 1.4s infinite ease-in-out',
         'shimmer': 'shimmer 2s infinite linear',
       },

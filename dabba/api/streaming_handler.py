@@ -128,6 +128,7 @@ class StreamingHandler:
         index: int = 0,
         finish_reason: Optional[str] = None,
         usage: Optional[Dict[str, int]] = None,
+        reasoning: Optional[str] = None,
     ) -> str:
         """
         Create a single SSE chunk for a token.
@@ -148,7 +149,11 @@ class StreamingHandler:
             choices=[
                 {
                     "index": index,
-                    "delta": {"content": token},
+                    "delta": (
+                        {"reasoning_content": reasoning}
+                        if reasoning is not None
+                        else {"content": token}
+                    ),
                     "finish_reason": finish_reason,
                 }
             ],

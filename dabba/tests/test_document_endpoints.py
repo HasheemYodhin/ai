@@ -177,12 +177,12 @@ def test_extract_zip_ignores_unsafe_member_paths():
     assert "must not be read" not in text
 
 
-def test_zip_upload_policy_accepts_reported_size_over_one_gibibyte():
+def test_zip_upload_policy_accepts_size_at_limit():
     content = _office_package({"notes.txt": "large archive metadata test"})
     upload = UploadFile(
         io.BytesIO(content),
         filename="large.zip",
-        size=2 * 1024 * 1024 * 1024,
+        size=MAX_ZIP_FILE_BYTES,
     )
 
     text, truncated = extract_uploaded_file(upload)
@@ -191,7 +191,7 @@ def test_zip_upload_policy_accepts_reported_size_over_one_gibibyte():
     assert truncated is False
 
 
-def test_zip_upload_policy_rejects_files_over_ten_gibibytes():
+def test_zip_upload_policy_rejects_files_over_limit():
     content = _office_package({"notes.txt": "too large"})
     upload = UploadFile(
         io.BytesIO(content),
@@ -199,5 +199,5 @@ def test_zip_upload_policy_rejects_files_over_ten_gibibytes():
         size=MAX_ZIP_FILE_BYTES + 1,
     )
 
-    with pytest.raises(ValueError, match="10 GB"):
+    with pytest.raises(ValueError, match="100 MiB"):
         extract_uploaded_file(upload)

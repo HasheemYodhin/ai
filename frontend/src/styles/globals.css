@@ -2,13 +2,57 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Named text styles for the frontend. Each maps to one
+ * Tailwind type step and weight, so pages never mix ad hoc sizes.
+ */
+@layer components {
+  .heading-1 { @apply text-6xl font-semibold; }
+  .heading-2 { @apply text-5xl font-semibold; }
+  .heading-3 { @apply text-4xl font-semibold; }
+  .heading-4 { @apply text-3xl font-semibold; }
+  .heading-5 { @apply text-2xl font-semibold; }
+  .heading-6 { @apply text-xl font-semibold; }
+  .title-1 { @apply text-xl font-medium; }
+  .title-2 { @apply text-lg font-medium; }
+  .title-3 { @apply text-base font-medium; }
+  .title-4 { @apply text-sm font-medium; }
+  .title-5 { @apply text-xs font-medium; }
+  .body-1 { @apply text-base font-semibold; }
+  .body-2 { @apply text-base font-medium; }
+  .body-3 { @apply text-base font-normal; }
+  .body-4 { @apply text-sm font-semibold; }
+  .body-5 { @apply text-sm font-medium; }
+  .body-6 { @apply text-sm font-normal; }
+  .button-lg { @apply text-lg font-semibold; }
+  .button-md { @apply text-base font-semibold; }
+  .button-sm { @apply text-sm font-semibold; }
+  .button-xsm { @apply text-xs font-semibold; }
+  .caption-1 { @apply text-sm font-medium; }
+  .caption-2 { @apply text-sm font-normal; }
+  .caption-3 { @apply text-xs font-semibold; }
+  .caption-4 { @apply text-xs font-medium; }
+  .caption-5 { @apply text-xs font-normal; }
+
+  /* Hero heading: the one place a gradient is allowed, and only on text. */
+  .hero-heading-gradient {
+    background-image: linear-gradient(to right, #000000, #666666);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .dark .hero-heading-gradient {
+    background-image: linear-gradient(to right, #ffffff, #9b9b9b);
+  }
+}
+
 @layer base {
   :root {
     --color-bg: 250 249 247;
     --color-surface: 255 255 255;
     --color-border: 229 226 220;
     --color-text: 31 30 29;
-    --color-text-secondary: 107 106 102;
+    --color-text-secondary: 95 94 90;
   }
 
   .dark {
@@ -75,18 +119,25 @@
   }
 
   .glass-card-user {
-    background: theme('colors.accent.DEFAULT');
-    border: 1px solid transparent;
+    background: theme('colors.surface.tertiary');
+    color: theme('colors.text.primary');
   }
 
-  .glass-card-bot {
-    background: theme('colors.surface.secondary');
+  .dark .glass-card-user {
+    background: theme('colors.surface.dark-tertiary');
+    color: theme('colors.text.dark-primary');
+  }
+
+  .composer {
+    background: theme('colors.surface.DEFAULT');
     border: 1px solid rgb(var(--color-border));
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
   }
 
-  .dark .glass-card-bot {
+  .dark .composer {
     background: theme('colors.surface.dark-tertiary');
     border: 1px solid theme('colors.border.dark');
+    box-shadow: none;
   }
 
   .glass-input {
@@ -157,24 +208,36 @@
     background-size: 200% 100%;
   }
 
-  .typing-indicator {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 4px;
+  .thinking-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: currentColor;
+    animation: thinkPulse 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
 
-  .typing-indicator span {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    @apply bg-accent/60;
-    animation: pulseDot 1.4s infinite ease-in-out;
+  /* Dot that trails the last line of a reply while it is still streaming. */
+  .streaming-cursor > :last-child:not(div, pre, table, ul, ol)::after,
+  .streaming-cursor > :is(ul, ol):last-child > li:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: 6px;
+    border-radius: 9999px;
+    background: currentColor;
+    vertical-align: middle;
+    animation: thinkPulse 1.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   }
 
-  .typing-indicator span:nth-child(1) { animation-delay: 0s; }
-  .typing-indicator span:nth-child(2) { animation-delay: 0.16s; }
-  .typing-indicator span:nth-child(3) { animation-delay: 0.32s; }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-dot,
+    .streaming-cursor > :last-child::after,
+    .streaming-cursor > :is(ul, ol):last-child > li:last-child::after {
+      animation: none;
+    }
+  }
 }
 
 @layer utilities {
@@ -192,7 +255,103 @@
   }
 }
 
+@keyframes thinkPulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.5; }
+  50% { transform: scale(1); opacity: 1; }
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* Keyboard focus ring. Declared after the utilities so it beats `outline-none`
+   (same specificity, later wins). :focus-visible only matches keyboard focus
+   for these controls, so mouse clicks don't show a ring. Text fields are
+   excluded: browsers treat every click into them as focus-visible, and they
+   already show a focus border of their own. */
+:where(button, a[href], summary, select, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]:not(input):not(textarea)):focus-visible {
+  outline: 2px solid #2f9e5c;
+  outline-offset: 2px;
+}
+
+.dark :where(button, a[href], summary, select, [role="button"], [role="menuitem"], [role="option"], [role="tab"], [tabindex]:not(input):not(textarea)):focus-visible {
+  outline-color: #4cbf7c;
+}
+
+/* Landing page motion. Uses the standalone `translate` property so it
+   composes with Tailwind transforms (centering, hover scale). */
+@keyframes lpRise {
+  from { opacity: 0; translate: 0 14px; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes lpFloat {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -8px; }
+}
+.lp-rise { animation: lpRise 700ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lp-float { animation: lpFloat 6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .lp-rise, .lp-float { animation: none; }
+}
+
+/* ── Landing / login / signup theme ─────────────────────────────────────
+   Light is the default. `html.dark` flips the page, cards and ink.
+   `.lp-light` pins a subtree to the light set (cards on the orange
+   gradient); `.lp-dark` pins one to the dark set (the black bands). */
+.lp-theme,
+.lp-light {
+  --lp-page: #f2f1ef;
+  --lp-card: #ffffff;
+  --lp-soft: #f2f1ef;
+  --lp-soft-2: #e7e5e1;
+  --lp-hover: #e7e5e1;
+  --lp-ink: #141414;
+  --lp-ink-2: #3d3c39;
+  --lp-muted: #5f5e5a;
+  --lp-line: rgba(0, 0, 0, 0.1);
+  --lp-dot: #c9c6c0;
+  --lp-btn: #141414;
+  --lp-btn-text: #ffffff;
+  --lp-accent-text: #c2410c;
+}
+.lp-theme {
+  --lp-band: #141414;
+  --lp-band-line: #2b2b2b;
+  color-scheme: light;
+}
+html.dark .lp-theme {
+  --lp-page: #0a0a0a;
+  --lp-card: #151515;
+  --lp-soft: #232323;
+  --lp-soft-2: #1c1c1c;
+  --lp-hover: #2e2e2e;
+  --lp-ink: #f5f5f5;
+  --lp-ink-2: #d4d4d4;
+  --lp-muted: #a3a3a3;
+  --lp-line: rgba(255, 255, 255, 0.12);
+  --lp-dot: #525252;
+  --lp-btn: #f5f5f5;
+  --lp-btn-text: #141414;
+  --lp-accent-text: #ff7a4d;
+  --lp-band: #1c1c1c;
+  --lp-band-line: #2e2e2e;
+  color-scheme: dark;
+}
+.lp-dark {
+  --lp-ink: #f5f5f5;
+  --lp-ink-2: #d4d4d4;
+  --lp-muted: #a3a3a3;
+  --lp-line: rgba(255, 255, 255, 0.12);
+  --lp-btn: #f5f5f5;
+  --lp-btn-text: #141414;
+}
+
+/* Accent color defaults (the original orange). Settings > General can override
+   these on <html>; see src/lib/accent.ts. Space separated so Tailwind can add alpha. */
+:root {
+  --accent-rgb: 207 68 25;
+  --accent-hover-rgb: 178 58 20;
+  --accent-light-rgb: 255 228 216;
+  --accent-dark-hover-rgb: 255 122 77;
 }
