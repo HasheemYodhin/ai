@@ -1,4 +1,4 @@
-"""Persist web chat history in SQLite, scoped to the authenticated user."""
+"""Persist web chat history scoped to the authenticated user."""
 
 from __future__ import annotations
 
@@ -10,12 +10,19 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from dabba.platform.core import get_platform_data_dir
+from dabba.platform.postgres import (
+    PostgresConnection,
+    database_url,
+    initialize_postgres_conversations,
+)
 from dabba.platform.services import IdentityService
 
 DB_PATH = get_platform_data_dir() / "conversations.db"
 
 
-def _get_db() -> sqlite3.Connection:
+def _get_db() -> sqlite3.Connection | PostgresConnection:
+    if url := database_url():
+        return PostgresConnection(url)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -49,6 +56,13 @@ def _get_db() -> sqlite3.Connection:
                 )""")
                 conn.execute("PRAGMA user_version = 2")
     return conn
+
+
+def _begin_write(conn: sqlite3.Connection | PostgresConnection) -> None:
+    if isinstance(conn, PostgresConnection):
+        conn.begin_write()
+    else:
+        conn.execute("BEGIN IMMEDIATE")
 
 
 def _initialize_message_index(conn: sqlite3.Connection) -> None:
@@ -115,7 +129,7 @@ def _initialize_message_index(conn: sqlite3.Connection) -> None:
         raise
 
 
-def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
+def _row_to_dict(row: sqlite3.Row | dict) -> Dict[str, Any]:
     return {
         "id": row["id"],
         "title": row["title"],
@@ -129,7 +143,7 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     }
 
 
-def _row_to_summary(row: sqlite3.Row) -> Dict[str, Any]:
+def _row_to_summary(row: sqlite3.Row | dict) -> Dict[str, Any]:
     """Sidebar entry without message bodies (messages load when a chat opens)."""
     return {
         "id": row["id"],
@@ -160,6 +174,8 @@ class ConversationUpsert(BaseModel):
 def create_conversations_router() -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["conversations"])
     identity = IdentityService()
+    if url := database_url():
+        initialize_postgres_conversations(url)
 
     def authenticated_user(authorization: Optional[str]) -> Dict[str, Any]:
         if not authorization or not authorization.lower().startswith("bearer "):
@@ -170,7 +186,7 @@ def create_conversations_router() -> APIRouter:
         return user
 
     @router.get("/conversations")
-    async def list_conversations(
+    def list_conversations(
         user_id: str,
         include_messages: bool = True,
         authorization: Optional[str] = Header(default=None),
@@ -195,10 +211,13 @@ def create_conversations_router() -> APIRouter:
                 ).fetchall()
                 return {"conversations": [_row_to_dict(r) for r in rows]}
             # json_array_length avoids sending (or parsing in Python) the bodies.
+            messages = (
+                "messages::json" if isinstance(conn, PostgresConnection) else "messages"
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT id, title, created_at, updated_at, pinned, custom_title,
-                       project_id, revision, json_array_length(messages) AS message_count
+                       project_id, revision, json_array_length({messages}) AS message_count
                 FROM conversations WHERE user_id = ? ORDER BY updated_at DESC
                 """,
                 (user_id,),
@@ -220,20 +239,32 @@ def create_conversations_router() -> APIRouter:
             return {"matches": []}
         conn = _get_db()
         try:
+            if isinstance(conn, PostgresConnection):
+                content_position = "strpos(lower(m.content), ?)"
+                title_position = "strpos(lower(title), ?)"
+                snippet_start = "greatest(1, " + content_position + " - 45)"
+                json_object = "json_build_object"
+                message_id = "c.messages::json -> m.position ->> 'id'"
+            else:
+                content_position = "instr(lower(m.content), ?)"
+                title_position = "instr(lower(title), ?)"
+                snippet_start = "max(1, " + content_position + " - 45)"
+                json_object = "json_object"
+                message_id = "json_extract(c.messages, '$[' || m.position || '].id')"
             rows = conn.execute(
-                """WITH matches AS (
+                f"""WITH matches AS (
                        SELECT c.id, c.title, c.updated_at,
-                              (SELECT json_object(
-                                   'snippet', substr(m.content, max(1, instr(lower(m.content), ?) - 45), 150),
-                                   'messageId', json_extract(c.messages, '$[' || m.position || '].id')
-                               )
+                              (SELECT CAST({json_object}(
+                                   'snippet', substr(m.content, {snippet_start}, 150),
+                                   'messageId', {message_id}
+                               ) AS TEXT)
                                FROM messages m WHERE m.conversation_id = c.id
-                                 AND instr(lower(m.content), ?) > 0
+                                 AND {content_position} > 0
                                ORDER BY m.position DESC LIMIT 1) AS hit
                        FROM conversations c WHERE c.user_id = ?
                    )
                    SELECT id, hit FROM matches
-                   WHERE hit IS NOT NULL OR instr(lower(title), ?) > 0
+                   WHERE hit IS NOT NULL OR {title_position} > 0
                    ORDER BY updated_at DESC, id LIMIT ? OFFSET ?""",
                 (needle, needle, user["id"], needle, limit, offset),
             ).fetchall()
@@ -254,7 +285,7 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.get("/conversations/{conversation_id}")
-    async def get_conversation(
+    def get_conversation(
         conversation_id: str,
         authorization: Optional[str] = Header(default=None),
     ):
@@ -275,7 +306,7 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.put("/conversations/{conversation_id}")
-    async def upsert_conversation(
+    def upsert_conversation(
         conversation_id: str,
         body: ConversationUpsert,
         authorization: Optional[str] = Header(default=None),
@@ -290,7 +321,7 @@ def create_conversations_router() -> APIRouter:
 
         conn = _get_db()
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            _begin_write(conn)
             if conn.execute(
                 "SELECT 1 FROM conversation_deletions WHERE user_id=? AND id=?",
                 (user["id"], conversation_id),
@@ -353,10 +384,11 @@ def create_conversations_router() -> APIRouter:
         conn = _get_db()
         try:
             with conn:
-                conn.execute("BEGIN IMMEDIATE")
+                _begin_write(conn)
                 conn.execute(
-                    """INSERT OR IGNORE INTO conversation_deletions (user_id, id)
-                       SELECT user_id, id FROM conversations WHERE user_id=?""",
+                    """INSERT INTO conversation_deletions (user_id, id)
+                       SELECT user_id, id FROM conversations WHERE user_id=?
+                       ON CONFLICT(user_id, id) DO NOTHING""",
                     (user_id,),
                 )
                 deleted = conn.execute(
@@ -367,7 +399,7 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.delete("/conversations/{conversation_id}")
-    async def delete_conversation(
+    def delete_conversation(
         conversation_id: str,
         user_id: str,
         authorization: Optional[str] = Header(default=None),
@@ -379,6 +411,7 @@ def create_conversations_router() -> APIRouter:
             )
         conn = _get_db()
         try:
+            _begin_write(conn)
             cur = conn.execute(
                 "DELETE FROM conversations WHERE id = ? AND user_id = ?",
                 (conversation_id, user_id),
@@ -386,7 +419,8 @@ def create_conversations_router() -> APIRouter:
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Conversation not found")
             conn.execute(
-                "INSERT OR IGNORE INTO conversation_deletions (user_id, id) VALUES (?, ?)",
+                """INSERT INTO conversation_deletions (user_id, id) VALUES (?, ?)
+                   ON CONFLICT(user_id, id) DO NOTHING""",
                 (user_id, conversation_id),
             )
             conn.commit()

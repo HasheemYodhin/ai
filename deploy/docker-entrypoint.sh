@@ -4,7 +4,7 @@
 # write is copied back to R2. Without it, runs the server directly.
 set -eu
 
-if [ -z "${LITESTREAM_BUCKET:-}" ]; then
+if [ -n "${DATABASE_URL:-}" ] || [ -z "${LITESTREAM_BUCKET:-}" ]; then
   exec "$@"
 fi
 

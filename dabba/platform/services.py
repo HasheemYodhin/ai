@@ -10,7 +10,6 @@ import mimetypes
 import os
 import secrets
 import shutil
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -32,6 +31,8 @@ from dabba.platform.core import (
     resolve_workspace_directory,
     utc_ms,
 )
+from dabba.platform.postgres import PostgresConnection
+from sqlite3 import Connection as SQLiteConnection
 
 TASK_STATES = {
     "queued",
@@ -133,7 +134,7 @@ class TaskOrchestrator:
         model: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         reject_duplicate: bool = False,
-        connection: Optional[sqlite3.Connection] = None,
+        connection: Optional[SQLiteConnection | PostgresConnection] = None,
     ) -> Dict[str, Any]:
         task_id = new_id("task")
         now = utc_ms()
@@ -278,9 +279,9 @@ class TaskOrchestrator:
             )
             if record_usage:
                 conn.execute(
-                    """INSERT OR IGNORE INTO model_usage
+                    """INSERT INTO model_usage
                        (task_id, user_id, model, prompt_tokens, completion_tokens, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?)""",
+                       VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(task_id) DO NOTHING""",
                     (
                         task_id,
                         current["userId"],
@@ -308,13 +309,13 @@ class TaskOrchestrator:
         now = utc_ms()
         cutoffs = [now - hours * 3_600_000 for _, hours, _, _ in CHAT_USAGE_WINDOWS]
         totals = self.store.fetchone(
-            """SELECT COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS five_hour,
-                      COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS daily,
-                      COALESCE(SUM(tokens), 0) AS weekly
+            """SELECT CAST(COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS BIGINT) AS five_hour,
+                      CAST(COALESCE(SUM(CASE WHEN created_at > ? THEN tokens END), 0) AS BIGINT) AS daily,
+                      CAST(COALESCE(SUM(tokens), 0) AS BIGINT) AS weekly
                FROM (
                    SELECT created_at, prompt_tokens + completion_tokens AS tokens
                    FROM model_usage WHERE user_id=? AND created_at > ? AND created_at <= ?
-               )""",
+               ) AS usage""",
             (cutoffs[0], cutoffs[1], user_id, cutoffs[2], now),
         )
         limits = []
@@ -331,7 +332,7 @@ class TaskOrchestrator:
                             OVER (ORDER BY created_at) AS expired_tokens
                         FROM model_usage
                         WHERE user_id=? AND created_at>? AND created_at<=?
-                    ) WHERE expired_tokens>? ORDER BY created_at LIMIT 1""",
+                    ) AS usage WHERE expired_tokens>? ORDER BY created_at LIMIT 1""",
                     (user_id, cutoff, now, used - limit),
                 )
                 if row:
@@ -351,8 +352,8 @@ class TaskOrchestrator:
         """Token totals for a user, from the usage recorded for each finished chat."""
         rows = self.store.fetchall(
             """SELECT model, COUNT(*) AS replies,
-                      COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                      COALESCE(SUM(completion_tokens), 0) AS completion_tokens
+                      CAST(COALESCE(SUM(prompt_tokens), 0) AS BIGINT) AS prompt_tokens,
+                      CAST(COALESCE(SUM(completion_tokens), 0) AS BIGINT) AS completion_tokens
                FROM model_usage WHERE user_id=? GROUP BY model""",
             (user_id,),
         )
@@ -516,11 +517,11 @@ class TaskOrchestrator:
         cursor = conn.execute(
             """
             INSERT INTO task_events(task_id, event_type, payload_json, created_at)
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?) RETURNING id
             """,
             (task_id, kind, json_dumps(payload), now),
         )
-        return int(cursor.lastrowid)
+        return int(cursor.fetchone()["id"])
 
     @staticmethod
     def _decode(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -744,6 +745,7 @@ class IdentityService:
             raise ValueError("A valid name and email are required")
         user_id = new_id("user")
         now = utc_ms()
+        password_hash = self.hash_password(password)
         try:
             with self.store.transaction() as conn:
                 # The first account becomes the workspace owner (role
@@ -762,7 +764,7 @@ class IdentityService:
                         user_id,
                         normalized,
                         name.strip(),
-                        self.hash_password(password),
+                        password_hash,
                         now,
                         now,
                     ),
@@ -797,15 +799,16 @@ class IdentityService:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = utc_ms()
         session_id = new_id("session")
+        oldest_tiebreaker = "id" if self.store.postgres_url else "rowid"
         with self.store.transaction() as conn:
             # Installs created before "first account = owner" may have no
             # owner at all; the oldest account claims it on its next login.
             conn.execute(
-                """
+                f"""
                 UPDATE users SET role='admin', updated_at=?
                 WHERE id=?
                   AND NOT EXISTS (SELECT 1 FROM users WHERE role='admin' AND disabled=0)
-                  AND id=(SELECT id FROM users ORDER BY created_at, rowid LIMIT 1)
+                  AND id=(SELECT id FROM users ORDER BY created_at, {oldest_tiebreaker} LIMIT 1)
                 """,
                 (now, row["id"]),
             )
@@ -1468,14 +1471,20 @@ class MemoryService:
             raise ValueError(f"Unknown memory scope: {scope}")
         memory_id = new_id("memory")
         now = utc_ms()
+        conflict_target = (
+            "((COALESCE(user_id, '')), (COALESCE(workspace_id, '')), "
+            "(COALESCE(conversation_id, '')), scope, memory_key)"
+            if self.store.postgres_url
+            else ""
+        )
         with self.store.transaction() as conn:
             conn.execute(
-                """
+                f"""
                 INSERT INTO memories
                     (id, user_id, workspace_id, conversation_id, scope, memory_key,
                      content, metadata_json, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT DO UPDATE SET
+                ON CONFLICT {conflict_target} DO UPDATE SET
                     content=excluded.content,
                     metadata_json=excluded.metadata_json,
                     updated_at=excluded.updated_at

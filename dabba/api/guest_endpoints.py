@@ -86,16 +86,6 @@ class GuestUsage:
 
     def __init__(self, store: Optional[PlatformStore] = None):
         self.store = store or get_platform_store()
-        with self.store.transaction() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS guest_usage (
-                    key TEXT PRIMARY KEY,
-                    count INTEGER NOT NULL,
-                    window_start INTEGER NOT NULL
-                )
-                """
-            )
 
     @staticmethod
     def _count(conn, key: str, now: int, window_ms: Optional[int]) -> int:
@@ -115,12 +105,13 @@ class GuestUsage:
         ).fetchone()
         if row and (window_ms is None or now - row["window_start"] < window_ms):
             conn.execute(
-                "UPDATE guest_usage SET count=MAX(0, count + ?) WHERE key=?",
-                (delta, key),
+                "UPDATE guest_usage SET count=? WHERE key=?",
+                (max(0, row["count"] + delta), key),
             )
         elif delta > 0:
             conn.execute(
-                "INSERT OR REPLACE INTO guest_usage (key, count, window_start) VALUES (?, ?, ?)",
+                """INSERT INTO guest_usage (key, count, window_start) VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET count=excluded.count, window_start=excluded.window_start""",
                 (key, delta, now),
             )
 

@@ -28,6 +28,7 @@ from dabba.api.rate_limiter import RateLimiter
 from dabba.api.chat_endpoints import create_chat_router
 from dabba.api.embedding_endpoints import create_embedding_router
 from dabba.api.model_endpoints import create_model_router
+from dabba.platform.postgres import database_url
 
 
 class ModelEngine:
@@ -1032,7 +1033,9 @@ def create_app(
         try:
             from dabba.platform.core import get_platform_store
 
-            get_platform_store().fetchone("SELECT 1 AS ok")
+            await asyncio.to_thread(
+                lambda: get_platform_store().fetchone("SELECT 1 AS ok")
+            )
             storage_ready = True
         except Exception:
             storage_ready = False
@@ -1140,12 +1143,16 @@ def create_app(
     except Exception as _image_exc:
         logger.warning(f"Image endpoints unavailable: {_image_exc}")
 
-    # Server-side conversation storage for the web frontend (SQLite, scoped by user_id)
+    # Server-side conversation storage for the web frontend, scoped by user_id.
     try:
         from dabba.api.conversations_endpoints import create_conversations_router
 
         app.include_router(create_conversations_router())
     except Exception as _conv_exc:
+        if database_url():
+            raise RuntimeError(
+                "PostgreSQL conversation storage could not initialize."
+            ) from None
         logger.warning(f"Conversation endpoints unavailable: {_conv_exc}")
 
     # Free prompts for signed-out visitors on the public /try page.
@@ -1178,6 +1185,10 @@ def create_app(
 
         app.include_router(create_platform_router())
     except Exception as _platform_exc:
+        if database_url():
+            raise RuntimeError(
+                "PostgreSQL platform endpoints could not initialize."
+            ) from None
         logger.warning(f"Platform endpoints unavailable: {_platform_exc}")
 
     # User-configurable event hooks (session/tool-call shell commands)

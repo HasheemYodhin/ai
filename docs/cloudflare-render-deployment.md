@@ -151,6 +151,37 @@ time it took to restore. Keep the existing production disk available during
 a restore or rollback.
 
 
+### Optional PostgreSQL storage (Neon)
+
+SQLite is the default. Set `DATABASE_URL` to a PostgreSQL connection string to
+use PostgreSQL for platform records and conversations. For Render on Neon, use
+the pooled URL for the app and keep the TLS options supplied by Neon. Store the
+URL in Render's Environment settings as a secret. The server image includes
+the driver. For a local migration, install it with
+`python3 -m pip install 'psycopg[binary]>=3.2,<4'`.
+
+For an existing deployment, migrate before setting `DATABASE_URL` on the
+live service:
+
+1. Take consistent copies of `platform.db` and `conversations.db` while
+   writes are stopped, or restore both from the same backup. Retain the
+   originals and the existing `DABBA_MASTER_KEY`.
+2. From a trusted machine, set `DATABASE_URL` privately in your environment
+   to the direct URL for an empty Neon database. Run
+   `python3 -m dabba.platform.migrate_sqlite /path/to/snapshot-directory`
+   from the repo. The importer reads the snapshots without editing them,
+   copies both stores in one transaction, rebuilds the message index, and
+   refuses a destination containing Dabba data.
+3. Verify sign-in, chats, search, usage, and saved provider keys against a
+   test deployment before switching production. For the final migration,
+   stop writes and use fresh snapshots and an empty destination. Keep the
+   SQLite backup until you have verified the cutover. If you revert to that
+   backup, writes made after the cutover require separate reconciliation.
+
+PostgreSQL mode bypasses Litestream. Back up PostgreSQL separately, and keep
+the files under `DABBA_DATA_DIR` on persistent storage or back them up
+separately. Uploaded documents and artifact binaries still live there.
+
 ### 512 MB Render services
 
 Set `DABBA_LOW_MEMORY=true` on an existing Render service. The Blueprint includes

@@ -1499,7 +1499,7 @@ def create_platform_router() -> APIRouter:
         return await asyncio.to_thread(tasks.usage_summary, user["id"])
 
     @router.post("/identity/signup", status_code=201)
-    async def signup(body: SignupRequest):
+    def signup(body: SignupRequest):
         try:
             user = identity.signup(body.name, body.email, body.password)
             session = identity.login(body.email, body.password)
@@ -1508,7 +1508,7 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.post("/identity/login")
-    async def login(body: LoginRequest):
+    def login(body: LoginRequest):
         try:
             return identity.login(body.email, body.password)
         except ValueError as exc:
@@ -1541,7 +1541,7 @@ def create_platform_router() -> APIRouter:
         return profile
 
     @router.post("/identity/logout")
-    async def logout(authorization: Optional[str] = Header(default=None)):
+    def logout(authorization: Optional[str] = Header(default=None)):
         identity.logout(_bearer(authorization))
         return {"ok": True}
 
