@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+test.use({ locale: 'en-US', timezoneId: 'Asia/Kolkata' })
+
 test('find, save, branch, recover and share from the chat', async ({ page }) => {
   const shareId = 'q'.repeat(32)
   let shared = false
@@ -7,8 +9,8 @@ test('find, save, branch, recover and share from the chat', async ({ page }) => 
   const chat = {
     id: 'c1', title: 'Example chat', createdAt: 1, updatedAt: 2, revision: 1,
     messages: [
-      { id: 'm1', role: 'user', content: 'First needle', timestamp: 1 },
-      { id: 'm2', role: 'assistant', content: 'Second needle', timestamp: 2, sources: [
+      { id: 'm1', role: 'user', content: 'First needle', timestamp: Date.parse('2026-11-27T12:30:00Z') },
+      { id: 'm2', role: 'assistant', content: 'Second needle', timestamp: Date.parse('2026-11-27T12:32:00Z'), sources: [
         { kind: 'web', title: 'Example source', url: 'https://example.com' },
       ] },
       { id: 'm3', role: 'assistant', content: 'Partial reply', timestamp: 3, interrupted: true, recoveryRequestId: 'reply-fixture' },
@@ -61,6 +63,13 @@ test('find, save, branch, recover and share from the chat', async ({ page }) => 
   await page.goto('/c/c1')
   const reply = page.locator('#message-m2')
   await expect(reply).toBeVisible()
+  const sentTime = page.locator('#message-m1 time')
+  const replyTime = reply.locator('time')
+  await expect(sentTime).toBeVisible()
+  await expect(sentTime).toHaveText('06:00 PM')
+  await expect(replyTime).toBeVisible()
+  await expect(replyTime).toHaveText('06:02 PM')
+  await expect(replyTime).toHaveAttribute('datetime', '2026-11-27T12:32:00.000Z')
   await page.getByRole('button', { name: 'Find in chat', exact: true }).click()
   const search = page.getByRole('textbox', { name: 'Search this chat' })
   await search.fill('needle')

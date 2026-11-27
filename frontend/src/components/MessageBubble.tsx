@@ -150,12 +150,14 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
     return () => window.clearInterval(timer)
   }, [isStreaming, message.id])
 
-  const timeStr = useMemo(() => {
-    if (!message.timestamp) return ''
-    return new Date(message.timestamp).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+  const messageTime = useMemo(() => {
+    const date = new Date(message.timestamp)
+    if (!Number.isFinite(date.getTime())) return null
+    return {
+      label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      full: date.toLocaleString(),
+      iso: date.toISOString(),
+    }
   }, [message.timestamp])
 
   const handleCopy = async () => {
@@ -207,7 +209,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
 
   return (
     <div
-      title={timeStr}
       className={cn(
         'group flex gap-4 w-full animate-fade-in',
         isUser ? 'justify-end' : 'justify-start'
@@ -558,6 +559,12 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           'flex flex-wrap items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
           isUser ? 'flex-row-reverse' : 'flex-row -ml-1.5'
         )}>
+
+          {messageTime && !writing && !isActing && (
+            <time dateTime={messageTime.iso} title={messageTime.full} className="whitespace-nowrap text-xs tabular-nums text-text-tertiary dark:text-text-dark-tertiary">
+              {messageTime.label}
+            </time>
+          )}
 
           {/* Model + token usage on assistant replies */}
           {!isUser && !writing && !isError && message.model && (
