@@ -10,7 +10,7 @@ import os
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -855,6 +855,11 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=401, detail="Session is invalid or expired")
         return user
 
+    def verified_user(
+        request: Request, authorization: Optional[str] = Header(default=None)
+    ) -> Dict[str, Any]:
+        return getattr(request.state, "dabba_user", None) or current_user(authorization)
+
     @router.get("/capabilities")
     async def capabilities():
         return {
@@ -1251,9 +1256,9 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Skill not found") from exc
 
     @router.post("/skills/match")
-    async def match_skill_package(
+    def match_skill_package(
         body: SkillMatchRequest,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
         """
         Best-matching skill for a free-text message, by relevance — lets the
@@ -1261,7 +1266,6 @@ def create_platform_router() -> APIRouter:
         user to pick one manually every time. Returns {"skill": null} when
         nothing scores highly enough to be a confident match.
         """
-        user = current_user(authorization)
         return {"skill": skill_packages.find_matching(user["id"], body.message)}
 
     @router.get("/agent-definitions")
@@ -1493,10 +1497,14 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=404, detail="Schedule not found") from exc
 
     @router.get("/usage")
-    async def usage_summary(authorization: Optional[str] = Header(default=None)):
+    def usage_summary(user: Dict[str, Any] = Depends(verified_user)):
         """The signed-in user's token usage, totalled per model."""
-        user = current_user(authorization)
-        return await asyncio.to_thread(tasks.usage_summary, user["id"])
+        from dabba.api.conversations_endpoints import conversation_usage_counts
+
+        return {
+            **tasks.usage_summary(user["id"]),
+            **conversation_usage_counts(user["id"]),
+        }
 
     @router.post("/identity/signup", status_code=201)
     def signup(body: SignupRequest):
@@ -1921,11 +1929,10 @@ def create_platform_router() -> APIRouter:
         )
 
     @router.put("/memory")
-    async def put_memory(
+    def put_memory(
         body: MemoryPutRequest,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
-        user = current_user(authorization)
         try:
             return memory.put(
                 body.scope,
@@ -1940,13 +1947,12 @@ def create_platform_router() -> APIRouter:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @router.get("/memory")
-    async def list_memory(
+    def list_memory(
         scope: Optional[str] = None,
         workspace_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(verified_user),
     ):
-        user = current_user(authorization)
         return {
             "memories": memory.list(
                 scope=scope,
@@ -1957,10 +1963,7 @@ def create_platform_router() -> APIRouter:
         }
 
     @router.delete("/memory/{memory_id}", status_code=204)
-    async def delete_memory(
-        memory_id: str, authorization: Optional[str] = Header(default=None)
-    ):
-        user = current_user(authorization)
+    def delete_memory(memory_id: str, user: Dict[str, Any] = Depends(verified_user)):
         try:
             memory.delete(memory_id, user["id"])
         except KeyError as exc:

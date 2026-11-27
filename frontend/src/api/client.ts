@@ -3,6 +3,11 @@ import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Messag
 export const DEFAULT_API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
 
 async function responseError(response: Response, fallback: string): Promise<Error> {
+  if (response.headers.get('Content-Type')?.includes('text/html')) {
+    return new Error(response.status >= 500
+      ? `Dabba is temporarily unavailable (HTTP ${response.status}). Please try again.`
+      : fallback)
+  }
   const text = await response.text().catch(() => '')
   if (!text) return new Error(fallback)
 
@@ -24,7 +29,7 @@ async function responseError(response: Response, fallback: string): Promise<Erro
     // Some proxies return plain-text errors instead of JSON.
   }
 
-  return new Error(text.trim() || fallback)
+  return new Error(/^\s*</.test(text) ? fallback : text.trim() || fallback)
 }
 
 /** How long a shared read (models, skills) is reused before refetching. */
@@ -297,7 +302,8 @@ export class ApiClient {
         ...init,
         headers: { ...this.getPlatformHeaders(), ...(init?.headers ?? {}) },
       })
-    } catch {
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') throw error
       throw new Error('Cannot reach the Dabba backend. Check that the server is running.')
     }
     if (!response.ok) {
@@ -1150,9 +1156,7 @@ export class ApiClient {
     })
 
     if (!response.ok) {
-      if (response.status === 429 || response.status === 409) throw await responseError(response, 'Chat usage limit reached')
-      const errorText = await response.text().catch(() => 'Unknown error')
-      throw new Error(`API error ${response.status}: ${errorText}`)
+      throw await responseError(response, `Dabba chat failed (HTTP ${response.status}). Please try again.`)
     }
 
     const data: ChatCompletionResponse = await response.json()
@@ -1173,9 +1177,7 @@ export class ApiClient {
     })
 
     if (!response.ok) {
-      if (response.status === 429 || response.status === 409) throw await responseError(response, 'Chat usage limit reached')
-      const errorText = await response.text().catch(() => 'Unknown error')
-      throw new Error(`API error ${response.status}: ${errorText}`)
+      throw await responseError(response, `Dabba chat failed (HTTP ${response.status}). Please try again.`)
     }
 
     const reader = response.body?.getReader()
@@ -1257,6 +1259,8 @@ export class ApiClient {
 }
 
 export interface ServerUsage {
+  conversationCount?: number
+  messageCount?: number
   replies: number
   promptTokens: number
   completionTokens: number

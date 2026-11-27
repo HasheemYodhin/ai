@@ -8,7 +8,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import closing, contextmanager
+from contextlib import closing, contextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional
 
@@ -505,11 +505,12 @@ class PlatformStore:
         if not self.postgres_url:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._pool_postgres = postgres_url is None
         self.initialize()
 
     def connect(self) -> sqlite3.Connection | PostgresConnection:
         if self.postgres_url:
-            return PostgresConnection(self.postgres_url)
+            return PostgresConnection(self.postgres_url, pooled=self._pool_postgres)
         conn = sqlite3.connect(self.path, timeout=30, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
@@ -546,7 +547,7 @@ class PlatformStore:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection | PostgresConnection]:
-        with self._lock:
+        with nullcontext() if self.postgres_url else self._lock:
             conn = self.connect()
             try:
                 if isinstance(conn, PostgresConnection):
@@ -564,14 +565,20 @@ class PlatformStore:
     def fetchone(
         self, query: str, params: tuple[Any, ...] = ()
     ) -> Optional[Dict[str, Any]]:
-        with self._lock, closing(self.connect()) as conn:
+        with (
+            nullcontext() if self.postgres_url else self._lock,
+            closing(self.connect()) as conn,
+        ):
             row = conn.execute(query, params).fetchone()
             return dict(row) if row else None
 
     def fetchall(
         self, query: str, params: tuple[Any, ...] = ()
     ) -> list[Dict[str, Any]]:
-        with self._lock, closing(self.connect()) as conn:
+        with (
+            nullcontext() if self.postgres_url else self._lock,
+            closing(self.connect()) as conn,
+        ):
             return [dict(row) for row in conn.execute(query, params).fetchall()]
 
     def audit(

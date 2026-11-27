@@ -28,7 +28,7 @@ from dabba.api.rate_limiter import RateLimiter
 from dabba.api.chat_endpoints import create_chat_router
 from dabba.api.embedding_endpoints import create_embedding_router
 from dabba.api.model_endpoints import create_model_router
-from dabba.platform.postgres import database_url
+from dabba.platform.postgres import close_postgres_pool, database_url
 
 
 class ModelEngine:
@@ -580,9 +580,12 @@ async def lifespan(app: FastAPI):
     except Exception:
         app.state.logger.exception("Could not recover stale chat tasks")
 
-    yield
-
-    app.state.logger.info("Server shutting down")
+    try:
+        yield
+    finally:
+        if database_url():
+            await asyncio.to_thread(close_postgres_pool)
+        app.state.logger.info("Server shutting down")
 
 
 # Enforced on HTML (the served SPA). Deliberately limited to directives that
@@ -748,6 +751,29 @@ def create_app(
     logger = py_logging.getLogger("dabba.api")
     logger.setLevel(getattr(py_logging, config.log_level.upper()))
 
+    def database_unavailable() -> JSONResponse:
+        return JSONResponse(
+            {"detail": "The database is temporarily unavailable. Please try again."},
+            status_code=503,
+            headers={"Retry-After": "3"},
+        )
+
+    database_errors: tuple[type[Exception], ...] = ()
+    if database_url():
+        from psycopg import OperationalError
+
+        database_errors = (OperationalError,)
+
+        async def handle_database_error(request: Request, exc: OperationalError):
+            logger.warning(
+                "Database operation failed for %s (%s)",
+                request.url.path,
+                type(exc).__name__,
+            )
+            return database_unavailable()
+
+        app.add_exception_handler(OperationalError, handle_database_error)
+
     app.state.config = config
     app.state.logger = logger
 
@@ -809,9 +835,16 @@ def create_app(
             else:
                 token = request.headers.get("x-dabba-session") or bearer
             if token:
-                user = await asyncio.to_thread(
-                    lambda: IdentityService().authenticate(token)
-                )
+                try:
+                    user = await asyncio.to_thread(
+                        lambda: IdentityService().authenticate(token)
+                    )
+                except database_errors as exc:
+                    logger.warning(
+                        "Database unavailable during session lookup (%s)",
+                        type(exc).__name__,
+                    )
+                    return database_unavailable()
             if not user:
                 if (
                     request.method == "GET"

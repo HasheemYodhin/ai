@@ -160,6 +160,9 @@ URL in Render's Environment settings as a secret. The server image includes
 the driver. For a local migration, install it with
 `python3 -m pip install 'psycopg[binary]>=3.2,<4'`.
 
+The API reuses up to four PostgreSQL connections per worker. Keep one worker
+on a 512 MB service and choose a Neon region close to the Render service.
+
 For an existing deployment, migrate before setting `DATABASE_URL` on the
 live service:
 

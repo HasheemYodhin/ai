@@ -7,7 +7,7 @@ import secrets
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from dabba.platform.core import get_platform_data_dir, get_platform_store, utc_ms
@@ -24,7 +24,7 @@ DB_PATH = get_platform_data_dir() / "conversations.db"
 
 def _get_db() -> sqlite3.Connection | PostgresConnection:
     if url := database_url():
-        return PostgresConnection(url)
+        return PostgresConnection(url, pooled=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -69,6 +69,24 @@ def _begin_write(conn: sqlite3.Connection | PostgresConnection) -> None:
         conn.begin_write()
     else:
         conn.execute("BEGIN IMMEDIATE")
+
+
+def conversation_usage_counts(user_id: str) -> dict[str, int]:
+    conn = _get_db()
+    try:
+        row = conn.execute(
+            """SELECT
+                (SELECT COUNT(*) FROM conversations WHERE user_id=?) AS conversation_count,
+                (SELECT COUNT(*) FROM messages m JOIN conversations c
+                 ON c.id=m.conversation_id WHERE c.user_id=?) AS message_count""",
+            (user_id, user_id),
+        ).fetchone()
+        return {
+            "conversationCount": row["conversation_count"],
+            "messageCount": row["message_count"],
+        }
+    finally:
+        conn.close()
 
 
 def _initialize_message_index(conn: sqlite3.Connection) -> None:
@@ -198,7 +216,11 @@ def create_conversations_router() -> APIRouter:
     if url := database_url():
         initialize_postgres_conversations(url)
 
-    def authenticated_user(authorization: Optional[str]) -> Dict[str, Any]:
+    def authenticated_user(
+        request: Request, authorization: Optional[str] = Header(default=None)
+    ) -> Dict[str, Any]:
+        if user := getattr(request.state, "dabba_user", None):
+            return user
         if not authorization or not authorization.lower().startswith("bearer "):
             raise HTTPException(status_code=401, detail="Authentication required")
         user = identity.authenticate(authorization.split(" ", 1)[1].strip())
@@ -207,8 +229,8 @@ def create_conversations_router() -> APIRouter:
         return user
 
     @router.get("/conversations/saved")
-    def list_saved(authorization: Optional[str] = Header(default=None)):
-        user_id = authenticated_user(authorization)["id"]
+    def list_saved(user: Dict[str, Any] = Depends(authenticated_user)):
+        user_id = user["id"]
         conn = _get_db()
         try:
             rows = conn.execute(
@@ -225,9 +247,9 @@ def create_conversations_router() -> APIRouter:
     @router.get("/conversations/recovery")
     def recover_reply(
         request_id: str = Query(min_length=1, max_length=128),
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user_id = authenticated_user(authorization)["id"]
+        user_id = user["id"]
         task = get_platform_store().fetchone(
             """SELECT status, result_json FROM tasks
                WHERE user_id=? AND idempotency_key=? AND kind='chat'""",
@@ -248,9 +270,9 @@ def create_conversations_router() -> APIRouter:
     def save_message(
         chat_id: str,
         message_id: str,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user_id = authenticated_user(authorization)["id"]
+        user_id = user["id"]
         conn = _get_db()
         try:
             with conn:
@@ -284,9 +306,9 @@ def create_conversations_router() -> APIRouter:
     def unsave_message(
         chat_id: str,
         message_id: str,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user_id = authenticated_user(authorization)["id"]
+        user_id = user["id"]
         conn = _get_db()
         try:
             with conn:
@@ -298,8 +320,8 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.get("/conversations/{chat_id}/shares")
-    def list_shares(chat_id: str, authorization: Optional[str] = Header(default=None)):
-        user_id = authenticated_user(authorization)["id"]
+    def list_shares(chat_id: str, user: Dict[str, Any] = Depends(authenticated_user)):
+        user_id = user["id"]
         conn = _get_db()
         try:
             rows = conn.execute(
@@ -315,9 +337,9 @@ def create_conversations_router() -> APIRouter:
     def create_share(
         chat_id: str,
         body: ShareSelection,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user_id = authenticated_user(authorization)["id"]
+        user_id = user["id"]
         conn = _get_db()
         try:
             with conn:
@@ -372,9 +394,9 @@ def create_conversations_router() -> APIRouter:
 
     @router.delete("/conversations/{chat_id}/shares/{share_id}", status_code=204)
     def revoke_share(
-        chat_id: str, share_id: str, authorization: Optional[str] = Header(default=None)
+        chat_id: str, share_id: str, user: Dict[str, Any] = Depends(authenticated_user)
     ):
-        user_id = authenticated_user(authorization)["id"]
+        user_id = user["id"]
         conn = _get_db()
         try:
             with conn:
@@ -408,7 +430,7 @@ def create_conversations_router() -> APIRouter:
     def list_conversations(
         user_id: str,
         include_messages: bool = True,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
         """List the user's conversations.
 
@@ -416,7 +438,6 @@ def create_conversations_router() -> APIRouter:
         every chat; the web app passes false to get a lightweight sidebar list
         and fetches each chat's messages via GET /conversations/{id}.
         """
-        user = authenticated_user(authorization)
         if user_id != user["id"]:
             raise HTTPException(
                 status_code=403, detail="Cannot read another user's conversations"
@@ -450,9 +471,8 @@ def create_conversations_router() -> APIRouter:
         q: str = Query(min_length=1, max_length=120),
         limit: int = Query(default=30, ge=1, le=50),
         offset: int = Query(default=0, ge=0, le=10_000),
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user = authenticated_user(authorization)
         needle = q.strip().lower()
         if not needle:
             return {"matches": []}
@@ -506,10 +526,9 @@ def create_conversations_router() -> APIRouter:
     @router.get("/conversations/{conversation_id}")
     def get_conversation(
         conversation_id: str,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
         """One full conversation, only if the session user owns it."""
-        user = authenticated_user(authorization)
         conn = _get_db()
         try:
             # Ownership is part of the query, so another user's id gets the
@@ -528,9 +547,8 @@ def create_conversations_router() -> APIRouter:
     def upsert_conversation(
         conversation_id: str,
         body: ConversationUpsert,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user = authenticated_user(authorization)
         if body.userId != user["id"]:
             raise HTTPException(
                 status_code=403, detail="Cannot write another user's conversations"
@@ -613,8 +631,8 @@ def create_conversations_router() -> APIRouter:
             conn.close()
 
     @router.delete("/conversations")
-    def clear_conversations(authorization: Optional[str] = Header(default=None)):
-        user_id = authenticated_user(authorization)["id"]
+    def clear_conversations(user: Dict[str, Any] = Depends(authenticated_user)):
+        user_id = user["id"]
         conn = _get_db()
         try:
             with conn:
@@ -638,9 +656,8 @@ def create_conversations_router() -> APIRouter:
     def delete_conversation(
         conversation_id: str,
         user_id: str,
-        authorization: Optional[str] = Header(default=None),
+        user: Dict[str, Any] = Depends(authenticated_user),
     ):
-        user = authenticated_user(authorization)
         if user_id != user["id"]:
             raise HTTPException(
                 status_code=403, detail="Cannot delete another user's conversations"

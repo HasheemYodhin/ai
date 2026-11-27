@@ -53,7 +53,27 @@ def test_server_identity_sessions_are_hashed_and_revocable(store):
     user = identity.signup("Hasheem", "hasheem@example.com", "a-secure-password")
     session = identity.login("hasheem@example.com", "a-secure-password")
 
+    before = store.fetchone(
+        "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+    )
     assert identity.authenticate(session["token"])["id"] == user["id"]
+    assert (
+        store.fetchone(
+            "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+        )
+        == before
+    )
+    with store.transaction() as conn:
+        conn.execute(
+            "UPDATE sessions SET last_seen_at=0 WHERE id=?", (session["sessionId"],)
+        )
+    assert identity.authenticate(session["token"])["id"] == user["id"]
+    assert (
+        store.fetchone(
+            "SELECT last_seen_at FROM sessions WHERE id=?", (session["sessionId"],)
+        )["last_seen_at"]
+        > 0
+    )
     row = store.fetchone("SELECT password_hash FROM users WHERE id=?", (user["id"],))
     assert "a-secure-password" not in row["password_hash"]
 

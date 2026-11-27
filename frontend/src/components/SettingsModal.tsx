@@ -131,18 +131,24 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   // Usage and chats live on the server, so load them when the tab is opened.
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
   const [usageError, setUsageError] = useState<string | null>(null)
+  const [usageAttempt, setUsageAttempt] = useState(0)
   const [dataBusy, setDataBusy] = useState<'export' | 'profile-export' | 'clear' | null>(null)
   const [dataError, setDataError] = useState<string | null>(null)
   useEffect(() => {
     if (!isOpen || activeTab !== 'usage' || !currentUser) return
     const controller = new AbortController()
+    const timeout = window.setTimeout(() => {
+      controller.abort()
+      setUsageError('Usage is taking longer than expected. Try again.')
+    }, 12_000)
     setUsageStats(null)
     setUsageError(null)
     loadUsageStats(currentUser.id, controller.signal)
       .then(stats => { if (!controller.signal.aborted) setUsageStats(stats) })
       .catch(err => { if (!controller.signal.aborted) setUsageError((err as Error).message || 'Could not load usage') })
-    return () => controller.abort()
-  }, [isOpen, activeTab, currentUser])
+      .finally(() => window.clearTimeout(timeout))
+    return () => { window.clearTimeout(timeout); controller.abort() }
+  }, [isOpen, activeTab, currentUser, usageAttempt])
 
   // Hooks must run on every render regardless of `isOpen` — computing this
   // here (before the early return below) keeps the hook count stable across
@@ -1149,7 +1155,12 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             {/* Usage Tab */}
             {activeTab === 'usage' && !usageStats && (
               <div role={usageError ? 'alert' : 'status'} className="flex items-center justify-center gap-2 py-12 text-xs text-text-tertiary">
-                {usageError ? <span className="text-red-500">{usageError}</span> : <><Loader2 className="w-4 h-4 animate-spin" /> Loading usage…</>}
+                {usageError ? (
+                  <div className="space-y-2 text-center">
+                    <p className="text-red-500">{usageError}</p>
+                    <button type="button" className="font-semibold text-accent underline" onClick={() => setUsageAttempt(attempt => attempt + 1)}>Retry usage</button>
+                  </div>
+                ) : <><Loader2 className="w-4 h-4 animate-spin" /> Loading usage…</>}
               </div>
             )}
             {activeTab === 'usage' && usageStats && (

@@ -20,8 +20,8 @@ export function buildUsageStats(
   conversations: { messageCount?: number; messages?: unknown[] }[],
 ): UsageStats {
   return {
-    totalConversations: conversations.length,
-    totalMessages: conversations.reduce((sum, conv) => sum + (conv.messageCount ?? conv.messages?.length ?? 0), 0),
+    totalConversations: usage.conversationCount ?? conversations.length,
+    totalMessages: usage.messageCount ?? conversations.reduce((sum, conv) => sum + (conv.messageCount ?? conv.messages?.length ?? 0), 0),
     totalTokens: usage.totalTokens,
     promptTokens: usage.promptTokens,
     completionTokens: usage.completionTokens,
@@ -31,6 +31,9 @@ export function buildUsageStats(
 }
 
 export async function loadUsageStats(userId: string, signal?: AbortSignal): Promise<UsageStats> {
-  const [usage, conversations] = await Promise.all([apiClient.fetchUsage(signal), apiClient.fetchConversations(userId, signal)])
+  const usage = await apiClient.fetchUsage(signal)
+  const conversations = usage.conversationCount !== undefined && usage.messageCount !== undefined
+    ? []
+    : await apiClient.fetchConversations(userId, signal)
   return buildUsageStats(usage, conversations)
 }

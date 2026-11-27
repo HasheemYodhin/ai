@@ -2,23 +2,69 @@
 
 import os
 import re
+from threading import Lock
+
+
+_pool = None
+_pool_url = ""
+_pool_lock = Lock()
 
 
 def database_url() -> str:
     return os.getenv("DATABASE_URL", "").strip()
 
 
+def _get_pool(url, options):
+    from psycopg_pool import ConnectionPool
+
+    global _pool, _pool_url
+    with _pool_lock:
+        if _pool is None or _pool_url != url:
+            if _pool is not None:
+                _pool.close()
+            _pool = ConnectionPool(
+                url,
+                kwargs=options,
+                min_size=0,
+                max_size=4,
+                timeout=8,
+                max_waiting=16,
+                max_idle=60,
+                num_workers=2,
+                open=True,
+            )
+            _pool_url = url
+        return _pool
+
+
+def close_postgres_pool() -> None:
+    global _pool, _pool_url
+    with _pool_lock:
+        if _pool is not None:
+            _pool.close()
+            _pool = None
+            _pool_url = ""
+
+
 class PostgresConnection:
     """Use the same positional parameters and named rows as the SQLite stores."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, *, pooled: bool = False):
         import psycopg
         from psycopg import ClientCursor
         from psycopg.rows import dict_row
 
-        self.connection = psycopg.connect(
-            url, cursor_factory=ClientCursor, row_factory=dict_row, connect_timeout=5
+        options = {
+            "cursor_factory": ClientCursor,
+            "row_factory": dict_row,
+            "connect_timeout": 5,
+            "autocommit": pooled,
+        }
+        self._pool = _get_pool(url, options) if pooled else None
+        self.connection = (
+            self._pool.getconn() if self._pool else psycopg.connect(url, **options)
         )
+        self._closed = False
 
     def execute(self, query, params=()):
         if params:
@@ -33,7 +79,10 @@ class PostgresConnection:
     def begin_write(self) -> None:
         # Match SQLite's BEGIN IMMEDIATE for read-then-write operations across
         # both stores. Transaction locks work with Neon's transaction pooler.
-        self.execute("SELECT pg_advisory_xact_lock(1624833651)")
+        if self._pool:
+            self.execute("BEGIN; SELECT pg_advisory_xact_lock(1624833651)")
+        else:
+            self.execute("SELECT pg_advisory_xact_lock(1624833651)")
 
     def commit(self) -> None:
         self.connection.commit()
@@ -42,7 +91,13 @@ class PostgresConnection:
         self.connection.rollback()
 
     def close(self) -> None:
-        self.connection.close()
+        if self._closed:
+            return
+        self._closed = True
+        if self._pool:
+            self._pool.putconn(self.connection)
+        else:
+            self.connection.close()
 
     def __enter__(self):
         return self

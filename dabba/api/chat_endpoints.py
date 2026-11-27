@@ -251,7 +251,9 @@ async def _handle_nonstreaming_chat(
     # of any in-flight chat request).
     if task_context:
         tasks, task_id = task_context
-        tasks.transition(task_id, "running", current_step="Generating response")
+        await asyncio.to_thread(
+            tasks.transition, task_id, "running", current_step="Generating response"
+        )
     try:
         response_text = await asyncio.to_thread(
             _generate_response,
@@ -267,7 +269,9 @@ async def _handle_nonstreaming_chat(
             from dabba.platform.provider_gateway import normalize_provider_error
 
             failure = normalize_provider_error(exc, model=req.model)
-            tasks.transition(task_id, "failed", error=failure.as_dict())
+            await asyncio.to_thread(
+                tasks.transition, task_id, "failed", error=failure.as_dict()
+            )
         raise
 
     # Real usage when the provider reported it; a word-count estimate
@@ -303,7 +307,8 @@ async def _handle_nonstreaming_chat(
 
     payload = response.to_dict()
     if task_context:
-        tasks.transition(
+        await asyncio.to_thread(
+            tasks.transition,
             task_id,
             "completed",
             record_model_usage=True,
@@ -336,20 +341,23 @@ async def _handle_streaming_chat(
 
     # Preserve multimodal content (see the non-streaming handler for why).
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    tasks = task_id = None
+    if task_context:
+        tasks, task_id = task_context
+        await asyncio.to_thread(
+            tasks.transition, task_id, "running", current_step="Streaming response"
+        )
 
     async def event_stream() -> AsyncGenerator[str, None]:
         handler = StreamingHandler(model_name=req.model)
-        tasks = task_id = None
-        if task_context:
-            tasks, task_id = task_context
-            tasks.transition(task_id, "running", current_step="Streaming response")
+        if task_id:
             yield f": dabba-task-id={task_id}\n\n"
 
         if req.model and not req.model.startswith("dabba"):
             usage_holder: Dict[str, int] = {}
             complete_text = ""
             event_buffer = ""
-            started = time.monotonic()
+            started = last_checkpoint = time.monotonic()
             first_seen = False
             try:
                 async with aclosing(
@@ -377,18 +385,31 @@ async def _handle_streaming_chat(
                             continue
                         complete_text += token
                         event_buffer += token
-                        if tasks and len(event_buffer) >= 500:
-                            tasks.append_event(
-                                task_id, "task.output.delta", {"content": event_buffer}
+                        yield handler.create_chunk(token, index=0)
+                        now = time.monotonic()
+                        if (
+                            tasks
+                            and len(event_buffer) >= 500
+                            and now - last_checkpoint >= 2
+                        ):
+                            await asyncio.to_thread(
+                                tasks.append_event,
+                                task_id,
+                                "task.output.delta",
+                                {"content": event_buffer},
                             )
                             event_buffer = ""
-                        yield handler.create_chunk(token, index=0)
+                            last_checkpoint = now
                 if tasks:
                     if event_buffer:
-                        tasks.append_event(
-                            task_id, "task.output.delta", {"content": event_buffer}
+                        await asyncio.to_thread(
+                            tasks.append_event,
+                            task_id,
+                            "task.output.delta",
+                            {"content": event_buffer},
                         )
-                    tasks.transition(
+                    await asyncio.to_thread(
+                        tasks.transition,
                         task_id,
                         "completed",
                         record_model_usage=True,
@@ -404,14 +425,16 @@ async def _handle_streaming_chat(
                 yield "data: [DONE]\n\n"
             except asyncio.CancelledError:
                 if tasks:
-                    tasks.cancel(task_id)
+                    await asyncio.to_thread(tasks.cancel, task_id)
                 raise
             except Exception as exc:
                 from dabba.platform.provider_gateway import normalize_provider_error
 
                 failure = normalize_provider_error(exc, model=req.model)
                 if tasks:
-                    tasks.transition(task_id, "failed", error=failure.as_dict())
+                    await asyncio.to_thread(
+                        tasks.transition, task_id, "failed", error=failure.as_dict()
+                    )
                 yield f"data: {json.dumps({'error': failure.as_dict()})}\n\n"
                 yield "data: [DONE]\n\n"
             return
@@ -441,13 +464,14 @@ async def _handle_streaming_chat(
         except (asyncio.CancelledError, GeneratorExit):
             response_task.cancel()
             if tasks:
-                tasks.cancel(task_id)
+                await asyncio.to_thread(tasks.cancel, task_id)
             raise
         except Exception as exc:
             if tasks:
                 from dabba.platform.provider_gateway import normalize_provider_error
 
-                tasks.transition(
+                await asyncio.to_thread(
+                    tasks.transition,
                     task_id,
                     "failed",
                     error=normalize_provider_error(exc, model=req.model).as_dict(),
@@ -468,8 +492,14 @@ async def _handle_streaming_chat(
             }
 
         if tasks:
-            tasks.append_event(task_id, "task.output.delta", {"content": response_text})
-            tasks.transition(
+            await asyncio.to_thread(
+                tasks.append_event,
+                task_id,
+                "task.output.delta",
+                {"content": response_text},
+            )
+            await asyncio.to_thread(
+                tasks.transition,
                 task_id,
                 "completed",
                 result={

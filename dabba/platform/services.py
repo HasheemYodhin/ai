@@ -152,12 +152,12 @@ class TaskOrchestrator:
                     if reject_duplicate:
                         raise FileExistsError("Task already exists")
                     return self._decode(dict(existing))
-            conn.execute(
+            row = conn.execute(
                 """
                 INSERT INTO tasks
                     (id, user_id, workspace_id, kind, status, request_json,
                      progress, model, idempotency_key, created_at, updated_at)
-                VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?) RETURNING *
                 """,
                 (
                     task_id,
@@ -170,9 +170,8 @@ class TaskOrchestrator:
                     now,
                     now,
                 ),
-            )
+            ).fetchone()
             self._insert_event(conn, task_id, "task.created", {"kind": kind}, now)
-            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
             return self._decode(dict(row))
 
     def get(self, task_id: str) -> Dict[str, Any]:
@@ -217,38 +216,41 @@ class TaskOrchestrator:
     ) -> Dict[str, Any]:
         if status not in TASK_STATES:
             raise ValueError(f"Unknown task state: {status}")
-        current = self.get(task_id)
-        if (
-            status != current["status"]
-            and status not in TASK_TRANSITIONS[current["status"]]
-        ):
-            raise ValueError(
-                f"Invalid task transition: {current['status']} -> {status}"
-            )
-
-        now = utc_ms()
-        resolved_progress = (
-            max(0.0, min(float(progress), 1.0))
-            if progress is not None
-            else current["progress"]
-        )
-        if status == "completed":
-            resolved_progress = 1.0
-        usage = (result or {}).get("usage")
-        record_usage = (
-            record_model_usage
-            and status == "completed"
-            and current["kind"] == "chat"
-            and current["userId"]
-            and current["model"]
-            and isinstance(usage, dict)
-            and all(
-                isinstance(usage.get(key), int) and usage[key] >= 0
-                for key in ("prompt_tokens", "completion_tokens")
-            )
-        )
         with self.store.transaction() as conn:
-            conn.execute(
+            row = conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"Task not found: {task_id}")
+            current = self._decode(dict(row))
+            if (
+                status != current["status"]
+                and status not in TASK_TRANSITIONS[current["status"]]
+            ):
+                raise ValueError(
+                    f"Invalid task transition: {current['status']} -> {status}"
+                )
+
+            now = utc_ms()
+            resolved_progress = (
+                max(0.0, min(float(progress), 1.0))
+                if progress is not None
+                else current["progress"]
+            )
+            if status == "completed":
+                resolved_progress = 1.0
+            usage = (result or {}).get("usage")
+            record_usage = (
+                record_model_usage
+                and status == "completed"
+                and current["kind"] == "chat"
+                and current["userId"]
+                and current["model"]
+                and isinstance(usage, dict)
+                and all(
+                    isinstance(usage.get(key), int) and usage[key] >= 0
+                    for key in ("prompt_tokens", "completion_tokens")
+                )
+            )
+            updated = conn.execute(
                 """
                 UPDATE tasks SET status=?, progress=?, current_step=?,
                     result_json=COALESCE(?, result_json),
@@ -259,7 +261,7 @@ class TaskOrchestrator:
                     completed_at=CASE WHEN ? IN ('completed','failed') THEN ? ELSE completed_at END,
                     cancelled_at=CASE WHEN ? = 'cancelled' THEN ? ELSE cancelled_at END,
                     updated_at=?
-                WHERE id=?
+                WHERE id=? RETURNING *
                 """,
                 (
                     status,
@@ -276,7 +278,7 @@ class TaskOrchestrator:
                     now,
                     task_id,
                 ),
-            )
+            ).fetchone()
             if record_usage:
                 conn.execute(
                     """INSERT INTO model_usage
@@ -303,7 +305,7 @@ class TaskOrchestrator:
                 },
                 now,
             )
-        return self.get(task_id)
+        return self._decode(dict(updated))
 
     def chat_usage_limits(self, user_id: str) -> list[Dict[str, Any]]:
         now = utc_ms()
@@ -835,7 +837,7 @@ class IdentityService:
         now = utc_ms()
         row = self.store.fetchone(
             """
-            SELECT s.id AS session_id, s.user_id, s.expires_at, u.*
+            SELECT s.id AS session_id, s.last_seen_at, u.*
             FROM sessions s JOIN users u ON u.id=s.user_id
             WHERE s.token_hash=? AND s.revoked_at IS NULL
               AND s.expires_at>? AND u.disabled=0
@@ -844,12 +846,14 @@ class IdentityService:
         )
         if not row:
             return None
-        with self.store.transaction() as conn:
-            conn.execute(
-                "UPDATE sessions SET last_seen_at=? WHERE id=?",
-                (now, row["session_id"]),
-            )
-        return self.get_user(row["user_id"])
+        cutoff = now - 300_000
+        if row["last_seen_at"] <= cutoff:
+            with self.store.transaction() as conn:
+                conn.execute(
+                    "UPDATE sessions SET last_seen_at=? WHERE id=? AND last_seen_at<=?",
+                    (now, row["session_id"], cutoff),
+                )
+        return self._profile(row)
 
     def logout(self, token: str) -> None:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -874,6 +878,10 @@ class IdentityService:
         row = self.store.fetchone("SELECT * FROM users WHERE id=?", (user_id,))
         if not row:
             raise KeyError(f"User not found: {user_id}")
+        return self._profile(row)
+
+    @staticmethod
+    def _profile(row: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "id": row["id"],
             "email": row["email"],

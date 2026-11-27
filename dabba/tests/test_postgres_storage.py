@@ -13,6 +13,7 @@ from dabba.api import create_app
 from dabba.api import conversations_endpoints
 from dabba.platform import core
 from dabba.platform.migrate_sqlite import migrate
+from dabba.platform.postgres import PostgresConnection, close_postgres_pool
 from dabba.platform.services import IdentityService, TaskOrchestrator
 
 
@@ -32,6 +33,39 @@ def postgres_url():
             )
         finally:
             admin.execute(f"DROP SCHEMA {schema} CASCADE")
+
+
+def test_postgres_pool_reuses_connections_and_releases_transactions(postgres_url):
+    try:
+        with closing(PostgresConnection(postgres_url, pooled=True)) as first:
+            pid = first.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+            with first:
+                first.begin_write()
+                first.execute("CREATE TABLE pool_transaction (id INT)")
+        with closing(PostgresConnection(postgres_url, pooled=True)) as reused:
+            assert (
+                reused.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
+                == pid
+            )
+            assert (
+                reused.execute(
+                    "SELECT COUNT(*) AS total FROM pool_transaction"
+                ).fetchone()["total"]
+                == 0
+            )
+            with pytest.raises(RuntimeError), reused:
+                reused.begin_write()
+                reused.execute("INSERT INTO pool_transaction VALUES (1)")
+                raise RuntimeError("force rollback")
+        with closing(PostgresConnection(postgres_url, pooled=True)) as reused:
+            assert (
+                reused.execute(
+                    "SELECT COUNT(*) AS total FROM pool_transaction"
+                ).fetchone()["total"]
+                == 0
+            )
+    finally:
+        close_postgres_pool()
 
 
 def test_sqlite_import_and_postgres_api(tmp_path, monkeypatch, postgres_url):
@@ -84,6 +118,9 @@ def test_sqlite_import_and_postgres_api(tmp_path, monkeypatch, postgres_url):
         assert response.is_success and response.json()["name"] == "Updated"
         response = client.get("/v1/platform/usage", headers=headers)
         assert response.is_success and response.json()["totalTokens"] == 12
+        assert (
+            response.json()["conversationCount"] == response.json()["messageCount"] == 1
+        )
         assert client.get(
             "/v1/guest/status?guestId=postgres-test", headers=headers
         ).is_success
