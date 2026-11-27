@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
-import type { Message, AgentStep, ExtractedDocument, DocumentAttachment } from '@/types'
+import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment } from '@/types'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
 import { ocrImages } from '@/lib/ocr'
@@ -105,6 +105,7 @@ interface UseChatReturn {
   generateImage: (prompt: string, conversationId?: string) => Promise<void>
   editMessage: (id: string, content: string) => Promise<void>
   regenerate: (id: string, overrides?: { model?: string; effort?: string }) => Promise<void>
+  recoverReply: (id: string) => Promise<void>
   stopGeneration: () => void
   setMessages: (messages: Message[], conversationId?: string) => void
   pendingApproval: PendingApproval | null
@@ -279,11 +280,14 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     let fullContent = ''
     let latestChunk: Partial<Message> | undefined
     let frame: number | undefined
+    let lastCheckpoint = Date.now()
     const flushChunk = () => {
       if (frame !== undefined) cancelAnimationFrame(frame)
       frame = undefined
       if (latestChunk) {
-        updateMessage(assistantId, latestChunk, conversationId, false)
+        const checkpoint = Date.now() - lastCheckpoint >= 4000
+        updateMessage(assistantId, latestChunk, conversationId, checkpoint)
+        if (checkpoint) lastCheckpoint = Date.now()
         latestChunk = undefined
       }
     }
@@ -313,19 +317,23 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     try {
       let responseModel = model
       const requestCompletion = async (requestModel: string) => {
+        const requestId = `${assistantId}:${requestModel}`
+        if (!conversationId.startsWith('__')) {
+          updateMessage(assistantId, { recoveryRequestId: requestId, model: requestModel }, conversationId)
+        }
         if (!settings.streaming) {
           return apiClient.chat(apiMessages, {
             signal: abortController.signal,
             ...chatParams,
             model: requestModel,
-          requestId: `${assistantId}:${requestModel}`,
+            requestId,
           })
         }
         return apiClient.chat(apiMessages, {
           signal: abortController.signal,
           ...chatParams,
           model: requestModel,
-          requestId: `${assistantId}:${requestModel}`,
+          requestId,
           onChunk: (chunk) => {
             if (chunk.usage) lastUsage = chunk.usage
             const hitCapacity = NVIDIA_CAPACITY_RE.test(chunk.content)
@@ -370,6 +378,12 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         content: fullContent,
         model: responseModel,
         timestamp: Date.now(),
+        sources: attachmentMessage?.documentAttachments?.map(file => {
+          const pages = [...new Set(fullContent.split('\n')
+            .filter(line => line.toLowerCase().includes(file.name.toLowerCase()))
+            .flatMap(line => [...line.matchAll(/\bpage\s+(\d+)/gi)].map(match => Number(match[1]))))]
+          return { kind: 'file', title: file.name, messageId: attachmentMessage.id, pages }
+        }),
       }, conversationId)
       if (requestedFormats.length > 0 && fullContent.trim() && userMessage) {
         const sourceMessage = attachmentMessage ?? userMessage
@@ -383,6 +397,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       updateMessage(assistantId, {
         error: false,
         interrupted: false,
+        recoveryRequestId: undefined,
         model: responseModel,
         usage: lastUsage,
       }, conversationId)
@@ -407,7 +422,8 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     } catch (err) {
       flushChunk()
       if ((err as Error).name === 'AbortError') {
-        updateMessage(assistantId, { timestamp: Date.now() }, conversationId)
+        const partial = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === assistantId)?.content
+        updateMessage(assistantId, { timestamp: Date.now(), interrupted: Boolean(partial), recoveryRequestId: undefined }, conversationId)
       } else {
         const errorMessage = (err as Error).message || 'An unexpected error occurred'
         const partial = conversationMessagesRef.current.get(conversationId)
@@ -416,7 +432,6 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
           content: partial || errorMessage,
           interrupted: Boolean(partial),
           error: true,
-          model,
           timestamp: Date.now(),
         }, conversationId)
         setError(errorMessage)
@@ -526,6 +541,17 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
 
     let textParts: string[] = []
     const steps: AgentStep[] = []
+    const webSources = new Map<string, ChatSource>()
+    const fetchedUrls = new Map<string, string>()
+    const addWebSources = (candidates: unknown[]) => {
+      for (const candidate of candidates) {
+        if (!candidate || typeof candidate !== 'object') continue
+        const { url, title } = candidate as { url?: unknown; title?: unknown }
+        if (typeof url !== 'string' || !/^https?:\/\//i.test(url) || url.length > 2048) continue
+        if (!webSources.has(url) && webSources.size >= 30) continue
+        webSources.set(url, { kind: 'web', url, title: typeof title === 'string' && title.trim() ? title.slice(0, 300) : url })
+      }
+    }
 
     const isResearch = opts.label === 'Research'
     const requestedFormats = requestedDocumentFormats(content)
@@ -584,15 +610,26 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
             textParts = [...textParts, '_Plan declined — continuing without it._']
             updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
           } else if (event.type === 'tool_call') {
-            const c = event.content as { name?: string; arguments?: unknown }
+            const c = event.content as { name?: string; arguments?: { url?: unknown }; call_id?: string }
             steps.push({ tool: c?.name ?? 'tool', detail: summarizeToolArgs(c?.arguments) })
+            if (c?.name === 'web_fetch' && typeof c.arguments?.url === 'string' && c.call_id) fetchedUrls.set(c.call_id, c.arguments.url)
             updateMessage(assistantMessage.id, { agentActivity: { label: opts.label, steps: [...steps], done: false } }, conversationId)
           } else if (event.type === 'tool_result') {
-            const c = event.content as { tool?: string; success?: boolean; output?: unknown }
+            const c = event.content as { tool?: string; success?: boolean; output?: unknown; call_id?: string }
             // Best-effort match to the most recent step for this tool name.
             const idx = steps.map((s, i) => ({ s, i })).reverse().find(({ s }) => s.tool === c?.tool)?.i
             if (idx != null) steps[idx] = { ...steps[idx], success: c?.success }
+            if (!isResearch && c?.success && (c.tool === 'web_search' || c.tool === 'web_fetch')) {
+              let output = c.output
+              if (typeof output === 'string') {
+                try { output = JSON.parse(output) } catch { output = undefined }
+              }
+              if (c.tool === 'web_search' && Array.isArray(output)) addWebSources(output)
+              if (c.tool === 'web_fetch') addWebSources([output ?? { url: fetchedUrls.get(c.call_id ?? '') }])
+            }
             updateMessage(assistantMessage.id, { agentActivity: { label: opts.label, steps: [...steps], done: false } }, conversationId)
+          } else if (event.type === 'sources' && Array.isArray(event.content)) {
+            addWebSources(event.content)
           } else if (event.type === 'text') {
             textParts = [...textParts, String(event.content ?? '')]
             updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
@@ -619,6 +656,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         model: settings.model,
         timestamp: Date.now(),
         agentActivity: { label: opts.label, steps, done: true },
+        ...(webSources.size ? { sources: [...webSources.values()] } : {}),
         ...(generatedFiles ? { generatedFiles } : {}),
       }, conversationId)
     } catch (err) {
@@ -695,6 +733,28 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     await runCompletion([...truncated, editedMessage], assistantMessage.id)
   }, [messages, isLoading, runCompletion, setMessages])
 
+  const recoverReply = useCallback(async (id: string) => {
+    const conversationId = activeConversationRef.current
+    if (!conversationId) return
+    const requestId = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId
+    if (!requestId) return
+    const { status, result } = await apiClient.recoverChatReply(requestId)
+    const latest = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)
+    if (latest?.recoveryRequestId !== requestId) return
+    if (!result || typeof result.content !== 'string' || NVIDIA_CAPACITY_RE.test(result.content)) {
+      throw new Error(status === 'running' || status === 'queued'
+        ? 'The server is still working. Check again shortly.'
+        : 'There’s no completed reply to recover. You can keep the partial text or retry.')
+    }
+    const promptTokens = result.usage?.prompt_tokens ?? 0
+    const completionTokens = result.usage?.completion_tokens ?? 0
+    updateMessage(id, {
+      content: result.content, model: result.model, timestamp: Date.now(),
+      interrupted: false, error: false, recoveryRequestId: undefined,
+      usage: result.usage ? { promptTokens, completionTokens, totalTokens: result.usage.total_tokens ?? promptTokens + completionTokens } : undefined,
+    }, conversationId)
+  }, [updateMessage])
+
   // Regenerates an assistant reply (also serves as retry-on-error), optionally
   // with a different model/effort than the current settings.
   const regenerate = useCallback(async (id: string, overrides?: { model?: string; effort?: string }) => {
@@ -723,6 +783,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     generateImage,
     editMessage,
     regenerate,
+    recoverReply,
     stopGeneration,
     setMessages,
     pendingApproval,

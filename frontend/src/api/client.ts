@@ -241,6 +241,55 @@ export class ApiClient {
     })
   }
 
+  private async chatToolsRequest<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations${path}`, {
+      ...init, headers: this.getPlatformHeaders(), cache: 'no-store',
+    })
+    if (!response.ok) throw await responseError(response, 'Could not complete the chat action.')
+    return response.status === 204 ? undefined as T : response.json()
+  }
+
+  async savedMessages(): Promise<SavedChatMessage[]> {
+    const { items } = await this.chatToolsRequest<{ items: SavedChatMessage[] }>('/saved')
+    return items ?? []
+  }
+
+  setMessageSaved(chatId: string, messageId: string, saved: boolean): Promise<void> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/saved/${encodeURIComponent(messageId)}`, {
+      method: saved ? 'PUT' : 'DELETE',
+    })
+  }
+
+  async chatShares(chatId: string): Promise<ChatShare[]> {
+    const { items } = await this.chatToolsRequest<{ items: ChatShare[] }>(`/${encodeURIComponent(chatId)}/shares`)
+    return items ?? []
+  }
+
+  createChatShare(chatId: string, messageIds: string[], revision: number): Promise<ChatShare> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/shares`, {
+      method: 'POST', body: JSON.stringify({ messageIds, revision }),
+    })
+  }
+
+  revokeChatShare(chatId: string, id: string): Promise<void> {
+    return this.chatToolsRequest(`/${encodeURIComponent(chatId)}/shares/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  async publicChatShare(id: string, signal: AbortSignal): Promise<SharedChat> {
+    const response = await fetch(`${this.baseUrl}/v1/conversations/public/shares/${encodeURIComponent(id)}`, {
+      cache: 'no-store', signal,
+    })
+    if (!response.ok) throw await responseError(response, 'This shared chat is unavailable.')
+    return response.json()
+  }
+
+  recoverChatReply(requestId: string): Promise<{
+    status: string
+    result: { content: string; model: string; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } } | null
+  }> {
+    return this.chatToolsRequest(`/recovery?request_id=${encodeURIComponent(requestId)}`)
+  }
+
   private async platformRequest<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response
     try {
@@ -1227,5 +1276,8 @@ export interface PlatformUser {
 }
 
 export type ProfileDetails = { name: string; bio: string }
+export type SavedChatMessage = { conversation_id: string; message_id: string; title: string; snippet: string }
+export type ChatShare = { id: string; created_at: number }
+export type SharedChat = { title: string; messages: { role: 'user' | 'assistant'; content: string }[] }
 
 export const apiClient = new ApiClient()

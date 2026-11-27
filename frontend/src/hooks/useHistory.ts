@@ -32,6 +32,7 @@ interface UseHistoryReturn {
   deleteError: string | null
   createConversation: (messages?: Message[]) => string
   saveConversation: (messages: Message[], id?: string) => string
+  flushConversation: (id: string) => Promise<void>
   /** Sync lookup; `messages` is [] for a chat whose messages aren't loaded yet. */
   loadConversation: (id: string) => Conversation | null
   /** Selects a chat and resolves with its full messages (fetched if needed). */
@@ -99,7 +100,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     setConversations(next)
   }, [])
   const [currentId, setCurrentId] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(Boolean(userId))
   const writes = useRef(new Map<string, Promise<void>>())
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   // Send functions for debounced saves that haven't fired yet, so they can be
@@ -268,6 +269,12 @@ export function useHistory(userId: string | null): UseHistoryReturn {
       send(opts)
     }
   }, [])
+
+  const flushConversation = useCallback(async (id: string) => {
+    flushSaves(id)
+    await writes.current.get(id)
+    if (pendingSaves.current.has(id)) throw new Error('Save this chat successfully before continuing.')
+  }, [flushSaves])
 
   // Don't lose the last debounced save when the tab is hidden or closed.
   // (Unsent saves are also kept in localStorage and retried on next load.)
@@ -583,6 +590,7 @@ export function useHistory(userId: string | null): UseHistoryReturn {
     deleteError,
     createConversation,
     saveConversation,
+    flushConversation,
     loadConversation,
     loadConversationAsync,
     getConversation,

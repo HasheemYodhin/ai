@@ -15,7 +15,12 @@ from dabba.platform.postgres import (
 
 
 PLATFORM_TABLES = tuple(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", SCHEMA))
-CONVERSATION_TABLES = ("conversations", "conversation_deletions")
+CONVERSATION_TABLES = (
+    "conversations",
+    "conversation_deletions",
+    "saved_messages",
+    "chat_shares",
+)
 IDENTITY_TABLES = ("task_events", "audit_logs", "cowork_activity")
 
 

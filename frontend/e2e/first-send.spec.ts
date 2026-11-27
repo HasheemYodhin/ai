@@ -30,7 +30,8 @@ test('the first message shows immediately, even when the model is slow', async (
   await box.press('Enter')
 
   // Well before the 3s model delay: the user's message is on screen, the welcome screen is gone.
-  await expect(page.getByRole('main').getByText('Hi', { exact: true })).toBeVisible({ timeout: 1500 })
+  const userMessage = page.getByRole('main').getByRole('paragraph').filter({ hasText: /^Hi$/ })
+  await expect(userMessage).toBeVisible({ timeout: 1500 })
   await expect(page.getByRole('heading', { name: 'Chat, write code or make an image' })).toHaveCount(0)
 
   // The reply still arrives, and the skill lookup did not hold it back for its full 4s.

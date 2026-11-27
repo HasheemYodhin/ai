@@ -76,6 +76,77 @@ def test_default_list_keeps_original_shape(client):
     assert response.json()["conversations"][0]["messages"] == MESSAGES
 
 
+def test_chat_bookmarks_shared_snapshots_and_reply_recovery(client):
+    from dabba.platform.services import TaskOrchestrator
+
+    user_id, owner = _signup(client, "chat-tools@example.com")
+    _, other = _signup(client, "other-chat-tools@example.com")
+    messages = [
+        *MESSAGES,
+        {
+            "id": "private",
+            "role": "user",
+            "content": "private",
+            "documentContext": "hidden",
+        },
+    ]
+    _save(client, owner, user_id, "chat-tools", messages)
+    root = "/v1/conversations/chat-tools"
+    saved = f"{root}/saved/m2"
+    assert client.put(saved, headers=other).status_code == 404
+    assert client.put(saved, headers=owner).status_code == 204
+    assert client.get("/v1/conversations/saved", headers=other).json() == {"items": []}
+    assert (
+        client.get("/v1/conversations/saved", headers=owner).json()["items"][0][
+            "snippet"
+        ]
+        == "hello"
+    )
+    selection = {"messageIds": ["m2"], "revision": 1}
+    assert (
+        client.post(
+            f"{root}/shares", headers=owner, json={**selection, "revision": 2}
+        ).status_code
+        == 409
+    )
+    shared = client.post(f"{root}/shares", headers=owner, json=selection)
+    assert shared.status_code == 201
+    share_id = shared.json()["id"]
+    public = f"/v1/conversations/public/shares/{share_id}"
+    snapshot = client.get(public)
+    assert snapshot.headers["Cache-Control"] == "no-store"
+    assert snapshot.json() == {
+        "title": "Chat",
+        "messages": [{"role": "assistant", "content": "hello"}],
+    }
+    assert client.delete(f"{root}/shares/{share_id}", headers=other).status_code == 204
+    assert client.get(public).is_success
+    assert client.delete(f"{root}/shares/{share_id}", headers=owner).status_code == 204
+    assert client.get(public).status_code == 404
+
+    tasks = TaskOrchestrator()
+    task = tasks.create(
+        "chat", {}, user_id=user_id, model="dabba", idempotency_key="reply-dabba"
+    )
+    tasks.transition(task["id"], "running")
+    tasks.transition(
+        task["id"], "completed", result={"content": "recovered", "model": "dabba"}
+    )
+    recovery = "/v1/conversations/recovery?request_id=reply-dabba"
+    assert client.get(recovery, headers=other).status_code == 404
+    assert client.get(recovery, headers=owner).json() == {
+        "status": "completed",
+        "result": {"content": "recovered", "model": "dabba"},
+    }
+    replacement = {
+        **client.get(root, headers=owner).json(),
+        "userId": user_id,
+        "messages": [MESSAGES[0]],
+    }
+    assert client.put(root, headers=owner, json=replacement).is_success
+    assert client.get("/v1/conversations/saved", headers=owner).json() == {"items": []}
+
+
 def test_get_one_conversation_only_for_its_owner(client):
     owner_id, owner_headers = _signup(client, "owner@example.com")
     _, other_headers = _signup(client, "other@example.com")

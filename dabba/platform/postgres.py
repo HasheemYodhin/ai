@@ -67,7 +67,20 @@ def postgres_platform_schema(schema: str) -> str:
     return re.sub(r"IFNULL\((\w+), ''\)", r"(COALESCE(\1, ''))", schema)
 
 
-POSTGRES_CONVERSATIONS_SCHEMA = """
+CHAT_TOOLS_SCHEMA = """
+    CREATE TABLE IF NOT EXISTS saved_messages (
+        user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, message_id TEXT NOT NULL,
+        snippet TEXT NOT NULL, created_at BIGINT NOT NULL, PRIMARY KEY (user_id, conversation_id, message_id)
+    );
+    CREATE TABLE IF NOT EXISTS chat_shares (
+        id TEXT PRIMARY KEY, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL,
+        title TEXT NOT NULL, messages TEXT NOT NULL, created_at BIGINT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_shares_owner ON chat_shares(user_id, conversation_id);
+"""
+
+POSTGRES_CONVERSATIONS_SCHEMA = (
+    """
     CREATE TABLE IF NOT EXISTS conversations (
         id TEXT PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL,
         messages TEXT NOT NULL, created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL,
@@ -103,6 +116,8 @@ POSTGRES_CONVERSATIONS_SCHEMA = """
     CREATE TRIGGER dabba_index_messages AFTER INSERT OR UPDATE OF messages ON conversations
     FOR EACH ROW EXECUTE FUNCTION dabba_index_messages();
 """
+    + CHAT_TOOLS_SCHEMA
+)
 
 
 def initialize_postgres_conversations(url: str) -> None:

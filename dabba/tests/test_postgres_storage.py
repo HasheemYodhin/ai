@@ -98,6 +98,28 @@ def test_sqlite_import_and_postgres_api(tmp_path, monkeypatch, postgres_url):
             {"id": "original", "snippet": "Find this", "messageId": "m1"}
         ]
 
+        assert (
+            client.put(
+                "/v1/conversations/original/saved/m1", headers=headers
+            ).status_code
+            == 204
+        )
+        assert (
+            client.get("/v1/conversations/saved", headers=headers).json()["items"][0][
+                "message_id"
+            ]
+            == "m1"
+        )
+        share = client.post(
+            "/v1/conversations/original/shares",
+            headers=headers,
+            json={"messageIds": ["m1"], "revision": 1},
+        )
+        assert share.status_code == 201
+        shared_path = f"/v1/conversations/public/shares/{share.json()['id']}"
+        assert client.get(shared_path).json()["messages"] == [
+            {"role": "user", "content": "Find this"}
+        ]
         payload = {
             **client.get("/v1/conversations/original", headers=headers).json(),
             "userId": user["id"],
@@ -118,6 +140,7 @@ def test_sqlite_import_and_postgres_api(tmp_path, monkeypatch, postgres_url):
         assert client.delete("/v1/conversations", headers=headers).json() == {
             "deleted": 1
         }
+        assert client.get(shared_path).status_code == 404
         assert (
             client.put(
                 "/v1/conversations/deleted",

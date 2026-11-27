@@ -454,22 +454,7 @@ async def _handle_streaming_chat(
                 )
             raise
 
-        # Chunk for the typewriter effect while PRESERVING all whitespace —
-        # newlines and indentation carry the structure of YAML/JSON/code, so
-        # `str.split()` (which collapses every run of whitespace into one space)
-        # would flatten a Pod manifest onto a single line. Splitting on the
-        # capture group keeps each whitespace run as its own token instead.
-        tokens = [t for t in re.split(r"(\s+)", response_text) if t != ""]
-
-        try:
-            for token in tokens:
-                yield handler.create_chunk(token, index=0)
-                await asyncio.sleep(0.01)
-        except (asyncio.CancelledError, GeneratorExit):
-            if tasks:
-                tasks.cancel(task_id)
-            raise
-
+        # Save the completed response before playback so a lost stream can recover it.
         # Local dabba model never populates usage_holder — fall back to the
         # same word-count estimate the non-streaming path uses.
         if not usage_holder:
@@ -493,6 +478,16 @@ async def _handle_streaming_chat(
                     "model": req.model,
                 },
             )
+        # Chunk for the typewriter effect while PRESERVING all whitespace —
+        # newlines and indentation carry the structure of YAML/JSON/code, so
+        # `str.split()` (which collapses every run of whitespace into one space)
+        # would flatten a Pod manifest onto a single line. Splitting on the
+        # capture group keeps each whitespace run as its own token instead.
+        tokens = [t for t in re.split(r"(\s+)", response_text) if t != ""]
+        for token in tokens:
+            yield handler.create_chunk(token, index=0)
+            await asyncio.sleep(0.01)
+
         yield handler.create_chunk(
             "", index=0, finish_reason="stop", usage=usage_holder
         )

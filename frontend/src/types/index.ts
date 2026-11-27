@@ -4,12 +4,18 @@ export interface TokenUsage {
   totalTokens: number
 }
 
+export type ChatSource =
+  | { kind: 'web'; title: string; url: string }
+  | { kind: 'file'; title: string; messageId: string; pages?: number[] }
+
 export interface Message {
   id: string
   role: 'user' | 'assistant' | 'system'
   content: string
   timestamp: number
   interrupted?: boolean
+  recoveryRequestId?: string
+  sources?: ChatSource[]
   reasoning?: string
   error?: boolean
   model?: string

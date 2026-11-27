@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Header, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 
-from dabba.platform.core import get_platform_data_dir
+from dabba.platform.core import get_platform_data_dir, get_platform_store, utc_ms
 from dabba.platform.postgres import (
     PostgresConnection,
+    CHAT_TOOLS_SCHEMA,
     database_url,
     initialize_postgres_conversations,
 )
@@ -55,6 +57,10 @@ def _get_db() -> sqlite3.Connection | PostgresConnection:
                     user_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (user_id, id)
                 )""")
                 conn.execute("PRAGMA user_version = 2")
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 3:
+        conn.executescript(
+            "BEGIN IMMEDIATE;" + CHAT_TOOLS_SCHEMA + "PRAGMA user_version=3; COMMIT;"
+        )
     return conn
 
 
@@ -171,6 +177,21 @@ class ConversationUpsert(BaseModel):
     revision: Optional[int] = None
 
 
+class ShareSelection(BaseModel):
+    messageIds: list[str] = Field(min_length=1, max_length=50)
+    revision: int
+
+
+def _owned_chat(conn, user_id: str, chat_id: str):
+    row = conn.execute(
+        "SELECT title, messages, revision FROM conversations WHERE id=? AND user_id=?",
+        (chat_id, user_id),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return row
+
+
 def create_conversations_router() -> APIRouter:
     router = APIRouter(prefix="/v1", tags=["conversations"])
     identity = IdentityService()
@@ -184,6 +205,204 @@ def create_conversations_router() -> APIRouter:
         if not user:
             raise HTTPException(status_code=401, detail="Session is invalid or expired")
         return user
+
+    @router.get("/conversations/saved")
+    def list_saved(authorization: Optional[str] = Header(default=None)):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                """SELECT s.conversation_id, s.message_id, s.snippet, c.title
+                   FROM saved_messages s JOIN conversations c
+                     ON c.id=s.conversation_id AND c.user_id=s.user_id
+                   WHERE s.user_id=? ORDER BY s.created_at DESC, s.message_id LIMIT 200""",
+                (user_id,),
+            ).fetchall()
+            return {"items": [dict(row) for row in rows]}
+        finally:
+            conn.close()
+
+    @router.get("/conversations/recovery")
+    def recover_reply(
+        request_id: str = Query(min_length=1, max_length=128),
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user_id = authenticated_user(authorization)["id"]
+        task = get_platform_store().fetchone(
+            """SELECT status, result_json FROM tasks
+               WHERE user_id=? AND idempotency_key=? AND kind='chat'""",
+            (user_id, request_id),
+        )
+        if task is None:
+            raise HTTPException(
+                status_code=404, detail="No recoverable reply was found."
+            )
+        result = (
+            json.loads(task["result_json"])
+            if task["result_json"] and task["status"] == "completed"
+            else None
+        )
+        return {"status": task["status"], "result": result}
+
+    @router.put("/conversations/{chat_id}/saved/{message_id}", status_code=204)
+    def save_message(
+        chat_id: str,
+        message_id: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            with conn:
+                _begin_write(conn)
+                chat = _owned_chat(conn, user_id, chat_id)
+                message = next(
+                    (
+                        message
+                        for message in json.loads(chat["messages"])
+                        if isinstance(message, dict) and message.get("id") == message_id
+                    ),
+                    None,
+                )
+                if message is None:
+                    raise HTTPException(status_code=404, detail="Message not found")
+                conn.execute(
+                    """INSERT INTO saved_messages (user_id, conversation_id, message_id, snippet, created_at)
+                       VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, conversation_id, message_id) DO NOTHING""",
+                    (
+                        user_id,
+                        chat_id,
+                        message_id,
+                        str(message.get("content") or "Attachment")[:200],
+                        utc_ms(),
+                    ),
+                )
+        finally:
+            conn.close()
+
+    @router.delete("/conversations/{chat_id}/saved/{message_id}", status_code=204)
+    def unsave_message(
+        chat_id: str,
+        message_id: str,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM saved_messages WHERE user_id=? AND conversation_id=? AND message_id=?",
+                    (user_id, chat_id, message_id),
+                )
+        finally:
+            conn.close()
+
+    @router.get("/conversations/{chat_id}/shares")
+    def list_shares(chat_id: str, authorization: Optional[str] = Header(default=None)):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            rows = conn.execute(
+                """SELECT id, created_at FROM chat_shares WHERE user_id=? AND conversation_id=?
+                   ORDER BY created_at DESC LIMIT 50""",
+                (user_id, chat_id),
+            ).fetchall()
+            return {"items": [dict(row) for row in rows]}
+        finally:
+            conn.close()
+
+    @router.post("/conversations/{chat_id}/shares", status_code=201)
+    def create_share(
+        chat_id: str,
+        body: ShareSelection,
+        authorization: Optional[str] = Header(default=None),
+    ):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            with conn:
+                _begin_write(conn)
+                chat = _owned_chat(conn, user_id, chat_id)
+                if body.revision != chat["revision"]:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This chat changed. Reopen the sharing preview.",
+                    )
+                selected = set(body.messageIds)
+                messages = [
+                    {"role": message["role"], "content": message["content"]}
+                    for message in json.loads(chat["messages"])
+                    if isinstance(message, dict)
+                    and message.get("id") in selected
+                    and message.get("role") in ("user", "assistant")
+                    and not message.get("error")
+                    and not message.get("recoveryRequestId")
+                    and isinstance(message.get("content"), str)
+                    and message["content"].strip()
+                ]
+                if len(messages) != len(selected):
+                    raise HTTPException(
+                        status_code=400, detail="Select saved text messages to share."
+                    )
+                content = json.dumps(messages, ensure_ascii=False)
+                if len(content.encode("utf-8")) > 128 * 1024:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="Select fewer messages. A shared chat can contain up to 128 KB of text.",
+                    )
+                count = conn.execute(
+                    "SELECT COUNT(*) AS total FROM chat_shares WHERE user_id=? AND conversation_id=?",
+                    (user_id, chat_id),
+                ).fetchone()["total"]
+                if count >= 50:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Revoke an existing link before creating another.",
+                    )
+                share_id = secrets.token_urlsafe(24)
+                created_at = utc_ms()
+                conn.execute(
+                    """INSERT INTO chat_shares (id, user_id, conversation_id, title, messages, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (share_id, user_id, chat_id, chat["title"], content, created_at),
+                )
+            return {"id": share_id, "created_at": created_at}
+        finally:
+            conn.close()
+
+    @router.delete("/conversations/{chat_id}/shares/{share_id}", status_code=204)
+    def revoke_share(
+        chat_id: str, share_id: str, authorization: Optional[str] = Header(default=None)
+    ):
+        user_id = authenticated_user(authorization)["id"]
+        conn = _get_db()
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM chat_shares WHERE id=? AND conversation_id=? AND user_id=?",
+                    (share_id, chat_id, user_id),
+                )
+        finally:
+            conn.close()
+
+    @router.get("/conversations/public/shares/{share_id}")
+    def open_share(share_id: str, response: Response):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Robots-Tag"] = "noindex"
+        conn = _get_db()
+        try:
+            row = conn.execute(
+                "SELECT title, messages FROM chat_shares WHERE id=?", (share_id,)
+            ).fetchone()
+            if row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Shared chat is unavailable",
+                    headers={"Cache-Control": "no-store"},
+                )
+            return {"title": row["title"], "messages": json.loads(row["messages"])}
+        finally:
+            conn.close()
 
     @router.get("/conversations")
     def list_conversations(
@@ -373,6 +592,21 @@ def create_conversations_router() -> APIRouter:
                     body.projectId,
                 ),
             )
+            kept = {
+                message.get("id")
+                for message in body.messages
+                if isinstance(message.get("id"), str)
+            }
+            saved = conn.execute(
+                "SELECT message_id FROM saved_messages WHERE conversation_id=? AND user_id=?",
+                (conversation_id, user["id"]),
+            ).fetchall()
+            for row in saved:
+                if row["message_id"] not in kept:
+                    conn.execute(
+                        "DELETE FROM saved_messages WHERE conversation_id=? AND user_id=? AND message_id=?",
+                        (conversation_id, user["id"], row["message_id"]),
+                    )
             conn.commit()
             return {"ok": True, "revision": existing["revision"] + 1 if existing else 1}
         finally:
@@ -394,6 +628,8 @@ def create_conversations_router() -> APIRouter:
                 deleted = conn.execute(
                     "DELETE FROM conversations WHERE user_id=?", (user_id,)
                 ).rowcount
+                conn.execute("DELETE FROM saved_messages WHERE user_id=?", (user_id,))
+                conn.execute("DELETE FROM chat_shares WHERE user_id=?", (user_id,))
             return {"deleted": deleted}
         finally:
             conn.close()
@@ -421,6 +657,14 @@ def create_conversations_router() -> APIRouter:
             conn.execute(
                 """INSERT INTO conversation_deletions (user_id, id) VALUES (?, ?)
                    ON CONFLICT(user_id, id) DO NOTHING""",
+                (user_id, conversation_id),
+            )
+            conn.execute(
+                "DELETE FROM saved_messages WHERE user_id=? AND conversation_id=?",
+                (user_id, conversation_id),
+            )
+            conn.execute(
+                "DELETE FROM chat_shares WHERE user_id=? AND conversation_id=?",
                 (user_id, conversation_id),
             )
             conn.commit()

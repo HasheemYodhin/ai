@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback
 import { modelDisplayName } from '@/lib/models'
 import type { Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { AlertCircle, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
+import { AlertCircle, Bookmark, GitBranch, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
 import { useSettings } from '@/hooks/useSettings'
 import { useSmoothText } from '@/hooks/useSmoothText'
@@ -19,7 +19,14 @@ interface MessageBubbleProps {
   onRevealChange?: (id: string, revealing: boolean) => void
   onEdit?: (id: string, content: string) => void
   onRegenerate?: (id: string, overrides?: { model?: string; effort?: string }) => void
+  saved?: boolean
+  onSave?: (value: boolean) => void
+  onBranch?: () => void
+  onRecover?: () => void
+  onSourceJump?: (messageId: string) => void
 }
+
+const messageAction = 'rounded-lg p-1.5 text-text-tertiary hover:bg-surface-tertiary hover:text-text-primary dark:hover:bg-surface-dark-tertiary dark:hover:text-text-dark-primary'
 
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
@@ -27,7 +34,7 @@ function formatFileSize(bytes: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate, saved, onSave, onBranch, onRecover, onSourceJump }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isError = message.error
   const [copied, setCopied] = useState(false)
@@ -464,8 +471,31 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
           </div>
         )}
 
+        {!writing && !!message.sources?.length && (
+          <details className="mt-2 max-w-full rounded-lg border border-border p-2 text-sm dark:border-border-dark">
+            <summary className="cursor-pointer font-medium">Sources ({message.sources.length})</summary>
+            <ul className="mt-2 space-y-2">
+              {message.sources.map((source, index) => (
+                <li key={index} className="break-words">
+                  {source.kind === 'web' && /^https?:\/\//i.test(source.url) ? (
+                    <a className="text-accent underline" href={source.url} target="_blank" rel="noopener noreferrer">{source.title}</a>
+                  ) : source.kind === 'file' && onSourceJump ? (
+                    <button type="button" className="text-left text-accent underline" onClick={() => onSourceJump(source.messageId)}>
+                      {source.title}{source.pages?.length ? ` · ${source.pages.length === 1 ? 'Page' : 'Pages'} ${source.pages.join(', ')}` : ''}
+                    </button>
+                  ) : source.title}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+        {onRecover && !writing && (
+          <button type="button" className="mt-2 rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={onRecover}>
+            Recover reply
+          </button>
+        )}
         <div className={cn(
-          'flex items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
+          'flex flex-wrap items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
           isUser ? 'flex-row-reverse' : 'flex-row -ml-1.5'
         )}>
 
@@ -479,7 +509,7 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
 
           {!isEditing && !writing && (message.content || (message.generatedImages?.length ?? 0) > 0) && (
             <div className={cn(
-              'flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity',
+              'flex flex-wrap items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 transition-opacity',
               isUser ? 'flex-row-reverse' : 'flex-row'
             )}>
               <button
@@ -490,6 +520,15 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
               >
                 {copied ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
               </button>
+              {onSave && (
+                <button type="button" className={cn(messageAction, saved && 'text-accent')} aria-pressed={!!saved}
+                  title={saved ? 'Remove saved message' : 'Save message'} aria-label={saved ? 'Remove saved message' : 'Save message'}
+                  onClick={() => onSave(!saved)}><Bookmark className={saved ? 'fill-current' : undefined} /></button>
+              )}
+              {onBranch && !message.recoveryRequestId && !message.error && (
+                <button type="button" className={messageAction} title="Branch from this message" aria-label="Branch from this message"
+                  onClick={onBranch}><GitBranch /></button>
+              )}
               {isUser && onEdit && (
                 <button
                   onClick={startEdit}

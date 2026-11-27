@@ -369,6 +369,14 @@ async def _research_event_stream(req: AgentRequest, request: Request, proxy):
             },
         }
 
+    yield {
+        "type": "sources",
+        "content": [
+            {"title": source["title"], "url": source["url"]}
+            for source in evidence
+            if source.get("content")
+        ],
+    }
     prompt = _research_prompt(
         req, evidence, getattr(request.state, "dabba_user", {}).get("id")
     )

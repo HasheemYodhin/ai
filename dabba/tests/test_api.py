@@ -369,6 +369,7 @@ class TestFastAPIApp:
             "/v1/platform/identity/signup",
             "/v1/platform/identity/login",
             "/v1/platform/public/artifacts/{slug}",
+            "/v1/conversations/public/shares/{share_id}",
             # Free guest prompts: public on purpose, limited inside the
             # endpoint (dabba/tests/test_guest_endpoints.py covers the limits).
             "/v1/guest/chat",
@@ -506,9 +507,10 @@ def test_authenticated_stream_reports_usage_and_done(monkeypatch, tmp_path):
         "dabba.api.chat_endpoints._stream_provider_response", provider_stream
     )
     client = TestClient(create_app(model_engine=Mock()))
+    headers = {"Authorization": f"Bearer {session['token']}"}
     response = client.post(
         "/v1/chat/completions",
-        headers={"Authorization": f"Bearer {session['token']}"},
+        headers={**headers, "X-Idempotency-Key": "stream-test-recovery"},
         json={
             "model": "mock-provider",
             "messages": [{"role": "user", "content": "Hello"}],
@@ -520,6 +522,11 @@ def test_authenticated_stream_reports_usage_and_done(monkeypatch, tmp_path):
     assert "Streaming reply" in response.text
     assert '"reasoning_content": "Separate thought"' in response.text
     assert response.text.endswith("data: [DONE]\n\n")
+    recovery = client.get(
+        "/v1/conversations/recovery?request_id=stream-test-recovery", headers=headers
+    )
+    assert recovery.is_success
+    assert recovery.json()["result"]["content"] == "Streaming reply"
     usage = identity.store.fetchone(
         "SELECT prompt_tokens, completion_tokens FROM model_usage WHERE user_id=?",
         (user["id"],),

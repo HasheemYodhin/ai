@@ -1,13 +1,15 @@
-import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react'
-import type { Message, Project, ExtractedDocument, DocumentAttachment } from '@/types'
+import { useEffect, useRef, useCallback, useMemo, useState, lazy, Suspense } from 'react'
+import type { Message, Project, ExtractedDocument, DocumentAttachment, Conversation } from '@/types'
+import { apiClient, type SavedChatMessage } from '@/api/client'
 import { MessageBubble } from './MessageBubble'
 import { preloadMarkdownRenderer } from '@/lib/markdownRenderer'
 import { InputArea } from './InputArea'
+import { SavedMessagesDialog, ShareChatDialog } from './ChatExtras'
 import type { ActiveMode } from './PlusMenu'
 import { ArtifactProvider, useArtifact } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
 import type { PendingApproval, PendingPlanApproval } from '@/hooks/useChat'
-import { ChevronDown, Ghost, ShieldAlert, ListChecks, BookOpenText, Code2, Gauge, Bug, Scale, Play, MoreHorizontal, Trash2, Lightbulb, FileText, CalendarCheck, type LucideIcon } from 'lucide-react'
+import { Bookmark, ChevronDown, Ghost, Search, Share2, ShieldAlert, ListChecks, BookOpenText, Code2, Gauge, Bug, Scale, Play, MoreHorizontal, Trash2, Lightbulb, FileText, CalendarCheck, X, type LucideIcon } from 'lucide-react'
 
 // Pulls in react-syntax-highlighter (same heavy dep MarkdownRenderer lazy-loads)
 // — keep it out of the main bundle and only fetch it once an artifact opens.
@@ -35,9 +37,17 @@ interface ChatWindowProps {
   onPlanApprovalDecision: (approved: boolean) => void
   /** The conversation's saved title, the same one the sidebar shows. */
   conversationTitle?: string
-  messageJump?: { id: string } | null
+  messageJump?: { id: string; preserveFocus?: boolean } | null
   onMessageJumpComplete?: () => void
+  chatId: string | null
+  onJump: (chatId: string, messageId: string, preserveFocus?: boolean) => void
+  onBranch: (messageId: string) => void
+  onRecover: (messageId: string) => Promise<void>
+  flushConversation: (chatId: string) => Promise<void>
+  loadSharePreview: (chatId: string) => Promise<Conversation>
 }
+
+const headerAction = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-secondary hover:bg-surface-secondary dark:text-text-dark-secondary dark:hover:bg-surface-dark-tertiary disabled:opacity-50'
 
 const FOLLOW_UPS: { label: string; icon: LucideIcon; prompt: string }[] = [
   { label: 'Explain in detail', icon: BookOpenText, prompt: 'Can you explain the previous answer in more detail, breaking down the key concepts?' },
@@ -61,11 +71,72 @@ export function ChatWindow({
   projects, currentProjectId, onAddToProject, initialMode, onInitialModeConsumed, isTemporary,
   pendingApproval, onApprovalDecision, pendingPlanApproval, onPlanApprovalDecision,
   conversationTitle, messageJump, onMessageJumpComplete,
+  chatId, onJump, onBranch, onRecover, flushConversation, loadSharePreview,
 }: ChatWindowProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isAutoScroll, setIsAutoScroll] = useState(true)
+  const [saved, setSaved] = useState<SavedChatMessage[]>([])
+  const savedIds = useMemo(() => new Set(saved.filter(item => item.conversation_id === chatId).map(item => item.message_id)), [saved, chatId])
+  const [savedOpen, setSavedOpen] = useState(false)
+  const [savedLoading, setSavedLoading] = useState(false)
+  const [shareFor, setShareFor] = useState<string | null>(null)
+  const [actionError, setActionError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [findFor, setFindFor] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [activeMatch, setActiveMatch] = useState<string | null>(null)
+  const findOpen = findFor === (chatId ?? '__temporary__')
+  const normalizedQuery = query.trim().toLowerCase()
+  const matches = useMemo(() => findOpen && normalizedQuery
+    ? messages.filter(message => message.content.toLowerCase().includes(normalizedQuery))
+    : [], [findOpen, messages, normalizedQuery])
+  const matchIndex = matches.findIndex(message => message.id === activeMatch)
+  const moveMatch = (direction: number) => {
+    if (!matches.length) return
+    const next = matches[(matchIndex < 0 ? direction < 0 ? matches.length - 1 : 0 : matchIndex + direction + matches.length) % matches.length]
+    setActiveMatch(next.id)
+    onJump(chatId ?? '__temporary__', next.id, true)
+  }
+
+  useEffect(() => {
+    let active = true
+    apiClient.savedMessages().then(items => { if (active) setSaved(items) }).catch(() => undefined)
+    return () => { active = false }
+  }, [])
+
+  const openSaved = async () => {
+    setSavedOpen(true)
+    setSavedLoading(true)
+    setActionError('')
+    try { setSaved(await apiClient.savedMessages()) }
+    catch (err) { setActionError((err as Error).message) }
+    finally { setSavedLoading(false) }
+  }
+
+  const setSavedMessage = async (id: string, messageId: string, value: boolean) => {
+    if (busy) return
+    setBusy(true)
+    setActionError('')
+    try {
+      if (value) await flushConversation(id)
+      await apiClient.setMessageSaved(id, messageId, value)
+      setSaved(await apiClient.savedMessages())
+    } catch (err) {
+      setActionError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const recover = async (id: string) => {
+    setActionError('')
+    setBusy(true)
+    try { await onRecover(id) }
+    catch (err) { setActionError((err as Error).message) }
+    finally { setBusy(false) }
+  }
 
   useEffect(() => { preloadMarkdownRenderer() }, [])
 
@@ -135,7 +206,7 @@ export function ChatWindow({
     const frame = requestAnimationFrame(() => {
       const target = document.getElementById(`message-${messageJump.id}`)
       target?.scrollIntoView({ block: 'center' })
-      target?.focus({ preventScroll: true })
+      if (!messageJump.preserveFocus) target?.focus({ preventScroll: true })
       setVisibleCount(current => Math.max(current, messages.length - jumpIndex))
       setIsAutoScroll(false)
       onMessageJumpComplete?.()
@@ -175,6 +246,7 @@ export function ChatWindow({
     <div className="flex flex-col h-full">
       <header className="flex items-center justify-between h-14 shrink-0 px-4 sm:px-6">
         <span className="text-[15px] font-medium text-text-primary dark:text-text-dark-primary">Dabba</span>
+        {!isTemporary && <button type="button" className={headerAction} title="Saved messages" aria-label="Saved messages" onClick={() => void openSaved()}><Bookmark size={17} /></button>}
         {temporaryBadge}
       </header>
 
@@ -212,8 +284,33 @@ export function ChatWindow({
           <span className="truncate text-[15px] font-medium text-text-primary dark:text-text-dark-primary" title={title}>{title}</span>
           {temporaryBadge}
         </div>
-        <ConversationActionsMenu onClear={onClear} />
+        <div className="flex shrink-0 items-center">
+          <button type="button" className={headerAction} title="Find in chat" aria-label="Find in chat" aria-expanded={findOpen}
+            onClick={() => { setFindFor(findOpen ? null : (chatId ?? '__temporary__')); setQuery(''); setActiveMatch(null) }}><Search size={17} /></button>
+          {!isTemporary && <>
+            <button type="button" className={headerAction} title="Saved messages" aria-label="Saved messages" onClick={() => void openSaved()}><Bookmark size={17} /></button>
+            <button type="button" className={headerAction} title="Share chat" aria-label="Share chat" disabled={!chatId || isLoading}
+              onClick={() => setShareFor(chatId)}><Share2 size={17} /></button>
+          </>}
+          <ConversationActionsMenu onClear={onClear} />
+        </div>
       </header>
+      {findOpen && (
+        <div role="search" aria-label="Find in chat" className="flex flex-wrap items-center gap-1 border-b border-border p-2 dark:border-border-dark sm:px-6">
+          <input autoFocus aria-label="Search this chat" placeholder="Find a message…" value={query}
+            className="min-w-24 flex-1 rounded-lg border border-border bg-transparent px-2 py-1 text-base dark:border-border-dark sm:text-sm"
+            onChange={event => { setQuery(event.currentTarget.value); setActiveMatch(null) }}
+            onKeyDown={event => {
+              if (event.key === 'Enter') { event.preventDefault(); moveMatch(event.shiftKey ? -1 : 1) }
+              if (event.key === 'Escape') setFindFor(null)
+            }} />
+          <span role="status" className="px-1 text-xs">{matchIndex >= 0 ? `${matchIndex + 1}/${matches.length}` : `${matches.length} matches`}</span>
+          <button type="button" className={headerAction} aria-label="Previous match" disabled={!matches.length} onClick={() => moveMatch(-1)}>↑</button>
+          <button type="button" className={headerAction} aria-label="Next match" disabled={!matches.length} onClick={() => moveMatch(1)}>↓</button>
+          <button type="button" className={headerAction} aria-label="Close find" onClick={() => setFindFor(null)}><X size={16} /></button>
+        </div>
+      )}
+      {!!actionError && !savedOpen && <p role="alert" className="px-4 py-1 text-sm text-red-600 dark:text-red-400">{actionError}</p>}
 
       <div
         ref={containerRef}
@@ -230,13 +327,19 @@ export function ChatWindow({
             </button>
           )}
           {messages.slice(hiddenCount).map((msg) => (
-            <div key={msg.id} id={`message-${msg.id}`} tabIndex={-1} className="rounded-lg focus-visible:outline focus-visible:outline-accent">
+            <div key={msg.id} id={`message-${msg.id}`} tabIndex={-1}
+              className={cn('rounded-lg focus-visible:outline focus-visible:outline-accent', findOpen && msg.id === activeMatch && normalizedQuery && 'ring-2 ring-accent')}>
             <MessageBubble
               message={msg}
               isStreaming={isStreaming && msg.id === messages[messages.length - 1].id}
               onRevealChange={handleRevealChange}
               onEdit={onEdit}
               onRegenerate={onRegenerate}
+              saved={savedIds.has(msg.id)}
+              onSave={chatId && !isTemporary && !isLoading && !busy ? value => void setSavedMessage(chatId, msg.id, value) : undefined}
+              onBranch={!isTemporary && !isLoading ? () => onBranch(msg.id) : undefined}
+              onRecover={!isLoading && msg.recoveryRequestId && !busy ? () => void recover(msg.id) : undefined}
+              onSourceJump={messageId => onJump(chatId ?? '__temporary__', messageId)}
             />
             </div>
           ))}
@@ -334,6 +437,11 @@ export function ChatWindow({
           </div>
         </div>
       )}
+      {savedOpen && <SavedMessagesDialog items={saved} loading={savedLoading} error={actionError}
+        onClose={() => { setSavedOpen(false); setActionError('') }}
+        onOpen={item => { setSavedOpen(false); onJump(item.conversation_id, item.message_id) }}
+        onRemove={item => void setSavedMessage(item.conversation_id, item.message_id, false)} />}
+      {shareFor && shareFor === chatId && <ShareChatDialog chatId={shareFor} loadPreview={loadSharePreview} onClose={() => setShareFor(null)} />}
     </ArtifactProvider>
   )
 }

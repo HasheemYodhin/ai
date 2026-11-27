@@ -639,9 +639,12 @@ class SPAStaticFiles(StaticFiles):
             # Newer Starlette raises for missing files instead of returning 404.
             if exc.status_code != 404 or not self._is_app_route(path):
                 raise
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
         if response.status_code == 404 and self._is_app_route(path):
-            return await super().get_response("index.html", scope)
+            response = await super().get_response("index.html", scope)
+        if path.lstrip("/").startswith("share/"):
+            response.headers["X-Robots-Tag"] = "noindex"
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
 
@@ -782,7 +785,12 @@ def create_app(
             )
             or (
                 request.method in {"GET", "HEAD"}
-                and path.startswith("/v1/platform/public/artifacts/")
+                and path.startswith(
+                    (
+                        "/v1/platform/public/artifacts/",
+                        "/v1/conversations/public/shares/",
+                    )
+                )
             )
             or (
                 # Free guest prompts for signed-out visitors; limits are enforced

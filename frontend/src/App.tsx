@@ -8,6 +8,7 @@ import { useHistory } from '@/hooks/useHistory'
 import { useProjects } from '@/hooks/useProjects'
 import { Sidebar } from '@/components/Sidebar'
 import { ChatWindow } from '@/components/ChatWindow'
+import { SharedChatPage } from '@/components/ChatExtras'
 import { SettingsModal } from '@/components/SettingsModal'
 import { AuthPage } from '@/components/AuthPage'
 import { LegalPage, NotFoundPage } from '@/components/PublicPages'
@@ -62,6 +63,7 @@ function ChatApp() {
     deleteError,
     createConversation,
     saveConversation,
+    flushConversation,
     loadConversationAsync,
     getConversation,
     deleteConversation,
@@ -99,6 +101,7 @@ function ChatApp() {
     setMessages,
     editMessage,
     regenerate,
+    recoverReply,
     pendingApproval,
     respondToApproval,
     pendingPlanApproval,
@@ -129,6 +132,10 @@ function ChatApp() {
 
   useEffect(() => {
     if (!currentUserId || restoredUserId === currentUserId || isHistoryLoading) return
+    if (currentId || isTemporaryChat) {
+      setRestoredUserId(currentUserId)
+      return
+    }
 
     const storageKey = `dabba_current_conversation_id_${currentUserId}`
     // A /c/:id link wins; otherwise reopen the last chat on a chat-view load.
@@ -146,7 +153,7 @@ function ChatApp() {
       })
     }
     setRestoredUserId(currentUserId)
-  }, [conversations, currentUserId, restoredUserId, isHistoryLoading, loadConversationAsync, setMessages, initialRoute])
+  }, [conversations, currentId, currentUserId, restoredUserId, isHistoryLoading, isTemporaryChat, loadConversationAsync, setMessages, initialRoute])
 
   // Web search and image generation start their own fresh conversation the
   // same way a normal message does — ensure one exists before sending.
@@ -227,7 +234,7 @@ function ChatApp() {
     closeGuestImport()
   }
 
-  const [messageJump, setMessageJump] = useState<{ id: string } | null>(null)
+  const [messageJump, setMessageJump] = useState<{ id: string; preserveFocus?: boolean } | null>(null)
   const clearMessageJump = useCallback(() => setMessageJump(null), [])
   const handleSelectConversation = useCallback((id: string, messageId?: string) => {
     if (id === currentId) {
@@ -250,6 +257,27 @@ function ChatApp() {
       setIsTemporaryChat(false)
     })
   }, [currentId, isTemporaryChat, loadConversationAsync, messages, saveConversation, setMessages])
+
+  const jumpToMessage = useCallback((id: string, messageId: string, preserveFocus = false) => {
+    if (id === currentId || id === '__temporary__') setMessageJump({ id: messageId, preserveFocus })
+    else handleSelectConversation(id, messageId)
+    setView('chat')
+  }, [currentId, handleSelectConversation])
+
+  const branchChat = (messageId: string) => {
+    const index = messages.findIndex(message => message.id === messageId)
+    if (index < 0 || isLoading || isTemporaryChat) return
+    const branch = messages.slice(0, index + 1).map(message => ({ ...message, recoveryRequestId: undefined }))
+    setMessageJump(null)
+    const id = createConversation(branch)
+    setMessages(branch, id)
+    if (currentProjectId) assignToProject(id, currentProjectId)
+  }
+
+  const loadSharePreview = useCallback(async (id: string) => {
+    await flushConversation(id)
+    return apiClient.fetchConversation(id)
+  }, [flushConversation])
 
   const handleDeleteConversation = useCallback((id: string) => {
     if (currentId === id) {
@@ -457,6 +485,12 @@ function ChatApp() {
             messageJump={messageJump}
             onMessageJumpComplete={clearMessageJump}
             conversationTitle={isTemporaryChat ? undefined : getConversation(currentId)?.title}
+            chatId={currentId}
+            onJump={jumpToMessage}
+            onBranch={branchChat}
+            onRecover={recoverReply}
+            flushConversation={flushConversation}
+            loadSharePreview={loadSharePreview}
           />
         </div>
 
@@ -522,9 +556,13 @@ function publicScreenFor(pathname: string): PublicScreen {
 function AuthGate() {
   const { currentUser, isReady } = useAuth()
   const [screen, setScreen] = useState<PublicScreen>(() => publicScreenFor(window.location.pathname))
+  const [shareId, setShareId] = useState(() => /^\/share\/([A-Za-z0-9_-]{32})\/?$/.exec(window.location.pathname)?.[1])
 
   useEffect(() => {
-    const onPopState = () => setScreen(publicScreenFor(window.location.pathname))
+    const onPopState = () => {
+      setScreen(publicScreenFor(window.location.pathname))
+      setShareId(/^\/share\/([A-Za-z0-9_-]{32})\/?$/.exec(window.location.pathname)?.[1])
+    }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
@@ -546,6 +584,7 @@ function AuthGate() {
     }
   }, [currentUser])
 
+  if (shareId) return <SharedChatPage key={shareId} id={shareId} />
   if (!isReady) {
     return <div className="flex h-full items-center justify-center bg-surface text-sm text-text-secondary dark:bg-surface-dark dark:text-text-dark-secondary">Restoring your Dabba session...</div>
   }
