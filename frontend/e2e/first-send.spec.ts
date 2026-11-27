@@ -36,4 +36,21 @@ test('the first message shows immediately, even when the model is slow', async (
 
   // The reply still arrives, and the skill lookup did not hold it back for its full 4s.
   await expect(page.getByText('Hello there')).toBeVisible({ timeout: 9000 })
+
+  const hasRoomForOneLine = () => box.evaluate((textarea: HTMLTextAreaElement) => {
+    const style = getComputedStyle(textarea)
+    const minimum = parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+    return textarea.clientHeight >= minimum && textarea.scrollTop === 0
+  })
+  await expect.poll(hasRoomForOneLine).toBe(true)
+  const singleLineHeight = await box.evaluate(textarea => textarea.clientHeight)
+  await box.fill(Array.from({ length: 20 }, (_, index) => `Draft line ${index + 1}`).join('\n'))
+  await expect.poll(() => box.evaluate(textarea => textarea.clientHeight)).toBeGreaterThan(singleLineHeight)
+  await expect.poll(() => box.evaluate(textarea => textarea.clientHeight)).toBeLessThanOrEqual(200)
+  await box.press('Control+End')
+  await expect.poll(() => box.evaluate(textarea => textarea.scrollTop)).toBeGreaterThan(0)
+  await box.press('Enter')
+  await expect(box).toHaveValue('')
+  await expect.poll(hasRoomForOneLine).toBe(true)
+  await expect.poll(() => box.evaluate(textarea => textarea.clientHeight)).toBe(singleLineHeight)
 })

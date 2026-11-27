@@ -10,6 +10,7 @@ import pytest
 from dabba.agent.mcp_handler import McpHandler
 from dabba.api import agent_endpoints
 from dabba.platform import core
+from dabba.platform.provider_gateway import ProviderFailure
 from dabba.providers.base import ReasoningDelta
 from dabba.providers.registry import ProviderRegistry
 
@@ -57,6 +58,12 @@ def hosted(request, monkeypatch, tmp_path):
         ]:
             expected = "gemini-3.5-flash-lite"
         assert body["model"] == expected
+        if model.startswith("vyceai/") and body["messages"] == [
+            {"role": "user", "content": "Reject test"}
+        ]:
+            return httpx.Response(
+                403, json={"error": {"message": "Account verification required"}}
+            )
         common = {"id": "response", "created": 1, "model": body["model"]}
         usage = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
         if not body.get("stream"):
@@ -147,7 +154,12 @@ def test_hosted_provider_catalog_and_chat(hosted, monkeypatch):
         "medium" if model.startswith("gemini") else None
     )
 
-    registry.config.api_keys = {entry["provider"]: "test-key"}
+    status = asyncio.run(routes["list_api_keys"]())["providers"]
+    assert {
+        "provider": entry["provider"],
+        "hasKey": True,
+        "fromEnvironment": True,
+    } in status
     verified = asyncio.run(
         routes["test_api_key"](
             agent_endpoints.VerifyApiKeyRequest(provider=entry["provider"])
@@ -186,3 +198,11 @@ def test_hosted_provider_streaming_tool_call(hosted):
     cancel.set()
     assert list(registry.stream_chat([], model, cancel_event=cancel)) == []
     assert len(requests) == 1
+
+
+def test_vyceai_rejection_identifies_the_provider(hosted):
+    registry, model, _ = hosted
+    if not model.startswith("vyceai/"):
+        return
+    with pytest.raises(ProviderFailure, match="VyceAI rejected the request"):
+        registry.chat([{"role": "user", "content": "Reject test"}], model)

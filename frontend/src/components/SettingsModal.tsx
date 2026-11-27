@@ -873,7 +873,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   <div className="p-3 rounded-xl bg-red-500/5 border border-red-500/10 text-xs text-red-500">{keysError}</div>
                 ) : (
                   <div className="space-y-3">
-                    {providerKeys.map(({ provider, hasKey }) => (
+                    {providerKeys.map(({ provider, hasKey, fromEnvironment }) => (
                       <div key={provider} className="p-3.5 rounded-2xl border border-border dark:border-border-dark bg-surface-secondary dark:bg-surface-dark-tertiary space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-semibold text-text-primary dark:text-text-dark-primary">
@@ -883,7 +883,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                             'text-xs font-semibold px-1.5 py-0.5 rounded uppercase',
                             hasKey ? 'bg-green-500/15 text-green-600 dark:text-green-400' : 'bg-surface-tertiary dark:bg-surface-dark text-text-tertiary'
                           )}>
-                            {hasKey ? (keyChecks[provider] ? 'Verified' : 'Configured · unverified') : 'Not configured'}
+                            {hasKey ? (keyChecks[provider] ? 'Verified' : fromEnvironment ? 'Server environment' : 'Configured · unverified') : 'Not configured'}
                           </span>
                         </div>
                         {hasKey && (
@@ -918,7 +918,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           >
                             {keyBusy === provider ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
                           </button>
-                          {hasKey && (
+                          {hasKey && !fromEnvironment && (
                             <button
                               onClick={() => handleDeleteKey(provider)}
                               disabled={keyBusy === provider}

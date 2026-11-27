@@ -16,6 +16,7 @@ from dabba.providers.base import (
     remap_tool_role_for_provider,
 )
 
+FLUX_IMAGE_MODEL = "black-forest-labs/flux.1-dev"
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_TIMEOUT_SECONDS = 60.0
 SLOW_REASONING_TIMEOUT_SECONDS = 300.0
@@ -215,7 +216,7 @@ MODELS = [
     ),
     # Image generation (FLUX.1-dev via NVIDIA NIM ai.api.nvidia.com)
     ModelInfo(
-        "black-forest-labs/flux.1-dev",
+        FLUX_IMAGE_MODEL,
         "FLUX.1-dev (Image)",
         "nvidia",
         "high",
@@ -809,7 +810,7 @@ class NvidiaProvider(BaseProvider):
         payload = {
             "prompt": prompt,
             "seed": 0,
-            "num_inference_steps": 50,
+            "steps": 50,
         }
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -830,7 +831,9 @@ class NvidiaProvider(BaseProvider):
                 )
             except Exception:
                 msg = resp.text or f"HTTP {resp.status_code}"
-            raise RuntimeError(f"NVIDIA NIM image generation failed: {msg}")
+            raise RuntimeError(
+                f"NVIDIA NIM image generation failed (HTTP {resp.status_code}): {msg}"
+            )
 
         data = resp.json()
         images = []

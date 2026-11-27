@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 from dabba.agent.tool_registry import tool_execution_policy
 from dabba.config.agent_config import AgentConfig
 from dabba.providers.registry import PROVIDER_KEY_ENV_VARS
+from dabba.platform.provider_gateway import normalize_provider_error
+from dabba.providers.nvidia_provider import FLUX_IMAGE_MODEL
 
 from dabba.utils.memory_manager import get_memory_manager
 from dabba.tools.web_tools import fetch_url, search_web
@@ -1294,10 +1296,17 @@ def create_agent_router() -> APIRouter:
         """
         proxy = _get_agent_proxy()
         keys = getattr(proxy.cli_config, "api_keys", {}) or {}
-        providers_status = [
-            {"provider": p, "hasKey": bool(keys.get(p) or keys.get(p.lower()))}
-            for p in sorted(VALID_KEY_PROVIDERS)
-        ]
+        registry = proxy._get_provider_registry()
+        providers_status = []
+        for provider in sorted(VALID_KEY_PROVIDERS):
+            _, source = registry.resolve_provider_key(provider)
+            providers_status.append(
+                {
+                    "provider": provider,
+                    "hasKey": bool(source),
+                    "fromEnvironment": source in PROVIDER_KEY_ENV_VARS[provider],
+                }
+            )
         # Include any model-specific keys configured (keys that are not provider names)
         for k in sorted(keys.keys()):
             if k.lower() not in VALID_KEY_PROVIDERS:
@@ -1345,45 +1354,31 @@ def create_agent_router() -> APIRouter:
     async def test_api_key(req: VerifyApiKeyRequest):
         registry = _get_agent_proxy()._get_provider_registry()
         configured = registry.config.api_keys or {}
-        provider = req.provider.casefold()
-        key_name = next(
-            (name for name in configured if name.casefold() == provider), None
-        )
-        if not key_name or not configured[key_name]:
-            raise HTTPException(
-                status_code=400, detail="Save a provider key before testing it."
+        provider = req.provider.strip().casefold()
+        if provider in VALID_KEY_PROVIDERS:
+            key, key_name = registry.resolve_provider_key(provider)
+        else:
+            key_name = next(
+                (name for name in configured if name.casefold() == provider), None
             )
-        model = next(
-            (
-                item
-                for item in registry.list_all_models()
-                if (
-                    item.provider.casefold() == provider
-                    or item.id.casefold() == provider
-                )
-                and item.requires_key
-                and not item.supports_vision
-                and registry.resolve_api_key(item.id)[0] == configured[key_name]
-            ),
-            None,
-        )
-        if model is None:
-            model = next(
-                (
-                    item
-                    for item in registry.list_all_models()
-                    if (
-                        item.provider.casefold() == provider
-                        or item.id.casefold() == provider
-                    )
-                    and item.requires_key
-                    and registry.resolve_api_key(item.id)[0] == configured[key_name]
-                ),
-                None,
-            )
+            key = configured.get(key_name) if key_name else None
+        if not key:
+            raise HTTPException(400, "Configure a provider key before testing it.")
+
+        candidates = [
+            item
+            for item in registry.list_all_models()
+            if provider in {item.provider.casefold(), item.id.casefold()}
+            and item.requires_key
+            and item.id != FLUX_IMAGE_MODEL
+            and registry.resolve_api_key(item.id)[1] == key_name
+        ]
+        model = next((item for item in candidates if not item.supports_vision), None)
+        if model is None and candidates:
+            model = candidates[0]
         if model is None:
             raise HTTPException(
-                status_code=422, detail="No catalog model can test this saved key."
+                status_code=422, detail="No chat model can test this key."
             )
         # Hosted reasoning models may spend part of this budget before returning text.
         token_budget = 512 if model.provider in {"google", "vyceai"} else 16
@@ -1397,11 +1392,11 @@ def create_agent_router() -> APIRouter:
             )
             if not reply or not reply.strip():
                 raise ValueError("No text returned")
-        except Exception:
-            raise HTTPException(
-                status_code=502,
-                detail="The model could not answer the test. Check the key, provider access, or availability.",
-            ) from None
+        except Exception as exc:
+            failure = normalize_provider_error(
+                exc, provider=model.provider, model=model.id
+            )
+            raise HTTPException(502, failure.message) from None
         return {"model": model.id, "verifiedAt": int(time.time() * 1000)}
 
     @router.delete("/v1/agent/keys/{provider:path}")

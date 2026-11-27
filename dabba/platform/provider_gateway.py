@@ -49,6 +49,25 @@ def normalize_provider_error(
         return exc
     raw = str(exc)
     lowered = raw.lower()
+    if provider == "vyceai":
+        if "api key not set" in lowered:
+            return ProviderFailure(
+                "VyceAI API key is missing. Add it in Settings → API Keys → VyceAI or set VYCEAI_API_KEY on the server.",
+                "provider_authentication",
+                False,
+                401,
+                provider,
+                model,
+            )
+        if getattr(exc, "status_code", None) in {401, 403}:
+            return ProviderFailure(
+                "VyceAI rejected the request. Check your VyceAI key, account verification, and access to this model.",
+                "provider_authentication",
+                False,
+                401,
+                provider,
+                model,
+            )
     if any(
         marker in lowered
         for marker in (

@@ -96,9 +96,16 @@ class ProviderRegistry:
     def resolve_api_key(self, model: str) -> tuple[str, Optional[str]]:
         keys = self.config.api_keys
         provider = self.provider_name(model)
-        for source in (model, model.lower(), provider):
+        for source in (model, model.lower()):
             if source != "local" and keys.get(source):
                 return keys[source], source
+        return self.resolve_provider_key(provider)
+
+    def resolve_provider_key(self, provider: str) -> tuple[str, Optional[str]]:
+        if provider in PROVIDER_KEY_ENV_VARS:
+            for source, key in self.config.api_keys.items():
+                if source.casefold() == provider and key:
+                    return key, source
         # Fall back to the host's environment (e.g. Render's Environment tab),
         # so keys can be configured without an admin saving them in the app.
         for env_name in PROVIDER_KEY_ENV_VARS.get(provider, ()):

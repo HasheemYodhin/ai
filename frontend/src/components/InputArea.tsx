@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, type KeyboardEvent, type ChangeEvent } from 'react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, type KeyboardEvent, type ChangeEvent } from 'react'
 import { ArrowUp, Square, X, FileText, Image as ImageIcon, Sparkles, Wand2, Bot, Mic, AudioLines, Loader2, ListChecks } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { fileToDataUrl } from '@/lib/ocr'
@@ -9,6 +9,8 @@ import { ConnectorMenuIcon, PlusMenu, type ActiveMode } from './PlusMenu'
 import { VoiceRecordingModal } from './VoiceRecordingModal'
 import { ModelSwitcher } from './ModelSwitcher'
 import { useSkills } from '@/hooks/useSkills'
+import { useSettings } from '@/hooks/useSettings'
+import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import type { UploadedFile, Project, ExtractedDocument, DocumentAttachment } from '@/types'
 
 interface InputAreaProps {
@@ -64,6 +66,7 @@ export function InputArea({
   initialMode,
   onInitialModeConsumed,
 }: InputAreaProps) {
+  const { settings } = useSettings()
   const [value, setValue] = useState('')
   const [files, setFiles] = useState<UploadedFile[]>([])
   const [fileError, setFileError] = useState<string | null>(null)
@@ -143,16 +146,13 @@ export function InputArea({
     }
   }, [initialMode, onInitialModeConsumed])
 
-  const adjustHeight = useCallback(() => {
-    const el = textareaRef.current
-    if (!el) return
-    el.style.height = '0'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }, [])
-
-  useEffect(() => {
-    adjustHeight()
-  }, [value, adjustHeight])
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+    if (!value) textarea.scrollTop = 0
+  }, [value])
 
   const handleFiles = useCallback(async (fileList: FileList) => {
     setFileError(null)
@@ -228,13 +228,19 @@ export function InputArea({
     e.target.value = ''
   }, [handleFiles])
 
+  const imageMode = mode.kind === 'image' || (mode.kind === 'chat' && settings.model === FLUX_IMAGE_MODEL)
+
   const handleSend = useCallback(async () => {
     const trimmed = value.trim()
     if ((!trimmed && files.length === 0) || isLoading || isExtractingDocuments || disabled) return
 
     if (mode.kind === 'agent') {
       onRunAgentMode(trimmed, { label: mode.label, effort: mode.effort, hint: mode.hint, allowedTools: mode.allowedTools, viaVoice: pendingViaVoice, planMode: planModeEnabled })
-    } else if (mode.kind === 'image') {
+    } else if (imageMode) {
+      if (files.length) {
+        setFileError('Image generation uses a text prompt. Remove the attachments to continue.')
+        return
+      }
       onGenerateImage(trimmed)
     } else {
       const imageFiles = files.filter(f => f.type.startsWith('image/') && f.dataUrl)
@@ -294,10 +300,7 @@ export function InputArea({
     extractedFiles.current.clear()
     setFiles([])
     setPendingViaVoice(false)
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
-  }, [value, files, isLoading, isExtractingDocuments, disabled, mode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
+  }, [value, files, isLoading, isExtractingDocuments, disabled, mode, imageMode, onSend, onRunAgentMode, onGenerateImage, skills, pendingViaVoice, planModeEnabled])
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     // IME keyboards emit Enter while composing; never submit partial text.
@@ -327,7 +330,7 @@ export function InputArea({
       : mode.kind === 'skill'
         ? { icon: Sparkles, label: mode.name, placeholder }
         : null
-  const effectivePlaceholder = modeChip?.placeholder ?? placeholder
+  const effectivePlaceholder = modeChip?.placeholder ?? (imageMode ? 'Describe the image to generate…' : placeholder)
 
   return (
     <div className="bg-transparent">
@@ -423,7 +426,7 @@ export function InputArea({
             disabled={disabled}
             maxLength={maxChars + 100}
             className={cn(
-              'w-full resize-none bg-transparent px-5 pt-4 pb-2 text-base leading-7 outline-none',
+              'w-full min-h-[3.25rem] max-h-[200px] shrink-0 resize-none overflow-y-auto bg-transparent px-5 pt-4 pb-2 text-base leading-7 outline-none',
               'text-text-primary dark:text-text-dark-primary',
               'placeholder:text-text-tertiary dark:placeholder:text-text-dark-tertiary',
               'disabled:opacity-50 scrollbar-thin'

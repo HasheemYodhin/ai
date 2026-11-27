@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react'
+import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
 import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment, DocumentProgress, DocumentRequest, GeneratedFile } from '@/types'
@@ -744,8 +745,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
   }, [isLoading, addMessage, setConversationRunning, updateMessage, markDocumentEnded, settings.model, settings.effort, settings.documentTemplate, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
 
-  // Generates images from a prompt via /v1/images/generations (proxies to
-  // whichever image-capable provider has a key configured — currently OpenAI).
+  // Sends image prompts to the image endpoint, with an explicit model when selected.
   const generateImage = useCallback(async (prompt: string, requestedConversationId?: string) => {
     if (!prompt.trim() || isLoading) return
     const conversationId = requestedConversationId ?? activeConversationRef.current ?? '__draft__'
@@ -759,7 +759,10 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     abortControllersRef.current.set(conversationId, abortController)
 
     try {
-      const images = await apiClient.generateImages(prompt, { signal: abortController.signal })
+      const images = await apiClient.generateImages(prompt, {
+        model: settings.model === FLUX_IMAGE_MODEL ? FLUX_IMAGE_MODEL : undefined,
+        signal: abortController.signal,
+      })
       updateMessage(assistantMessage.id, {
         generatedImages: images,
         isGeneratingImage: false,
@@ -782,7 +785,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [isLoading, addMessage, setConversationRunning, updateMessage])
+  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model])
 
   // Edits a user message in place, drops everything after it, and re-runs the assistant turn.
   const editMessage = useCallback(async (id: string, content: string) => {

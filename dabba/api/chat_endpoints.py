@@ -29,6 +29,7 @@ from dabba.api.auth import ApiKeyAuth
 from dabba.api.rate_limiter import RateLimiter
 from dabba.api.streaming_handler import StreamingHandler
 from dabba.providers.base import ReasoningDelta
+from dabba.providers.nvidia_provider import FLUX_IMAGE_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -185,6 +186,11 @@ def create_chat_router(
             StreamingResponse for streaming requests.
         """
         req = await _read_chat_request(request)
+        if req.model.casefold() == FLUX_IMAGE_MODEL:
+            raise HTTPException(
+                400,
+                "FLUX.1-dev generates images. Send the prompt to /v1/images/generations.",
+            )
 
         if rate_limiter:
             await rate_limiter.check_request(request, api_key)
@@ -207,6 +213,11 @@ def create_chat_router(
         Useful for clients that want explicit streaming endpoints.
         """
         req = await _read_chat_request(request)
+        if req.model.casefold() == FLUX_IMAGE_MODEL:
+            raise HTTPException(
+                400,
+                "FLUX.1-dev generates images. Send the prompt to /v1/images/generations.",
+            )
 
         req.stream = True
 

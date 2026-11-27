@@ -4,6 +4,7 @@ import { apiClient } from '@/api/client'
 export interface ProviderKeyStatus {
   provider: string
   hasKey: boolean
+  fromEnvironment?: boolean
 }
 
 interface UseProviderKeysReturn {

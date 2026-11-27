@@ -790,7 +790,7 @@ export class ApiClient {
   }
 
   /** Which providers have an API key configured server-side — never the key values themselves. */
-  async fetchProviderKeys(signal?: AbortSignal): Promise<{ provider: string; hasKey: boolean }[]> {
+  async fetchProviderKeys(signal?: AbortSignal): Promise<{ provider: string; hasKey: boolean; fromEnvironment?: boolean }[]> {
     const response = await fetch(`${this.baseUrl}/v1/agent/keys`, {
       headers: this.getHeaders(),
       signal,
@@ -995,11 +995,11 @@ export class ApiClient {
   }
 
   /** Generate images from a text prompt. Returns data URLs (works for both b64_json and url responses). */
-  async generateImages(prompt: string, opts?: { size?: string; n?: number; signal?: AbortSignal }): Promise<string[]> {
+  async generateImages(prompt: string, opts?: { model?: string; size?: string; n?: number; signal?: AbortSignal }): Promise<string[]> {
     const response = await fetch(`${this.baseUrl}/v1/images/generations`, {
       method: 'POST',
       headers: this.getHeaders(),
-      body: JSON.stringify({ prompt, size: opts?.size ?? '1024x1024', n: opts?.n ?? 1 }),
+      body: JSON.stringify({ prompt, model: opts?.model, size: opts?.size ?? '1024x1024', n: opts?.n ?? 1 }),
       signal: opts?.signal,
     })
     if (!response.ok) {

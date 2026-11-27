@@ -1,5 +1,7 @@
 import type { ModelInfo, EffortTier } from '@/types'
 
+export const FLUX_IMAGE_MODEL = 'black-forest-labs/flux.1-dev'
+
 /**
  * Static fallback list used only when the Dabba server's /v1/agent/models
  * endpoint is unreachable. The live catalog (43+ models across providers)
