@@ -6,6 +6,11 @@ export interface DocumentRequest {
   template: DocumentTemplate
 }
 
+export interface DocumentProgress {
+  stage: 'drafting' | 'building' | 'finished' | 'failed' | 'stopped'
+  formats: Partial<Record<DocumentFormat, 'building' | 'ready' | 'failed'>>
+}
+
 export interface TokenUsage {
   promptTokens: number
   completionTokens: number
@@ -39,6 +44,7 @@ export interface Message {
   /** Real binary documents generated from an assistant reply. */
   generatedFiles?: GeneratedFile[]
   documentRequest?: DocumentRequest
+  documentProgress?: DocumentProgress
   /** Generated document body kept for follow-up requests. */
   documentOutput?: string
   /** Brief text shown beside a generated file. */

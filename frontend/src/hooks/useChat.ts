@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { apiClient } from '@/api/client'
-import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment, DocumentRequest, GeneratedFile } from '@/types'
+import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment, DocumentProgress, DocumentRequest, GeneratedFile } from '@/types'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
 import { ocrImages } from '@/lib/ocr'
@@ -79,16 +79,45 @@ function documentRequestFor(prompt: string, fallback: DocumentTemplate, attachme
   return formats.length ? { formats, template: templateForPrompt(prompt, fallback) } : undefined
 }
 
-async function buildDocumentReply(reply: string, request: DocumentRequest, userMessage: Message, attachmentMessage?: Message) {
+async function buildDocumentReply(
+  reply: string,
+  request: DocumentRequest,
+  userMessage: Message,
+  report: (documentProgress: DocumentProgress, generatedFiles: GeneratedFile[]) => void,
+  attachmentMessage?: Message,
+  signal?: AbortSignal,
+) {
   const { splitDocumentReply } = await import('@/lib/documents/summary')
   const { body, summary } = splitDocumentReply(reply)
   if (!body.trim()) throw new Error('The model returned an empty document. Try generating it again.')
   const baseName = generatedDocumentBaseName(attachmentMessage ?? userMessage, userMessage.content, body)
   const files: GeneratedFile[] = []
+  const formats: DocumentProgress['formats'] = {}
+  const publish = () => report({ stage: 'building', formats: { ...formats } }, [...files])
   for (const format of request.formats) {
-    files.push(await createGeneratedDocument(body, baseName, format, request.template))
+    signal?.throwIfAborted()
+    formats[format] = 'building'
+    publish()
+    // Yield so the progress UI can render even when the exporter is already loaded.
+    await new Promise<void>(resolve => setTimeout(resolve, 0))
+    signal?.throwIfAborted()
+    try {
+      const file = await createGeneratedDocument(body, baseName, format, request.template)
+      signal?.throwIfAborted()
+      files.push(file)
+      formats[format] = 'ready'
+    } catch (error) {
+      signal?.throwIfAborted()
+      if (error instanceof DOMException && error.name === 'AbortError') throw error
+      formats[format] = 'failed'
+    }
+    publish()
   }
-  return { content: '', generatedFiles: files, documentOutput: body, documentSummary: summary }
+  if (!files.length) throw new Error('Could not create the requested files. Try again.')
+  return {
+    content: '', generatedFiles: files, documentOutput: body, documentSummary: summary,
+    documentProgress: { stage: 'finished' as const, formats },
+  }
 }
 
 /** The first Markdown heading in generated text, without the markup. */
@@ -254,6 +283,13 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     commitMessages(target, previous.map(m => (m.id === id ? { ...m, ...updates } : m)), persist)
   }, [commitMessages])
 
+  const markDocumentEnded = useCallback((id: string, stage: 'failed' | 'stopped', conversationId: string) => {
+    const message = conversationMessagesRef.current.get(conversationId)?.find(item => item.id === id)
+    if (message?.documentProgress) {
+      updateMessage(id, { documentProgress: { ...message.documentProgress, stage } }, conversationId)
+    }
+  }, [updateMessage])
+
   const clearMessages = useCallback(() => {
     respondToApproval(false)
     const target = activeConversationRef.current
@@ -293,7 +329,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       message => message.role === 'user' && message.documentAttachments?.length
     )
     const documentRequest = userMessage && documentRequestFor(userMessage.content, settings.documentTemplate, attachmentMessage?.documentAttachments)
-    if (documentRequest) updateMessage(assistantId, { documentRequest }, conversationId)
+    if (documentRequest) updateMessage(assistantId, { documentRequest, documentProgress: { stage: 'drafting', formats: {} } }, conversationId)
 
     const apiMessages = [...historyMessages]
     apiMessages.unshift({
@@ -392,7 +428,9 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       }
 
       const documentReply = documentRequest && userMessage
-        ? await buildDocumentReply(fullContent, documentRequest, userMessage, attachmentMessage)
+        ? await buildDocumentReply(fullContent, documentRequest, userMessage,
+            (documentProgress, generatedFiles) => updateMessage(assistantId, { documentProgress, generatedFiles }, conversationId, false),
+            attachmentMessage, abortController.signal)
         : { content: fullContent }
       if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantId, {
@@ -431,9 +469,11 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     } catch (err) {
       flushChunk()
       if ((err as Error).name === 'AbortError') {
+        markDocumentEnded(assistantId, 'stopped', conversationId)
         const partial = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === assistantId)?.content
         updateMessage(assistantId, { timestamp: Date.now(), interrupted: Boolean(partial), recoveryRequestId: undefined }, conversationId)
       } else {
+        markDocumentEnded(assistantId, 'failed', conversationId)
         const errorMessage = (err as Error).message || 'An unexpected error occurred'
         const partial = conversationMessagesRef.current.get(conversationId)
           ?.find(message => message.id === assistantId)?.content
@@ -449,7 +489,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [settings, setConversationRunning, updateMessage, models, onConversationTitle])
+  }, [settings, setConversationRunning, updateMessage, markDocumentEnded, models, onConversationTitle])
 
   const sendMessage = useCallback(async (content: string, images?: string[], opts?: { conversationId?: string; systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => {
     if ((!content.trim() && !images?.length && !opts?.attachments?.length) || isLoading) return
@@ -494,7 +534,14 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       userMessage = addMessage(content, 'user', { documentContext, documentAttachments: opts?.attachments, viaVoice: opts?.viaVoice }, conversationId)
     }
 
-    const assistantMessage = addMessage('', 'assistant', { viaVoice: opts?.viaVoice }, conversationId)
+    const attachments = userMessage.documentAttachments?.length
+      ? userMessage.documentAttachments
+      : [...startingMessages].reverse().find(message => message.role === 'user' && message.documentAttachments?.length)?.documentAttachments
+    const documentRequest = documentRequestFor(userMessage.content, settings.documentTemplate, attachments)
+    const assistantMessage = addMessage('', 'assistant', {
+      viaVoice: opts?.viaVoice, documentRequest,
+      documentProgress: documentRequest ? { stage: 'drafting', formats: {} } : undefined,
+    }, conversationId)
     // Enter the loading state immediately — the skill-match lookup below is
     // best-effort and must not delay the UI's "Dabba is working" feedback.
     setConversationRunning(conversationId, true)
@@ -516,7 +563,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
 
     await runCompletion([...startingMessages, userMessage], assistantMessage.id, effectiveOpts, conversationId)
-  }, [messages, isLoading, addMessage, runCompletion, setConversationRunning, settings.model, models])
+  }, [messages, isLoading, addMessage, runCompletion, setConversationRunning, settings.model, settings.documentTemplate, models])
 
   /** Best-effort human summary of a tool call's arguments for the activity trace. */
   function summarizeToolArgs(args: unknown): string {
@@ -542,7 +589,11 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     const documentRequest = documentRequestFor(content, settings.documentTemplate)
 
     const userMessage = addMessage(content, 'user', { viaVoice: opts.viaVoice }, conversationId)
-    const assistantMessage = addMessage('', 'assistant', { documentRequest, agentActivity: { label: opts.label, steps: [], done: false }, viaVoice: opts.viaVoice }, conversationId)
+    const assistantMessage = addMessage('', 'assistant', {
+      documentRequest,
+      documentProgress: documentRequest ? { stage: 'drafting', formats: {} } : undefined,
+      agentActivity: { label: opts.label, steps: [], done: false }, viaVoice: opts.viaVoice,
+    }, conversationId)
 
     setError(null)
     setConversationRunning(conversationId, true)
@@ -652,7 +703,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
             const optionsText = c?.options?.length ? '\n' + c.options.map(o => `  • ${o}`).join('\n') : ''
             askedQuestion = true
             textParts = [...(documentRequest ? [] : textParts), `❓ ${c?.question ?? ''}${optionsText}`]
-            updateMessage(assistantMessage.id, { content: textParts.join('\n\n') }, conversationId)
+            updateMessage(assistantMessage.id, { content: textParts.join('\n\n'), documentProgress: undefined }, conversationId)
           } else if (event.type === 'error') {
             throw new Error(String(event.content ?? 'Agent error'))
           }
@@ -660,7 +711,9 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       })
       const finalContent = textParts.join('\n\n').trim()
       const documentReply = documentRequest && !askedQuestion
-        ? await buildDocumentReply(finalContent, documentRequest, userMessage)
+        ? await buildDocumentReply(finalContent, documentRequest, userMessage,
+            (documentProgress, generatedFiles) => updateMessage(assistantMessage.id, { documentProgress, generatedFiles }, conversationId, false),
+            undefined, abortController.signal)
         : undefined
       if (abortController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
       updateMessage(assistantMessage.id, {
@@ -672,8 +725,10 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       }, conversationId)
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
+        markDocumentEnded(assistantMessage.id, 'stopped', conversationId)
         updateMessage(assistantMessage.id, { timestamp: Date.now(), agentActivity: { label: opts.label, steps, done: true } }, conversationId)
       } else {
+        markDocumentEnded(assistantMessage.id, 'failed', conversationId)
         const errorMessage = (err as Error).message || `${opts.label} failed`
         updateMessage(assistantMessage.id, {
           content: errorMessage,
@@ -687,7 +742,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model, settings.effort, settings.documentTemplate, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
+  }, [isLoading, addMessage, setConversationRunning, updateMessage, markDocumentEnded, settings.model, settings.effort, settings.documentTemplate, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
 
   // Generates images from a prompt via /v1/images/generations (proxies to
   // whichever image-capable provider has a key configured — currently OpenAI).
@@ -765,10 +820,33 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       const history = conversation.slice(0, conversation.indexOf(latest)).reverse()
       const userMessage = history.find(message => message.role === 'user')
       if (!userMessage) throw new Error('The original document request could not be found.')
-      reply = await buildDocumentReply(
-        result.content, latest.documentRequest, userMessage,
-        history.find(message => message.role === 'user' && message.documentAttachments?.length),
-      )
+      if (abortControllersRef.current.has(conversationId)) return
+      const abortController = new AbortController()
+      abortControllersRef.current.set(conversationId, abortController)
+      setConversationRunning(conversationId, true)
+      try {
+        reply = await buildDocumentReply(
+          result.content, latest.documentRequest, userMessage,
+          (documentProgress, generatedFiles) => {
+            if (conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId === requestId) {
+              updateMessage(id, { documentProgress, generatedFiles }, conversationId, false)
+            }
+          },
+          history.find(message => message.role === 'user' && message.documentAttachments?.length),
+          abortController.signal,
+        )
+      } catch (error) {
+        if (conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId === requestId) {
+          markDocumentEnded(id, abortController.signal.aborted ? 'stopped' : 'failed', conversationId)
+        }
+        if (abortController.signal.aborted) return
+        throw error
+      } finally {
+        if (abortControllersRef.current.get(conversationId) === abortController) {
+          abortControllersRef.current.delete(conversationId)
+          setConversationRunning(conversationId, false)
+        }
+      }
       if (conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId !== requestId) return
     }
     updateMessage(id, {
@@ -776,7 +854,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       interrupted: false, error: false, recoveryRequestId: undefined,
       usage: result.usage ? { promptTokens, completionTokens, totalTokens: result.usage.total_tokens ?? promptTokens + completionTokens } : undefined,
     }, conversationId)
-  }, [updateMessage])
+  }, [updateMessage, markDocumentEnded, setConversationRunning])
 
   // Regenerates an assistant reply (also serves as retry-on-error), optionally
   // with a different model/effort than the current settings.

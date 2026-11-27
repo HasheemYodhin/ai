@@ -24,8 +24,16 @@ const REPLY = [
 
 const SUMMARY = 'A week-one onboarding checklist with responsibilities for new engineers.'
 
-test('shows one short summary beside PDF, Word, Excel, PowerPoint and Markdown downloads', async ({ page }) => {
+test('logs progress and shows one short summary beside all five document downloads', async ({ page }) => {
   let modelPrompt = ''
+  let finishDraft!: () => void
+  const drafting = new Promise<void>(resolve => { finishDraft = resolve })
+  let finishPdfLoad!: () => void
+  const pdfLoading = new Promise<void>(resolve => { finishPdfLoad = resolve })
+  await page.route('**/src/lib/documents/pdf.ts*', async route => {
+    await pdfLoading
+    await route.continue()
+  })
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   await page.route('**/v1/**', async route => {
     const request = route.request()
@@ -38,6 +46,7 @@ test('shows one short summary beside PDF, Word, Excel, PowerPoint and Markdown d
       const sse = (text: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text, reasoning_content: 'Private file draft' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`
       const isTitleRequest = (request.postData() ?? '').includes('chat title')
       if (!isTitleRequest) modelPrompt = request.postData() ?? ''
+      if (!isTitleRequest) await drafting
       return route.fulfill({ contentType: 'text/event-stream', body: sse(isTitleRequest ? 'Checklist' : `Chat summary: ${SUMMARY}\n\n${REPLY}`) })
     }
     if (url.includes('/v1/conversations?')) return route.fulfill({ json: { conversations: [] } })
@@ -48,12 +57,32 @@ test('shows one short summary beside PDF, Word, Excel, PowerPoint and Markdown d
   const box = page.getByPlaceholder('Ask anything…')
   await box.fill('Please create a PDF, Word document, Excel workbook, PowerPoint and Markdown file for an onboarding checklist using the Technical template')
   await box.press('Enter')
+  const progress = page.getByRole('status', { name: 'File preparation' })
+  const log = page.getByRole('list', { name: 'File preparation log' })
+  const formats = ['PDF', 'Word', 'Excel', 'PowerPoint', 'Markdown']
+  try {
+    await expect(progress).toHaveText('Drafting document content…')
+    await expect(log.getByRole('listitem')).toHaveCount(formats.length)
+    for (const name of formats) {
+      await expect(log.getByRole('listitem').filter({ hasText: name })).toContainText('Queued')
+    }
+    finishDraft()
+    await expect(progress).toHaveText('Building PDF…')
+  } finally {
+    finishDraft()
+    finishPdfLoad()
+  }
 
   // Named after the document's own title, not after the request. The libraries load on demand, so allow time.
   const links = page.locator('a[download]')
   await expect(links).toHaveCount(5, { timeout: 60_000 })
   for (const extension of ['pdf', 'docx', 'xlsx', 'pptx', 'md']) {
     await expect(page.locator(`a[download="onboarding-checklist.${extension}"]`)).toBeVisible()
+  }
+  await expect(progress).toHaveText('Files ready')
+  await progress.click()
+  for (const name of formats) {
+    await expect(log.getByRole('listitem').filter({ hasText: name })).toContainText('Ready')
   }
   expect(modelPrompt).toContain('Document template: Technical')
   expect(modelPrompt).toContain('Chat summary:')

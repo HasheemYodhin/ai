@@ -1,12 +1,13 @@
 import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback, type KeyboardEvent } from 'react'
 import { modelDisplayName } from '@/lib/models'
-import type { Message } from '@/types'
+import type { DocumentProgress, DocumentRequest, Message } from '@/types'
 import { cn } from '@/lib/utils'
 import { AlertCircle, Bookmark, GitBranch, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
 import { useSettings } from '@/hooks/useSettings'
 import { useSmoothText } from '@/hooks/useSmoothText'
 import { loadMarkdownRenderer } from '@/lib/markdownRenderer'
+import { DOCUMENT_FORMAT_LABELS } from '@/lib/download'
 import { RegenerateMenu } from './RegenerateMenu'
 import { DownloadMenu } from './DownloadMenu'
 import logo from '../icon.svg'
@@ -32,6 +33,45 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function DocumentProgressLog({ request, progress, isStreaming }: {
+  request: DocumentRequest
+  progress: DocumentProgress
+  isStreaming: boolean
+}) {
+  const active = isStreaming && (progress.stage === 'drafting' || progress.stage === 'building')
+  const current = request.formats.find(format => progress.formats[format] === 'building')
+  const failed = request.formats.some(format => progress.formats[format] === 'failed')
+  const heading = progress.stage === 'finished'
+    ? failed ? 'Some files could not be created' : 'Files ready'
+    : progress.stage === 'failed' ? 'File preparation failed'
+      : progress.stage === 'stopped' ? 'File preparation stopped'
+        : !active ? 'File preparation interrupted'
+          : progress.stage === 'drafting' ? 'Drafting document content…'
+            : current ? `Building ${DOCUMENT_FORMAT_LABELS[current]}…` : 'Preparing downloads…'
+
+  return (
+    <details open={active} className="mb-3 w-full max-w-sm rounded-lg border border-border px-3 py-2 text-sm dark:border-border-dark">
+      <summary className="cursor-pointer font-medium">
+        <span role="status" aria-label="File preparation">{heading}</span>
+      </summary>
+      <ul aria-label="File preparation log" className="mt-2 space-y-1 border-t border-border pt-2 text-xs dark:border-border-dark">
+        {request.formats.map(format => {
+          const status = progress.formats[format]
+          const label = status === 'ready' ? 'Ready' : status === 'failed' ? 'Failed'
+            : active ? status === 'building' ? 'Building…' : 'Queued'
+              : status === 'building' ? 'Interrupted' : 'Skipped'
+          return (
+            <li key={format} className="flex justify-between gap-2">
+              <span>{DOCUMENT_FORMAT_LABELS[format]}</span>
+              <span className={status === 'failed' ? 'text-red-600 dark:text-red-400' : 'text-text-secondary dark:text-text-dark-secondary'}>{label}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </details>
+  )
 }
 
 export const MessageBubble = memo(function MessageBubble({ message, isStreaming, onRevealChange, onEdit, onRegenerate, saved, onSave, onBranch, onRecover, onSourceJump }: MessageBubbleProps) {
@@ -400,11 +440,15 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                   </details>
                 )}
 
+                {message.documentRequest && message.documentProgress && (
+                  <DocumentProgressLog request={message.documentRequest} progress={message.documentProgress} isStreaming={Boolean(isStreaming)} />
+                )}
+
                 {shownContent ? (
                   <Suspense fallback={<p className="whitespace-pre-wrap">{shownContent}</p>}>
                     <MarkdownRenderer content={shownContent} className={writing ? 'streaming-cursor' : undefined} />
                   </Suspense>
-                ) : isStreaming && !message.isGeneratingImage ? (
+                ) : isStreaming && !message.isGeneratingImage && !message.documentProgress ? (
                   <div className="flex items-center gap-3 h-7 text-text-primary dark:text-text-dark-primary" role="status" aria-label={isDocument ? 'Preparing files' : 'Dabba is thinking'}>
                     <span className="thinking-dot" />
                     {isDocument ? <span className="text-[13px] text-text-tertiary dark:text-text-dark-tertiary">Preparing files…</span> : streamElapsed >= 6 && (

@@ -16,6 +16,14 @@ export interface TextFormat {
 
 export type DocumentFormat = 'pdf' | 'docx' | 'xlsx' | 'pptx' | 'md'
 
+export const DOCUMENT_FORMAT_LABELS: Record<DocumentFormat, string> = {
+  pdf: 'PDF',
+  docx: 'Word',
+  xlsx: 'Excel',
+  pptx: 'PowerPoint',
+  md: 'Markdown',
+}
+
 const DOCUMENT_MIME_TYPES: Record<DocumentFormat, string> = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
