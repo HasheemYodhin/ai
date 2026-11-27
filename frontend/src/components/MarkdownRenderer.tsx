@@ -12,7 +12,8 @@ import { Copy, Check, ChevronDown, ChevronRight, Maximize2, FileCode2, Play, Loa
 import { useTheme } from '@/hooks/useTheme'
 import { useArtifact, isPreviewable } from '@/hooks/useArtifact'
 import { cn } from '@/lib/utils'
-import { apiClient } from '@/api/client'
+import { apiClient, type CodeExecutionStatus } from '@/api/client'
+import { downloadJavaSource } from '@/lib/download'
 import { useAuth } from '@/hooks/useAuth'
 import { runBrowserPython, type BrowserCodeResult } from '@/lib/browserPython'
 
@@ -25,6 +26,11 @@ const RUNNABLE_LANGUAGES = new Set([
   'java', 'c', 'cpp', 'c++', 'cc', 'go', 'golang', 'rust', 'rs', 'ruby', 'rb',
   'php', 'bash', 'sh', 'shell', 'zsh', 'kotlin', 'kt', 'swift',
 ])
+const LANGUAGE_ALIASES: Record<string, string> = {
+  py: 'python', python3: 'python', js: 'javascript', node: 'javascript',
+  ts: 'typescript', tsx: 'typescript', 'c++': 'cpp', cc: 'cpp', golang: 'go',
+  rs: 'rust', rb: 'ruby', sh: 'bash', shell: 'bash', zsh: 'bash', kt: 'kotlin',
+}
 
 function guessTitle(language: string, code: string): string {
   const firstLine = code.split('\n', 1)[0]?.trim() ?? ''
@@ -171,16 +177,22 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   const [runError, setRunError] = useState('')
   const { openArtifact } = useArtifact()
   const { isAdmin, currentUser } = useAuth()
-  const [executionAccess, setExecutionAccess] = useState<{ userId: string; reason: string | null } | null>(null)
+  const [executionAccess, setExecutionAccess] = useState<(CodeExecutionStatus & { userId: string }) | null>(null)
   const userId = currentUser?.id
-  const isRunnableLanguage = RUNNABLE_LANGUAGES.has(language.toLowerCase())
-  const canRunInBrowser = ['python', 'py', 'python3'].includes(language.toLowerCase()) && typeof WebAssembly !== 'undefined'
+  const languageLabel = language.toLowerCase()
+  const runtime = LANGUAGE_ALIASES[languageLabel] ?? languageLabel
+  const isRunnableLanguage = RUNNABLE_LANGUAGES.has(languageLabel)
+  const canRunInBrowser = runtime === 'python' && typeof WebAssembly !== 'undefined'
+  const runtimeStatus = executionAccess?.languages.find(item => typeof item === 'string' ? item === runtime : item.id === runtime)
+  const runtimeMissing = executionAccess?.languages.length && (!runtimeStatus || (typeof runtimeStatus === 'object' && !runtimeStatus.available))
   const runController = useRef<AbortController | null>(null)
   useEffect(() => () => runController.current?.abort(), [])
   const runDisabledReason = !isAdmin
     ? 'Only the workspace owner can run code'
     : executionAccess && executionAccess.userId === userId
-      ? executionAccess.reason
+      ? executionAccess.unavailableReason ?? (runtimeMissing
+        ? runtime === 'java' ? 'Java JDK is missing on the local Dabba server' : `${language} runtime is missing on the local Dabba server`
+        : null)
       : 'Checking code execution availability'
   const useBrowserRunner = canRunInBrowser && runDisabledReason !== null
   const canRun = useBrowserRunner || (isRunnableLanguage && runDisabledReason === null)
@@ -188,11 +200,11 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   useEffect(() => {
     if (!isAdmin || !userId || !isRunnableLanguage) return
     const controller = new AbortController()
-    apiClient.getCodeExecutionUnavailableReason(controller.signal)
-      .then(reason => setExecutionAccess({ userId, reason }))
+    apiClient.getCodeExecutionStatus(controller.signal)
+      .then(status => setExecutionAccess({ userId, ...status }))
       .catch(error => {
         if (!controller.signal.aborted) {
-          setExecutionAccess({ userId, reason: error instanceof Error ? error.message : 'Could not check code execution availability' })
+          setExecutionAccess({ userId, languages: [], unavailableReason: error instanceof Error ? error.message : 'Could not check code execution availability' })
         }
       })
     return () => controller.abort()
@@ -269,9 +281,17 @@ function CodeBlock({ language, code, isDark }: { language: string; code: string;
   ) : null
 
   const executionPanel = !canRun && showRunReason ? (
-    <p role="status" className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
-      {runDisabledReason}. Python snippets can run in a supported browser. Scripts that install software or access local files need your own terminal. Other runtimes require the owner's local server.
-    </p>
+    <div className="border-t border-border px-3 py-2 text-xs text-text-secondary dark:border-border-dark">
+      <p role="status">{runDisabledReason}. {runtime === 'java'
+        ? 'Run Java with a local JDK or open the browser playground and paste the code there.'
+        : 'Python snippets can run in a supported browser. Other runtimes require the owner’s local server.'}</p>
+      {runtime === 'java' && (
+        <div className="mt-2 flex flex-wrap gap-3">
+          <button type="button" onClick={() => downloadJavaSource(code)} className="font-medium text-accent underline">Download Java source</button>
+          <a href="https://javafiddle.leaningtech.com/" target="_blank" rel="noopener noreferrer" className="font-medium text-accent underline">Open Java playground</a>
+        </div>
+      )}
+    </div>
   ) : canRun && (stdinOpen || result || runError) && (
     <div className="border-t border-border dark:border-border-dark bg-gray-950 text-gray-100">
       {stdinOpen && (

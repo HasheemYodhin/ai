@@ -686,17 +686,24 @@ export class ApiClient {
     return data.documents ?? []
   }
 
-  async getCodeExecutionUnavailableReason(signal?: AbortSignal): Promise<string | null> {
+  getCodeExecutionStatus(signal?: AbortSignal): Promise<CodeExecutionStatus> {
     return this.cachedRead('code-execution', async () => {
       const response = await fetch(`${this.baseUrl}/v1/code/languages`, {
         headers: this.getHeaders(),
       })
       if (!response.ok) throw await responseError(response, 'Could not check code execution availability')
-      const data = await response.json() as { unavailableReason?: string | null }
-      return data.unavailableReason === undefined
-        ? 'Code execution availability could not be verified'
-        : data.unavailableReason
+      const data = await response.json() as Partial<CodeExecutionStatus>
+      return {
+        unavailableReason: data.unavailableReason === undefined
+          ? 'Code execution availability could not be verified'
+          : data.unavailableReason,
+        languages: data.languages ?? [],
+      }
     }, { signal })
+  }
+
+  async getCodeExecutionUnavailableReason(signal?: AbortSignal): Promise<string | null> {
+    return (await this.getCodeExecutionStatus(signal)).unavailableReason
   }
 
   async executeCode(
@@ -1280,6 +1287,10 @@ export interface PlatformUser {
 }
 
 export type ProfileDetails = { name: string; bio: string }
+export type CodeExecutionStatus = {
+  unavailableReason: string | null
+  languages: (string | { id: string; available: boolean })[]
+}
 export type SavedChatMessage = { conversation_id: string; message_id: string; title: string; snippet: string }
 export type ChatShare = { id: string; created_at: number }
 export type SharedChat = { title: string; messages: { role: 'user' | 'assistant'; content: string }[] }

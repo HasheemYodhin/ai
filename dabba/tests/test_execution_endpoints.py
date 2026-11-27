@@ -97,3 +97,27 @@ def test_compiled_c_execution():
 
     assert result["exitCode"] == 0
     assert result["stdout"] == "compiled\n"
+
+
+@pytest.mark.skipif(
+    not shutil.which("java") or not shutil.which("javac"),
+    reason="Java JDK not installed",
+)
+def test_java_execution_compiles_a_named_class_and_reverses_input():
+    result = execute_code(
+        ExecutionRequest(
+            language="java",
+            code="""package example;
+import java.util.Scanner;
+public final class ReverseString {
+    public static void main(String[] args) {
+        System.out.println(new StringBuilder(new Scanner(System.in).nextLine()).reverse());
+    }
+}
+""",
+            stdin="Dabba\n",
+        )
+    )
+
+    assert result["exitCode"] == 0, result
+    assert result["stdout"] == "abbaD\n"

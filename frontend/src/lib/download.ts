@@ -69,6 +69,13 @@ function triggerDownload(filename: string, data: Blob | string, mime = 'text/pla
   URL.revokeObjectURL(url)
 }
 
+export function downloadJavaSource(source: string) {
+  const declarations = source.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
+  const type = /\bpublic\s+(?:(?:final|abstract|sealed|non-sealed|strictfp)\s+)*(?:class|record|enum|interface)\s+([A-Za-z_$][\w$]*)/.exec(declarations)
+    ?? /^\s*(?:final\s+)?class\s+([A-Za-z_$][\w$]*)/m.exec(declarations)
+  triggerDownload(`${type?.[1] ?? 'Main'}.java`, source, 'text/x-java')
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

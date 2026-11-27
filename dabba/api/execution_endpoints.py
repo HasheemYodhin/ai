@@ -23,6 +23,13 @@ MAX_CODE_BYTES = 100_000
 MAX_STDIN_BYTES = 32_000
 MAX_OUTPUT_BYTES = 64_000
 MAX_TIMEOUT_SECONDS = 10
+JAVA_VM_OPTIONS = (
+    "-Xms16m",
+    "-Xmx128m",
+    "-XX:+UseSerialGC",
+    "-XX:ReservedCodeCacheSize=32m",
+    "-XX:CompressedClassSpaceSize=32m",
+)
 
 
 class ExecutionRequest(BaseModel):
@@ -45,7 +52,17 @@ LANGUAGES: Dict[str, LanguageSpec] = {
     "javascript": LanguageSpec(("js", "node"), ".js", ("node", "{source}")),
     "typescript": LanguageSpec(("ts", "tsx"), ".ts", ("tsx", "{source}")),
     "java": LanguageSpec(
-        (), ".java", ("java", "-cp", "{dir}", "{class}"), ("javac", "{source}")
+        (),
+        ".java",
+        ("java", *JAVA_VM_OPTIONS, "-cp", "{dir}", "{class}"),
+        (
+            "javac",
+            *(f"-J{option}" for option in JAVA_VM_OPTIONS),
+            "-proc:none",
+            "-d",
+            "{dir}",
+            "{source}",
+        ),
     ),
     "c": LanguageSpec(
         (), ".c", ("{binary}",), ("gcc", "{source}", "-O0", "-o", "{binary}")
@@ -150,10 +167,20 @@ def execute_code(req: ExecutionRequest) -> dict:
     with tempfile.TemporaryDirectory(prefix="dabba-run-") as tmp:
         tmp_path = Path(tmp)
         class_name = "Main"
+        entry_point = class_name
         if language == "java":
-            match = re.search(r"public\s+class\s+([A-Za-z_$][\w$]*)", req.code)
+            declarations = re.sub(r"/\*[\s\S]*?\*/|//[^\n]*", "", req.code)
+            match = re.search(
+                r"\bpublic\s+(?:(?:final|abstract|sealed|non-sealed|strictfp)\s+)*"
+                r"(?:class|record|enum|interface)\s+([A-Za-z_$][\w$]*)",
+                declarations,
+            ) or re.search(
+                r"(?m)^\s*(?:final\s+)?class\s+([A-Za-z_$][\w$]*)", declarations
+            )
             if match:
                 class_name = match.group(1)
+            package = re.search(r"(?m)^\s*package\s+([\w$.]+)\s*;", declarations)
+            entry_point = f"{package.group(1)}.{class_name}" if package else class_name
         source = (
             tmp_path / f"{class_name if language == 'java' else 'main'}{spec.extension}"
         )
@@ -165,7 +192,7 @@ def execute_code(req: ExecutionRequest) -> dict:
             "dir": str(tmp_path),
             "binary": str(binary),
             "jar": str(jar),
-            "class": class_name,
+            "class": entry_point,
         }
         run_kwargs = {
             "cwd": str(tmp_path),
