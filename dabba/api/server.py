@@ -645,6 +645,8 @@ class SPAStaticFiles(StaticFiles):
             response = await super().get_response("index.html", scope)
         if response.status_code == 404 and self._is_app_route(path):
             response = await super().get_response("index.html", scope)
+        if self._is_app_route(path) or path in {".", "index.html"}:
+            response.headers["Cache-Control"] = "no-cache"
         if path.lstrip("/").startswith("share/"):
             response.headers["X-Robots-Tag"] = "noindex"
             response.headers["Referrer-Policy"] = "no-referrer"

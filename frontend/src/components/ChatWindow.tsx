@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useMemo, useState, lazy, Suspense } from 'react'
+import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import type { Message, Project, ExtractedDocument, DocumentAttachment, Conversation } from '@/types'
 import { apiClient, type SavedChatMessage } from '@/api/client'
 import { MessageBubble } from './MessageBubble'
@@ -338,7 +339,7 @@ export function ChatWindow({
               saved={savedIds.has(msg.id)}
               onSave={chatId && !isTemporary && !isLoading && !busy ? value => void setSavedMessage(chatId, msg.id, value) : undefined}
               onBranch={!isTemporary && !isLoading ? () => onBranch(msg.id) : undefined}
-              onRecover={!isLoading && msg.recoveryRequestId && !busy ? () => void recover(msg.id) : undefined}
+              onRecover={!isLoading && msg.model !== FLUX_IMAGE_MODEL && msg.recoveryRequestId && !busy ? () => void recover(msg.id) : undefined}
               onSourceJump={messageId => onJump(chatId ?? '__temporary__', messageId)}
             />
             </div>

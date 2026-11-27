@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { FLUX_IMAGE_MODEL } from '../src/lib/models'
 
 test('sending a prompt with FLUX selected generates an image', async ({ page }) => {
+  let requests = 0
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   await page.route('**/v1/**', route => {
     const path = new URL(route.request().url()).pathname
@@ -13,6 +14,7 @@ test('sending a prompt with FLUX selected generates an image', async ({ page }) 
     }
     if (path === '/v1/images/generations') {
       expect(route.request().postDataJSON()).toMatchObject({ prompt: 'A mountain at sunset', model: FLUX_IMAGE_MODEL })
+      if (++requests === 1) return route.fulfill({ status: 503, json: { detail: 'Image provider temporarily unavailable.' } })
       return route.fulfill({ json: { data: [{ b64_json: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aGh4AAAAASUVORK5CYII=' }] } })
     }
     expect(path).not.toBe('/v1/chat/completions')
@@ -25,5 +27,9 @@ test('sending a prompt with FLUX selected generates an image', async ({ page }) 
   const prompt = page.getByPlaceholder('Describe the image to generate…')
   await prompt.fill('A mountain at sunset')
   await prompt.press('Enter')
+  await expect(page.getByText('Image provider temporarily unavailable.', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Recover reply' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
   await expect(page.getByRole('img', { name: /generated/ })).toBeVisible()
+  expect(requests).toBe(2)
 })

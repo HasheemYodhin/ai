@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useLayoutEffect } from 'react'
 import { FLUX_IMAGE_MODEL } from '@/lib/models'
 import { v4 as uuidv4 } from 'uuid'
-import { apiClient } from '@/api/client'
+import { apiClient, HttpResponseError, TerminalChatError } from '@/api/client'
 import type { Message, AgentStep, ChatSource, ExtractedDocument, DocumentAttachment, DocumentProgress, DocumentRequest, GeneratedFile } from '@/types'
 import { useSettings } from '@/hooks/useSettings'
 import { useModels } from '@/hooks/useModels'
@@ -310,22 +310,61 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
   }, [respondToApproval, setConversationRunning])
 
+  const runImageCompletion = useCallback(async (prompt: string, assistantId: string, conversationId: string, model?: string) => {
+    setError(null)
+    setConversationRunning(conversationId, true)
+    const abortController = new AbortController()
+    abortControllersRef.current.set(conversationId, abortController)
+    updateMessage(assistantId, { imageGeneration: true, isGeneratingImage: true, model }, conversationId)
+    try {
+      const images = await apiClient.generateImages(prompt, { model, signal: abortController.signal })
+      if (!images.length) throw new Error('The image provider returned no images. Try again.')
+      updateMessage(assistantId, { generatedImages: images, isGeneratingImage: false, timestamp: Date.now() }, conversationId)
+    } catch (err) {
+      const stopped = (err as Error).name === 'AbortError'
+      const errorMessage = stopped ? 'Image generation stopped.' : (err as Error).message || 'Image generation failed.'
+      updateMessage(assistantId, { content: errorMessage, error: true, isGeneratingImage: false, timestamp: Date.now() }, conversationId)
+      if (!stopped) setError(errorMessage)
+    } finally {
+      setConversationRunning(conversationId, false)
+      abortControllersRef.current.delete(conversationId)
+    }
+  }, [setConversationRunning, updateMessage])
+
+  const generateImage = useCallback(async (prompt: string, requestedConversationId?: string) => {
+    if (!prompt.trim() || isLoading) return
+    const conversationId = requestedConversationId ?? activeConversationRef.current ?? '__draft__'
+    addMessage(prompt, 'user', undefined, conversationId)
+    const assistant = addMessage('', 'assistant', undefined, conversationId)
+    await runImageCompletion(prompt, assistant.id, conversationId, settings.model === FLUX_IMAGE_MODEL ? FLUX_IMAGE_MODEL : undefined)
+  }, [isLoading, addMessage, runImageCompletion, settings.model])
+
   const runCompletion = useCallback(async (
     historyMessages: Message[],
     assistantId: string,
-    overrides?: { model?: string; effort?: string; systemPromptOverride?: string },
+    overrides?: { model?: string; effort?: string; systemPromptOverride?: string; imageGeneration?: boolean },
     conversationId = activeConversationRef.current ?? '__draft__',
   ) => {
+    const model = overrides?.model ?? settings.model
+    const userMessage = [...historyMessages].reverse().find(message => message.role === 'user')
+    if (model === FLUX_IMAGE_MODEL || overrides?.imageGeneration) {
+      if (!userMessage?.content.trim() || userMessage.images?.length || userMessage.documentAttachments?.length) {
+        const content = 'Image generation needs a text prompt without attachments.'
+        updateMessage(assistantId, { content, error: true, model }, conversationId)
+        setError(content)
+        setConversationRunning(conversationId, false)
+        return
+      }
+      return runImageCompletion(userMessage.content, assistantId, conversationId, model === FLUX_IMAGE_MODEL ? model : undefined)
+    }
+
     setError(null)
     setConversationRunning(conversationId, true)
 
     const abortController = new AbortController()
     abortControllersRef.current.set(conversationId, abortController)
-
-    const model = overrides?.model ?? settings.model
     const effort = overrides?.effort ?? settings.effort
     const systemPrompt = overrides?.systemPromptOverride ?? settings.systemPrompt
-    const userMessage = [...historyMessages].reverse().find(message => message.role === 'user')
     const attachmentMessage = [...historyMessages].reverse().find(
       message => message.role === 'user' && message.documentAttachments?.length
     )
@@ -478,9 +517,12 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
         const errorMessage = (err as Error).message || 'An unexpected error occurred'
         const partial = conversationMessagesRef.current.get(conversationId)
           ?.find(message => message.id === assistantId)?.content
+        const rejected = err instanceof HttpResponseError && err.status >= 400 && err.status < 500
+          && err.status !== 408 && err.status !== 409
         updateMessage(assistantId, {
           content: partial || errorMessage,
           interrupted: Boolean(partial),
+          ...(rejected || err instanceof TerminalChatError ? { recoveryRequestId: undefined } : {}),
           error: true,
           timestamp: Date.now(),
         }, conversationId)
@@ -490,11 +532,14 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
       setConversationRunning(conversationId, false)
       abortControllersRef.current.delete(conversationId)
     }
-  }, [settings, setConversationRunning, updateMessage, markDocumentEnded, models, onConversationTitle])
+  }, [settings, setConversationRunning, updateMessage, markDocumentEnded, models, onConversationTitle, runImageCompletion])
 
   const sendMessage = useCallback(async (content: string, images?: string[], opts?: { conversationId?: string; systemPromptOverride?: string; viaVoice?: boolean; documents?: ExtractedDocument[]; attachments?: DocumentAttachment[] }) => {
     if ((!content.trim() && !images?.length && !opts?.attachments?.length) || isLoading) return
     const conversationId = opts?.conversationId ?? activeConversationRef.current ?? '__draft__'
+    if (settings.model === FLUX_IMAGE_MODEL && !images?.length && !opts?.attachments?.length) {
+      return generateImage(content, conversationId)
+    }
     const startingMessages = conversationMessagesRef.current.get(conversationId) ?? messages
 
     const documentContext = opts?.documents?.length
@@ -564,7 +609,7 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
 
     await runCompletion([...startingMessages, userMessage], assistantMessage.id, effectiveOpts, conversationId)
-  }, [messages, isLoading, addMessage, runCompletion, setConversationRunning, settings.model, settings.documentTemplate, models])
+  }, [generateImage, messages, isLoading, addMessage, runCompletion, setConversationRunning, settings.model, settings.documentTemplate, models])
 
   /** Best-effort human summary of a tool call's arguments for the activity trace. */
   function summarizeToolArgs(args: unknown): string {
@@ -745,48 +790,6 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     }
   }, [isLoading, addMessage, setConversationRunning, updateMessage, markDocumentEnded, settings.model, settings.effort, settings.documentTemplate, settings.planModeDefault, settings.defaultPermissionMode, settings.systemPrompt, settings.useToolSearch, settings.maxSteps, settings.contextCompactionThreshold, settings.contextCompactionKeepRecent])
 
-  // Sends image prompts to the image endpoint, with an explicit model when selected.
-  const generateImage = useCallback(async (prompt: string, requestedConversationId?: string) => {
-    if (!prompt.trim() || isLoading) return
-    const conversationId = requestedConversationId ?? activeConversationRef.current ?? '__draft__'
-
-    addMessage(prompt, 'user', undefined, conversationId)
-    const assistantMessage = addMessage('', 'assistant', { isGeneratingImage: true }, conversationId)
-
-    setError(null)
-    setConversationRunning(conversationId, true)
-    const abortController = new AbortController()
-    abortControllersRef.current.set(conversationId, abortController)
-
-    try {
-      const images = await apiClient.generateImages(prompt, {
-        model: settings.model === FLUX_IMAGE_MODEL ? FLUX_IMAGE_MODEL : undefined,
-        signal: abortController.signal,
-      })
-      updateMessage(assistantMessage.id, {
-        generatedImages: images,
-        isGeneratingImage: false,
-        timestamp: Date.now(),
-      }, conversationId)
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') {
-        updateMessage(assistantMessage.id, { isGeneratingImage: false, timestamp: Date.now() }, conversationId)
-      } else {
-        const errorMessage = (err as Error).message || 'Image generation failed'
-        updateMessage(assistantMessage.id, {
-          content: errorMessage,
-          error: true,
-          isGeneratingImage: false,
-          timestamp: Date.now(),
-        }, conversationId)
-        setError(errorMessage)
-      }
-    } finally {
-      setConversationRunning(conversationId, false)
-      abortControllersRef.current.delete(conversationId)
-    }
-  }, [isLoading, addMessage, setConversationRunning, updateMessage, settings.model])
-
   // Edits a user message in place, drops everything after it, and re-runs the assistant turn.
   const editMessage = useCallback(async (id: string, content: string) => {
     if (!content.trim() || isLoading) return
@@ -807,13 +810,19 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     if (!conversationId) return
     const requestId = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)?.recoveryRequestId
     if (!requestId) return
-    const { status, result } = await apiClient.recoverChatReply(requestId)
+    const recovered = await apiClient.recoverChatReply(requestId).catch(error => {
+      if (!(error instanceof HttpResponseError) || error.status !== 404) throw error
+      return null
+    })
+    const { status, result } = recovered ?? { status: 'missing', result: null }
     const latest = conversationMessagesRef.current.get(conversationId)?.find(message => message.id === id)
     if (latest?.recoveryRequestId !== requestId) return
     if (!result || typeof result.content !== 'string' || NVIDIA_CAPACITY_RE.test(result.content)) {
-      throw new Error(status === 'running' || status === 'queued'
-        ? 'The server is still working. Check again shortly.'
-        : 'There’s no completed reply to recover. You can keep the partial text or retry.')
+      if (status === 'running' || status === 'queued') {
+        throw new Error('The server is still working. Check again shortly.')
+      }
+      updateMessage(id, { recoveryRequestId: undefined, error: true }, conversationId)
+      return
     }
     const promptTokens = result.usage?.prompt_tokens ?? 0
     const completionTokens = result.usage?.completion_tokens ?? 0
@@ -871,7 +880,13 @@ export function useChat({ activeConversationId = null, onConversationUpdate, onC
     const assistantMessage: Message = { id: uuidv4(), role: 'assistant', content: '', timestamp: Date.now() }
 
     setMessages([...history, assistantMessage])
-    await runCompletion(history, assistantMessage.id, overrides)
+    const previous = messages[index]
+    const wasImage = previous.imageGeneration || !!previous.generatedImages?.length
+    await runCompletion(history, assistantMessage.id, {
+      ...overrides,
+      model: overrides?.model ?? (previous.error || wasImage ? previous.model : undefined),
+      imageGeneration: !overrides?.model && wasImage,
+    })
   }, [messages, isLoading, runCompletion, setMessages])
 
   return {

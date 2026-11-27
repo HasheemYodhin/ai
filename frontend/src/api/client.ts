@@ -2,34 +2,42 @@ import type { ChatCompletionRequest, ChatCompletionResponse, StreamChunk, Messag
 
 export const DEFAULT_API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '')
 
+export class HttpResponseError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message)
+  }
+}
+
+export class TerminalChatError extends Error {}
+
 async function responseError(response: Response, fallback: string): Promise<Error> {
   if (response.headers.get('Content-Type')?.includes('text/html')) {
-    return new Error(response.status >= 500
+    return new HttpResponseError(response.status, response.status >= 500
       ? `Dabba is temporarily unavailable (HTTP ${response.status}). Please try again.`
       : fallback)
   }
   const text = await response.text().catch(() => '')
-  if (!text) return new Error(fallback)
+  if (!text) return new HttpResponseError(response.status, fallback)
 
   try {
     const body = JSON.parse(text) as {
       detail?: unknown
       error?: { message?: unknown }
     }
-    if (typeof body.error?.message === 'string') return new Error(body.error.message)
-    if (typeof body.detail === 'string') return new Error(body.detail)
+    if (typeof body.error?.message === 'string') return new HttpResponseError(response.status, body.error.message)
+    if (typeof body.detail === 'string') return new HttpResponseError(response.status, body.detail)
     if (Array.isArray(body.detail)) {
       const details = body.detail
         .map(item => typeof item?.msg === 'string' ? item.msg : '')
         .filter(Boolean)
         .join('; ')
-      if (details) return new Error(details)
+      if (details) return new HttpResponseError(response.status, details)
     }
   } catch {
     // Some proxies return plain-text errors instead of JSON.
   }
 
-  return new Error(/^\s*</.test(text) ? fallback : text.trim() || fallback)
+  return new HttpResponseError(response.status, /^\s*</.test(text) ? fallback : text.trim() || fallback)
 }
 
 /** How long a shared read (models, skills) is reused before refetching. */
@@ -1228,7 +1236,7 @@ export class ApiClient {
             continue
           }
           if (parsed.error) {
-            throw new Error(parsed.error.message ?? 'The model provider could not complete this request.')
+            throw new TerminalChatError(parsed.error.message ?? 'The model provider could not complete this request.')
           }
           const delta = parsed.choices?.[0]?.delta?.content ?? ''
           const reasoning = parsed.choices?.[0]?.delta?.reasoning_content ?? ''

@@ -51,6 +51,7 @@ export interface Message {
   documentSummary?: string
   /** Images the model generated in response to this message (data URLs). */
   generatedImages?: string[]
+  imageGeneration?: boolean
   /** True while this message represents an in-flight image generation request. */
   isGeneratingImage?: boolean
   /**

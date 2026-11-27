@@ -1,278 +1,130 @@
-<div align="center">
-
 # Dabba
 
-**A self-hosted AI assistant platform — chat, agents, tools, and automations in one place.**
+Dabba is a self-hosted AI workspace for chat, documents, image generation, and tool-assisted tasks. Run the web app and API locally, or deploy them together on Docker. Hosted model providers handle inference remotely, so a small server can run Dabba without loading a large model.
 
-Web app · Terminal TUI · VS Code extension · Chrome extension · OpenAI-compatible API
+- **Chat.** Stream replies, upload files and images, use voice where supported, branch conversations, and save or share messages.
+- **Documents.** Generate PDF, Word, Excel, PowerPoint, and Markdown files with templates, progress updates, and a short summary in chat.
+- **Workspace.** Organize chats into projects, reuse prompts, and manage account preferences, usage, and saved memory.
+- **Tools.** Connect MCP servers, run workflows in Cowork, and manage scheduled skills and approval requests.
 
-</div>
+## Run locally
 
----
-
-## Table of contents
-
-- [What is Dabba?](#what-is-dabba)
-- [Screenshots](#screenshots)
-- [Architecture](#architecture)
-- [Features](#features)
-- [Quick start](#quick-start)
-- [Configuration](#configuration)
-- [Project structure](#project-structure)
-- [Testing](#testing)
-- [Deployment](#deployment)
-- [Documentation](#documentation)
-
----
-
-## What is Dabba?
-
-Dabba is a full-stack AI assistant platform. One FastAPI backend powers several clients, and every client can switch between cloud model providers or Dabba's own from-scratch transformer.
-
-It brings together:
-
-- **A chat workspace** with projects, artifacts, file uploads, voice input, and exports (PDF, Word, Excel, PowerPoint)
-- **An agent runtime** with planning, tool calling, MCP connectors, hooks, subagents, and scheduled skills
-- **A multi-provider gateway** for Anthropic, OpenAI, Google, NVIDIA NIM, Ollama, Hugging Face, and local GGUF models
-- **A from-scratch LLM stack**: BPE tokenizer, decoder-only transformer, trainer, RAG pipeline, and multimodal encoders
-
-> [!NOTE]
-> The built-in `dabba` model is small (about 8.9M parameters) and intended for experimentation and casual chat. For agentic work such as file edits, shell commands, and multi-step tasks, pick a hosted model like Claude, GPT, Gemini, or a NVIDIA NIM model from the **Agents** page.
-
----
-
-## Screenshots
-
-### Sign in
-
-Signed-out visitors see the sign-in form at `/` or `/login`, can sign up at `/signup`, and can open guest chat at `/try` when enabled. On phones it shows the form only. The first account created on a server becomes its owner.
-
-| Desktop | Mobile |
-|---|---|
-| ![Sign up](docs/screenshots/auth.png) | <img src="docs/screenshots/mobile-login.png" alt="Mobile sign up" width="260"> |
-
-### Cowork
-
-A task-first workspace. Describe the result you want, optionally point it at a project folder, and Dabba works on it with tools and connectors enabled.
-
-![Cowork workspace](docs/screenshots/cowork.png)
-
-### Agents (model picker)
-
-Each available model, grouped by provider, with an effort badge (`LOW` → `MAX`). Providers that need a key prompt for it on first use.
-
-![Agents and model picker](docs/screenshots/agents.png)
-
-### Connectors
-
-MCP connectors for GitHub, Google Drive, Microsoft 365, AWS, Azure, Slack, Jira, Linear, Notion, Figma, and more. Installed connectors show live status.
-
-![Connectors catalogue](docs/screenshots/connectors.png)
-
-### Projects
-
-Group related conversations and give them shared instructions.
-
-![Projects](docs/screenshots/projects.png)
-
-### Prompt library (skills)
-
-Saved instructions that Dabba applies to matching messages automatically. Any `SKILL.md` file can be imported.
-
-![Prompt library](docs/screenshots/prompt-library.png)
-
-### Scheduled skills
-
-Run reusable instructions on a schedule, with durable queueing and run history.
-
-![Scheduled skills](docs/screenshots/scheduled-skills.png)
-
-### Hooks
-
-Run a shell command on agent events. A non-zero exit from a *Before a tool call* hook blocks that tool call.
-
-![Hooks](docs/screenshots/hooks.png)
-
-### Subagent types
-
-Named personas with their own system prompt, tool allowlist, and model, which can be dispatched in parallel.
-
-![Subagent types](docs/screenshots/subagents.png)
-
----
-
-## Architecture
-
-![Dabba system architecture](docs/images/architecture.png)
-
-See [DABBA_ARCHITECTURE.md](DABBA_ARCHITECTURE.md) for the full design.
-
----
-
-## Features
-
-| Area | Highlights |
-|---|---|
-| **Chat** | Streaming replies, Markdown + KaTeX math, syntax highlighting, artifacts panel, regenerate, file and image upload, OCR, voice input, text-to-speech |
-| **Export** | Download conversations or artifacts as PDF, DOCX, XLSX, or PPTX |
-| **Agents** | Plan → act loop, native tool calling, permission prompts, subagents, research mode |
-| **Tools** | File, shell, code, Docker, SSH, web, RAG, todo, and artifact tools |
-| **Connectors** | MCP client with a curated connector catalogue |
-| **Automation** | Scheduled skills, hooks on agent events, task center for run history and retries |
-| **Providers** | Anthropic, OpenAI, Google, NVIDIA NIM, Ollama, Hugging Face, local GGUF, built-in `dabba` |
-| **Security** | Session auth, owner/member roles (first account is the owner), encrypted provider keys (`DABBA_MASTER_KEY`), CORS allowlist, rate limiting |
-| **Model stack** | BPE tokenizer, GQA/MQA attention, KV cache, gradient checkpointing, quantization, perplexity and latency benchmarks |
-
----
-
-## Quick start
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 22+ (for the web app)
-- Optional: an API key for at least one hosted provider
-
-### 1. Start the backend
+Use Python 3.10 or newer and Node.js 22 or newer. From the repository root, start the API in one terminal.
 
 ```bash
-pip install -r requirements-server.txt
-export DABBA_CORS_ORIGINS=http://localhost:5173
-python3 -m dabba.api.server            # listens on http://127.0.0.1:8080
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements-server.txt
+DABBA_MODEL_PATH=rule_based DABBA_DATA_DIR="$PWD/.dabba-data" \
+  python -m dabba.api.server --host 127.0.0.1 --port 8080
 ```
 
-Check it is running:
+Check API and storage readiness.
 
 ```bash
-curl http://localhost:8080/health
+curl --fail http://127.0.0.1:8080/ready
 ```
 
-### 2. Start the web app
+Start the web app in a second terminal.
 
 ```bash
 cd frontend
-npm install
-npm run dev                            # http://localhost:5173
+npm ci
+npm run dev
 ```
 
-The Vite dev server proxies `/v1` to the backend. Set `VITE_API_URL` to point at a different server.
+Open <http://localhost:5173/signup> and create the first account. It becomes the workspace owner and can manage provider keys and connectors. Vite proxies API requests to port 8080. Set `VITE_API_URL` before starting Vite if your backend uses another address.
 
-### 3. Create an account
+## Connect a model provider
 
-Open the web app and sign up. The first account becomes the workspace owner, with access to Cowork, connectors, hooks and code execution. To give another account the same access later:
+Add a provider key under **Settings → API Keys** or set the matching environment variable on the API server. Saved model-specific keys take precedence over the provider key, and saved provider keys take precedence over environment variables. Refresh the model picker after adding a key.
+
+| Provider | Environment variable | Typical use |
+| --- | --- | --- |
+| NVIDIA | `NVIDIA_API_KEY` | Nemotron chat and FLUX.1-dev image generation |
+| Google | `GEMINI_API_KEY` | Gemini chat, reasoning, and vision on supported models |
+| VyceAI | `VYCEAI_API_KEY` | GLM 5.3 Flash, Nemotron 3.5 Super VL, GPT-OSS 120B, and Wave |
+| OpenAI | `OPENAI_API_KEY` | GPT chat and optional hosted transcription |
+| Anthropic | `ANTHROPIC_API_KEY` | Claude chat and tool use |
+| Hugging Face | `HF_TOKEN` | Supported hosted models |
+
+To generate an image, select **FLUX.1-dev (Image)** or choose **Create an image** from the composer. FLUX uses NVIDIA credentials. For VyceAI chat access, use **Test key** in Settings and verify your VyceAI account if the provider rejects the request. Promotional access and quotas depend on the provider account.
+
+Use [.env.example](.env.example) as a configuration reference. Keep real keys and database URLs in your host’s secret settings.
+
+### Usage limits
+
+These server variables set rolling chat token limits per account. Set a window to `0` for unlimited usage in that window. Provider spend and rate limits are configured in the provider’s dashboard.
+
+| Window | Variable | Default |
+| --- | --- | ---: |
+| 5 hours | `DABBA_CHAT_TOKEN_LIMIT_5H` | 250,000 |
+| Daily | `DABBA_CHAT_TOKEN_LIMIT_DAILY` | 1,000,000 |
+| Weekly | `DABBA_CHAT_TOKEN_LIMIT_WEEKLY` | 4,000,000 |
+
+## Deploy Dabba
+
+### Docker
+
+The production image builds the web app and serves it from the API. Mount `/data` for persistent files and local databases.
 
 ```bash
-python3 -m dabba.platform.accounts [USER_EMAIL] --role admin
+docker build -t dabba .
+docker run --name dabba --rm -p 127.0.0.1:8080:8080 \
+  -e DABBA_LOW_MEMORY=true \
+  -v dabba-data:/data dabba
 ```
 
-### Other clients
+Open <http://127.0.0.1:8080>. Use `/health` to check the API process and `/ready` to check whether it can access platform storage.
 
-| Client | How to run |
-|---|---|
-| Terminal TUI | `bin/dabba` (or `python3 -m dabba.cli`) |
-| VS Code | `cd vscode-extension && npx vsce package` then install the `.vsix` |
-| Chrome | Load `chrome-extension/` as an unpacked extension |
-| Any OpenAI client | Point the base URL at `http://localhost:8080/v1` |
+### Render with 512 MB and optional Neon Postgres
 
-See [HOW_TO_USE_DABBA.md](HOW_TO_USE_DABBA.md) for day-to-day usage.
+1. Use the [Render Blueprint](render.yaml) or a Docker web service built from the [Dockerfile](Dockerfile). The Blueprint listens on port `10000` and checks `/ready`.
+2. Keep one API worker and set `DABBA_LOW_MEMORY=true` and `DABBA_MODEL_PATH=rule_based`. Add the keys for the hosted models you use.
+3. For Neon, add its pooled PostgreSQL connection string as the secret `DATABASE_URL`, keeping the TLS settings supplied with the URL. SQLite is used when this variable is unset.
+4. Keep `/data` on persistent storage for uploaded files and artifact binaries. Keep `DABBA_MASTER_KEY` stable across restarts so saved provider keys can still be decrypted.
 
----
+For an existing SQLite deployment, back up and migrate the data before switching the live service. Follow the [storage migration and deployment guide](docs/cloudflare-render-deployment.md#optional-postgresql-storage-neon).
 
-## Configuration
+### Kubernetes
 
-Copy `.env.example` and set the values for your environment.
-
-| Variable | Purpose |
-|---|---|
-| `DABBA_CORS_ORIGINS` | Comma-separated list of allowed browser origins |
-| `DABBA_DATA_DIR` | Where accounts, chats, and indexes are stored |
-| `DABBA_MASTER_KEY` | Fernet key used to encrypt stored provider keys. Keep it in a secret manager. |
-| `DABBA_MODEL_PATH` | Local model path, or `rule_based` for a lightweight fallback |
-| `DABBA_GUEST_CHAT`, `DABBA_GUEST_PROMPT_LIMIT`, `DABBA_GUEST_IP_DAILY_LIMIT` | Free prompts for signed-out visitors on `/try` (default on, 5 per visitor, 20 per IP per day). Replies use the server's `NVIDIA_API_KEY`; set `DABBA_GUEST_CHAT=0` to turn it off. |
-| `DABBA_CHAT_TOKEN_LIMIT_5H`, `DABBA_CHAT_TOKEN_LIMIT_DAILY`, `DABBA_CHAT_TOKEN_LIMIT_WEEKLY` | Per-account rolling chat budgets, defaulting to 250,000, 1,000,000, and 4,000,000 tokens. Set a budget to `0` for unlimited use in that window. Budgets count reported tokens from completed chats. |
-| `SITE_URL` (build time) | Public address of the site, e.g. `https://dabba.example.com`. When set at build time, the app gets a canonical link and absolute social image, and `sitemap.xml` is generated. Pass it as a Docker build arg or a Cloudflare Pages build variable. |
-| `DABBA_TRUSTED_PROXY_HOPS` | Reverse proxies in front of the server (default 1, right for Render), used to find a visitor's real IP for the guest limit. |
-| `DABBA_HOSTED_TRANSCRIPTION`, `DABBA_TRANSCRIBE_MODEL` | Set `DABBA_HOSTED_TRANSCRIPTION=openai` to let voice input work on hosts that can't run Whisper (such as Render's slim image). Recordings are then sent to OpenAI to be turned into text, using the OpenAI key already set for the server. Off by default. `DABBA_TRANSCRIBE_MODEL` changes the model (default `whisper-1`). |
-| `DABBA_FFMPEG` | Full path to an `ffmpeg` binary, for voice input. Usually not needed: Dabba also looks on `PATH`, in the `imageio-ffmpeg` package and in common install folders. |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN`, `VYCEAI_API_KEY` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
-
-> [!IMPORTANT]
-> Never commit real keys. Only placeholders belong in `.env.example`.
-
-VyceAI uses the hosted `https://vyceai.com/v1` API. Set `VYCEAI_API_KEY` in Render or save the key under **Settings → API Keys → VyceAI**. Its model IDs start with `vyceai/` in Dabba, and access to promotional models depends on your VyceAI account. For Google, set `GEMINI_API_KEY` or save a Google key in the same settings panel.
-
----
-
-## Project structure
-
-```text
-.
-├── dabba/                 # Python backend and model stack
-│   ├── api/               # FastAPI server and endpoints
-│   ├── platform/          # Accounts, projects, skills, provider gateway
-│   ├── agent/             # Planner, executor, MCP client, tool registry
-│   ├── providers/         # Anthropic, OpenAI, Google, NVIDIA, Ollama, HF, local
-│   ├── tools/             # Built-in agent tools
-│   ├── rag/               # Embeddings, vector store, hybrid search, reranker
-│   ├── model/             # Decoder-only transformer
-│   ├── tokenizer/         # BPE tokenizer
-│   ├── trainer/           # Training loop, schedulers, checkpoints
-│   ├── inference/         # Sampling, beam search, GGUF engine
-│   ├── multimodal/        # Vision, audio, video encoders
-│   ├── cli/               # Terminal TUI
-│   ├── docs/              # Component documentation
-│   └── tests/             # pytest suite
-├── frontend/              # React + Vite + Tailwind web app
-├── vscode-extension/      # VS Code side-panel client
-├── chrome-extension/      # Chrome sidebar client
-├── helm/                  # Kubernetes Helm chart
-├── docs/                  # CI/CD, deployment, PR automation guides
-├── Dockerfile             # Multi-stage image (frontend + API)
-└── render.yaml            # Render deployment blueprint
-```
-
----
-
-## Testing
+The [Helm chart](helm/dabba) uses port `8080`, probes `/health` and `/ready`, and mounts a 10 GiB persistent volume by default. Use an image repository and tag you have published.
 
 ```bash
-# Backend
-pytest dabba/tests
+helm upgrade --install dabba ./helm/dabba \
+  --set image.repository=YOUR_IMAGE_REPOSITORY \
+  --set image.tag=YOUR_IMAGE_TAG
+```
 
-# Frontend
-cd frontend
+Configure private registry credentials through `image.pullSecrets` and external access through `ingress` in [the chart values](helm/dabba/values.yaml).
+
+## Tools, code, and voice
+
+- **MCP connectors.** The workspace owner can manage them under **Connectors** or **Settings → Tools (MCP)**. Dabba starts MCP servers as local subprocesses. Presets using `npx` need a runtime with Node.js, such as the Dockerfile’s `developer-runtime` target. The Settings connection test checks whether the MCP process responds. Account access can be checked separately with a read-only tool call.
+- **Code.** Python snippets can run in the browser. Hosted Java opens in JavaFiddle with the snippet preloaded. The local Java runner requires a JDK and the owner’s local code-execution setting.
+- **Voice.** Check `/v1/audio/status` for server capabilities. Supported browsers can provide speech fallbacks. For hosted transcription, configure `DABBA_HOSTED_TRANSCRIPTION=openai` and an OpenAI key.
+
+## Development and other clients
+
+The web client lives in [frontend/](frontend/), the API in [dabba/api/](dabba/api/), and provider integrations in [dabba/providers/](dabba/providers/). Run frontend checks from `frontend/`.
+
+```bash
 npm run lint
-npm test               # Vitest unit tests
-npm run test:e2e       # Playwright (desktop + mobile)
+npx tsc --noEmit
+npm test
+npx playwright install chromium
+npm run test:e2e
 ```
 
-CI runs on every pull request: lint, unit tests, CodeQL, and PR metadata checks. See [.github/workflows/](.github/workflows/).
+See the [backend CI workflow](.github/workflows/platform-ci.yml) for the slim server suite and the separate model tests, which require the larger [training dependencies](requirements.txt).
 
----
+- **Terminal.** Run [`bin/dabba`](bin/dabba) from the repository root.
+- **VS Code.** See the [extension architecture guide](VSCODE_EXTENSION_ARCHITECTURE.md).
+- **Chrome.** Add PNG icons named `icon16.png`, `icon48.png`, and `icon128.png` at the matching sizes under `chrome-extension/icons/`. Load [chrome-extension/](chrome-extension/) as an unpacked extension.
+- **API clients.** Start with the [API guide](dabba/docs/api.md).
 
-## Deployment
+## Further reading
 
-| Target | Reference |
-|---|---|
-| Docker | `docker build -t dabba . && docker run -p 8080:8080 -v dabba-data:/data dabba` |
-| Render | [render.yaml](render.yaml) and [docs/cloudflare-render-deployment.md](docs/cloudflare-render-deployment.md). On the free plan, enable Litestream + Cloudflare R2 to keep data across restarts. |
-| Kubernetes | [helm/](helm/) |
-
-**Voice input and read aloud.** When the server has Whisper and ffmpeg, it can transcribe recordings. You can also configure hosted transcription with `DABBA_HOSTED_TRANSCRIPTION=openai` and an OpenAI key. On the slim Docker image, supported browsers can handle dictation and read aloud when the server lacks Whisper or Piper. Browser dictation may use the browser vendor's speech service. `GET /v1/audio/status` shows what the server provides.
-
-**Run Python.** On hosted installs, Python code blocks run in a sandboxed browser worker and load Pyodide from jsDelivr. The runner supports standard input and output with a five-second execution timeout. Scripts that install software or need access to the host must be run in your own terminal. The owner can use local runtimes by setting `api.enable_local_code_execution: true` in the server YAML and connecting through loopback.
-
-**Run Java.** On hosted installs, the Java block’s Run link opens JavaFiddle with the snippet in its `Main.java` editor. Dabba adds a `Main` entry point when needed. Open Java run options to download the original source. For Dabba’s local runner, install an OpenJDK JDK with both `java` and `javac` on the backend’s PATH, then use the local execution setting above.
-
-The Docker image builds the web app and serves it from the API, runs as a non-root user, and exposes a `/ready` health check. It also bundles [Litestream](https://litestream.io): set `LITESTREAM_BUCKET` and the R2 variables to back up the SQLite databases to Cloudflare R2 and restore them on startup.
-
----
-
-## Documentation
-
-- [How to use Dabba](HOW_TO_USE_DABBA.md)
+- [Day-to-day usage](HOW_TO_USE_DABBA.md)
 - [Architecture](DABBA_ARCHITECTURE.md)
-- [VS Code extension architecture](VSCODE_EXTENSION_ARCHITECTURE.md)
-- [Component docs](dabba/docs/index.md): installation, configuration, training, RAG, inference, API, deployment
-- [CI/CD pipeline](docs/ci-cd-pipeline.md)
-- [Pull request automation](docs/pull-request-automation.md)
+- [Installation, configuration, and model training](dabba/docs/index.md)

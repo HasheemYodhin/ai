@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useMemo, useState, useRef, useEffect, useCallback
 import { modelDisplayName } from '@/lib/models'
 import type { DocumentProgress, DocumentRequest, Message } from '@/types'
 import { cn } from '@/lib/utils'
-import { AlertCircle, Bookmark, GitBranch, ChevronRight, X, Copy, Check, Pencil, RotateCcw, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
+import { AlertCircle, Bookmark, GitBranch, ChevronRight, X, Copy, Check, Pencil, Loader2, ImageDown, Volume2, VolumeX, FileText, FileSpreadsheet, Presentation, Download } from 'lucide-react'
 import { speak } from '@/lib/tts'
 import { useSettings } from '@/hooks/useSettings'
 import { useSmoothText } from '@/hooks/useSmoothText'
@@ -540,10 +540,19 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
             </ul>
           </details>
         )}
-        {onRecover && !writing && (
-          <button type="button" className="mt-2 rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={onRecover}>
-            Recover reply
-          </button>
+        {!writing && (onRecover || (!isUser && isError && onRegenerate)) && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {onRecover && (
+              <button type="button" className="rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={onRecover}>
+                Recover reply
+              </button>
+            )}
+            {!isUser && isError && onRegenerate && (
+              <button type="button" className="rounded-lg border border-border px-2 py-1 text-xs text-accent dark:border-border-dark" onClick={() => onRegenerate(message.id)}>
+                Retry
+              </button>
+            )}
+          </div>
         )}
         <div className={cn(
           'flex flex-wrap items-center gap-2 mt-1 min-h-8 [&_svg]:w-4 [&_svg]:h-4 [&_svg]:stroke-[1.5]',
@@ -588,17 +597,6 @@ export const MessageBubble = memo(function MessageBubble({ message, isStreaming,
                   className="p-1.5 rounded-lg text-text-tertiary hover:text-text-primary dark:hover:text-text-dark-primary hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
                 >
                   <Pencil className="w-3 h-3" />
-                </button>
-              )}
-              {/* Errored reply → retry with same model; successful reply → regenerate (with model options) */}
-              {!isUser && isError && onRegenerate && (
-                <button
-                  onClick={() => onRegenerate(message.id)}
-                  title="Retry"
-                  className="flex items-center gap-1 px-1.5 py-1 rounded-md text-text-tertiary hover:text-accent hover:bg-surface-tertiary dark:hover:bg-surface-dark-tertiary transition-colors"
-                >
-                  <RotateCcw className="w-3 h-3" />
-                  <span className="text-xs font-medium">Retry</span>
                 </button>
               )}
               {!isUser && !isError && onRegenerate && (

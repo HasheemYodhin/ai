@@ -17,15 +17,18 @@ def client(tmp_path):
     return TestClient(app)
 
 
-@pytest.mark.parametrize("path", ["/", "/c/abc-123", "/agents", "/connectors/"])
+@pytest.mark.parametrize("path", ["/", "/c/abc-123", "/agents", "/connectors/", "/index.html"])
 def test_app_routes_serve_index(client, path):
     response = client.get(path)
     assert response.status_code == 200
     assert "app" in response.text
+    assert response.headers["Cache-Control"] == "no-cache"
 
 
 def test_real_files_still_served(client):
-    assert client.get("/assets/app.js").text == "js"
+    response = client.get("/assets/app.js")
+    assert response.text == "js"
+    assert "Cache-Control" not in response.headers
 
 
 @pytest.mark.parametrize("path", ["/assets/missing.js", "/v1/unknown"])
