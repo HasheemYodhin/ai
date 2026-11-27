@@ -1,146 +1,107 @@
-from __future__ import annotations
-from typing import Dict, List
-from dabba.providers.base import BaseProvider, ModelInfo
+from dabba.providers.base import ModelInfo
+from dabba.providers.chat_completions_provider import ChatCompletionsProvider
+
+
+def _gemini(model, name, tier, description, cost_input, cost_output, max_output=65_536):
+    return ModelInfo(
+        model,
+        f"Gemini {name}",
+        "google",
+        tier,
+        description,
+        1_048_576,
+        cost_input,
+        cost_output,
+        supports_thinking=True,
+        max_output_tokens=max_output,
+        supports_vision=True,
+    )
+
 
 MODELS = [
-    ModelInfo(
-        "gemini-2.5-pro",
-        "Gemini 2.5 Pro",
-        "google",
-        "xhigh",
-        "Best Gemini, deep reasoning",
-        1000000,
-        1.25,
-        10.0,
-        True,
-        True,
-        supports_vision=True,
-    ),
-    ModelInfo(
-        "gemini-2.5-flash",
-        "Gemini 2.5 Flash",
-        "google",
-        "high",
-        "Fast + thinking",
-        1000000,
-        0.30,
-        2.5,
-        True,
-        True,
-        supports_vision=True,
-    ),
-    ModelInfo(
-        "gemini-2.5-flash-lite",
-        "Gemini 2.5 Flash Lite",
-        "google",
-        "medium",
-        "Cheapest 2.5-gen, still fast",
-        1000000,
-        0.10,
-        0.40,
-        False,
-        True,
-        supports_vision=True,
-    ),
-    ModelInfo(
-        "gemini-2.0-flash",
-        "Gemini 2.0 Flash",
-        "google",
-        "medium",
-        "Fast, efficient",
-        1000000,
-        0.10,
-        0.40,
-        False,
-        True,
-        supports_vision=True,
-    ),
-    ModelInfo(
-        "gemini-2.0-flash-lite",
-        "Gemini 2.0 Lite",
-        "google",
+    _gemini(
+        "gemini-3.5-flash-lite",
+        "3.5 Flash-Lite",
         "low",
-        "Lightest, cheapest 2.0-gen",
-        1000000,
-        0.075,
+        "Efficient everyday chat.",
         0.30,
-        False,
-        True,
-        supports_vision=True,
+        2.50,
+    ),
+    _gemini(
+        "gemini-4-hydrogen",
+        "4 Hydrogen",
+        "medium",
+        "Fast multimodal chat and coding.",
+        1.50,
+        7.50,
+        1_048_576,
+    ),
+    _gemini(
+        "gemini-3.8-flash",
+        "3.8 Flash",
+        "high",
+        "Multimodal coding and reasoning.",
+        1.50,
+        7.50,
+    ),
+    _gemini(
+        "gemini-4-argon",
+        "4 Argon",
+        "high",
+        "Efficient advanced reasoning.",
+        4.00,
+        20.00,
+        1_048_576,
+    ),
+    _gemini(
+        "gemini-4-neon",
+        "4 Neon",
+        "xhigh",
+        "Complex coding and multimodal tasks.",
+        3.00,
+        15.00,
+        1_048_576,
+    ),
+    _gemini(
+        "gemini-4-carbon",
+        "4 Carbon",
+        "max",
+        "Advanced reasoning for complex tasks.",
+        4.00,
+        20.00,
+        1_048_576,
+    ),
+    _gemini(
+        "gemini-2.5-flash-lite",
+        "2.5 Flash-Lite",
+        "low",
+        "Lightweight Gemini 2.5 model.",
+        0.10,
+        0.40,
     ),
 ]
 
 
-class GoogleProvider(BaseProvider):
+class GoogleProvider(ChatCompletionsProvider):
     name = "google"
+    base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    key_env = "GEMINI_API_KEY"
+    stream_usage = True
 
-    def chat(self, messages, model, max_tokens=4096, temperature=0.7, **kwargs) -> str:
-        import google.generativeai as genai
+    def _params(self, messages, model, max_tokens, temperature, options):
+        params = super()._params(messages, model, max_tokens, temperature, options)
+        if model.startswith(("gemini-3.", "gemini-4-")):
+            effort = options.get("effort") or "medium"
+            if effort in {"xhigh", "max"}:
+                effort = (
+                    "xhigh"
+                    if model in {"gemini-4-neon", "gemini-4-hydrogen"}
+                    else "high"
+                )
+            elif effort == "low" and not model.startswith("gemini-4-"):
+                effort = "minimal"
+            params["reasoning_effort"] = effort
+        return params
 
-        key = kwargs.get("api_key", "")
-        if not key:
-            raise RuntimeError("Google API key not set. Run: /keys set google <key>")
-
-        genai.configure(api_key=key)
-        gmodel = genai.GenerativeModel(model_name=model)
-
-        history, system_text = self._convert_messages(messages)
-
-        if system_text and history:
-            history[0]["parts"][0] = (
-                f"[System: {system_text}]\n\n{history[0]['parts'][0]}"
-            )
-
-        if not history:
-            return ""
-
-        chat = gmodel.start_chat(history=history[:-1])
-        last_msg = history[-1]["parts"][0]
-
-        gen_config = genai.types.GenerationConfig(
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
-        # Explicit timeout — see anthropic_provider.py for why this matters.
-        resp = chat.send_message(
-            last_msg,
-            generation_config=gen_config,
-            request_options={"timeout": 60},
-        )
-        return resp.text.strip()
-
-    @staticmethod
-    def _convert_messages(messages):
-        """
-        Convert OpenAI-style messages to Gemini's alternating user/model history.
-
-        Gemini requires strict user/model alternation, so consecutive
-        same-role turns (e.g. a "tool" result right after "assistant" text,
-        which both need to look like additional user context) are merged
-        into one turn instead of being dropped or breaking the API call.
-        """
-        history: List[Dict] = []
-        system_text = ""
-
-        for m in messages:
-            role = m.get("role", "")
-            content = m.get("content", "") or ""
-
-            if role == "system":
-                system_text = content
-                continue
-
-            gemini_role = "model" if role == "assistant" else "user"
-            # "tool" and "user" both map to "user" — label tool output so the
-            # model knows it's a result, not a new user request.
-            text = f"[Tool result]\n{content}" if role == "tool" else content
-
-            if history and history[-1]["role"] == gemini_role:
-                history[-1]["parts"][0] += "\n\n" + text
-            else:
-                history.append({"role": gemini_role, "parts": [text]})
-
-        return history, system_text
-
-    def list_models(self) -> List[ModelInfo]:
+    def list_models(self):
         return MODELS

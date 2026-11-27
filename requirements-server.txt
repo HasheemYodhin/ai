@@ -10,7 +10,6 @@ tzdata>=2025.2
 numpy>=1.24,<3
 openai>=1.66,<3  # Responses API
 anthropic>=0.112,<1  # output_config.effort + refusal fallbacks
-google-generativeai>=0.8,<1
 mcp>=1,<2
 PyMuPDF>=1.23,<2
 pdfminer.six>=20221105

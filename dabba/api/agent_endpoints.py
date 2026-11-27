@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from dabba.agent.tool_registry import tool_execution_policy
 from dabba.config.agent_config import AgentConfig
+from dabba.providers.registry import PROVIDER_KEY_ENV_VARS
 
 from dabba.utils.memory_manager import get_memory_manager
 from dabba.tools.web_tools import fetch_url, search_web
@@ -87,7 +88,7 @@ class ApprovalRequest(BaseModel):
 
 
 # Same set the CLI's `/keys` command validates against — see cli/session.py's _cmd_keys.
-VALID_KEY_PROVIDERS = {"anthropic", "openai", "google", "nvidia", "huggingface"}
+VALID_KEY_PROVIDERS = set(PROVIDER_KEY_ENV_VARS)
 
 
 class VerifyApiKeyRequest(BaseModel):
@@ -671,13 +672,7 @@ def create_agent_router() -> APIRouter:
                         if args and args[0] == "set" and len(args) >= 3:
                             provider = args[1].lower()
                             key_value = args[2]
-                            valid = {
-                                "anthropic",
-                                "openai",
-                                "google",
-                                "nvidia",
-                                "huggingface",
-                            }
+                            valid = VALID_KEY_PROVIDERS
                             if provider not in valid:
                                 msg = f"❌ Unknown provider: `{provider}`. Valid: {', '.join(sorted(valid))}"
                             else:
@@ -703,13 +698,7 @@ def create_agent_router() -> APIRouter:
                             yield f"data: {json.dumps({'type': 'text', 'content': msg})}\n\n"
                         else:
                             keys = getattr(keys_proxy.cli_config, "api_keys", {}) or {}
-                            providers = [
-                                "anthropic",
-                                "openai",
-                                "google",
-                                "nvidia",
-                                "huggingface",
-                            ]
+                            providers = sorted(VALID_KEY_PROVIDERS)
                             lines = ["🔑 **API Key Status:**\n"]
                             for p in providers:
                                 status = "✅ set" if keys.get(p) else "⬜ not set"
@@ -1396,13 +1385,15 @@ def create_agent_router() -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="No catalog model can test this saved key."
             )
+        # Hosted reasoning models may spend part of this budget before returning text.
+        token_budget = 512 if model.provider in {"google", "vyceai"} else 16
         try:
             reply = await asyncio.to_thread(
                 registry._chat_once,
                 [{"role": "user", "content": "Reply OK."}],
                 model.id,
                 effort="low",
-                max_tokens=16,
+                max_tokens=token_budget,
             )
             if not reply or not reply.strip():
                 raise ValueError("No text returned")

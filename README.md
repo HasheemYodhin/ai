@@ -194,10 +194,12 @@ Copy `.env.example` and set the values for your environment.
 | `DABBA_TRUSTED_PROXY_HOPS` | Reverse proxies in front of the server (default 1, right for Render), used to find a visitor's real IP for the guest limit. |
 | `DABBA_HOSTED_TRANSCRIPTION`, `DABBA_TRANSCRIBE_MODEL` | Set `DABBA_HOSTED_TRANSCRIPTION=openai` to let voice input work on hosts that can't run Whisper (such as Render's slim image). Recordings are then sent to OpenAI to be turned into text, using the OpenAI key already set for the server. Off by default. `DABBA_TRANSCRIBE_MODEL` changes the model (default `whisper-1`). |
 | `DABBA_FFMPEG` | Full path to an `ffmpeg` binary, for voice input. Usually not needed: Dabba also looks on `PATH`, in the `imageio-ffmpeg` package and in common install folders. |
-| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `NVIDIA_API_KEY`, `HF_TOKEN`, `VYCEAI_API_KEY` | Provider keys, used when no key is saved in the app. Set them in your host's environment (e.g. Render's **Environment** tab) so no setup inside the app is needed. |
 
 > [!IMPORTANT]
 > Never commit real keys. Only placeholders belong in `.env.example`.
+
+VyceAI uses the hosted `https://vyceai.com/v1` API. Set `VYCEAI_API_KEY` in Render or save the key under **Settings → API Keys → VyceAI**. Its model IDs start with `vyceai/` in Dabba, and access to promotional models depends on your VyceAI account. For Google, set `GEMINI_API_KEY` or save a Google key in the same settings panel.
 
 ---
 

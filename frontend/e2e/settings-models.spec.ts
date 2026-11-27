@@ -8,18 +8,38 @@ const MODELS = Array.from({ length: 43 }, (_, i) => ({
   has_key: true, keySource: 'API_KEY', contextWindow: 128000,
 }))
 
-async function signedIn(page: Page) {
+async function signedIn(page: Page, models = MODELS) {
   await page.addInitScript(() => localStorage.setItem('dabba-session-token', 'test-session'))
   await page.route('**/v1/**', route => {
     const url = route.request().url()
     if (url.includes('/identity/me')) {
       return route.fulfill({ json: { id: 'u1', name: 'Test User', email: 'user@example.com', role: 'admin', createdAt: 0, updatedAt: 0 } })
     }
-    if (url.includes('/v1/agent/models')) return route.fulfill({ json: { models: MODELS, current: 'm-1', effort: 'medium' } })
+    if (url.includes('/v1/agent/models')) return route.fulfill({ json: { models, current: 'm-1', effort: 'medium' } })
     return route.fulfill({ json: [] })
   })
   await page.goto('/')
 }
+
+test('VyceAI and Gemini models can be selected in chat', async ({ page }) => {
+  await signedIn(page, [
+    ...MODELS,
+    { ...MODELS[0], id: 'vyceai/glm-5.3-flash', provider: 'vyceai', name: 'GLM 5.3 Flash', keySource: 'VYCEAI_API_KEY' },
+    { ...MODELS[0], id: 'gemini-4-hydrogen', provider: 'google', name: 'Gemini 4 Hydrogen', keySource: 'GEMINI_API_KEY' },
+  ])
+  const trigger = page.getByRole('button', { name: /Change model/ })
+  const picker = page.getByRole('dialog', { name: 'Choose model' })
+  for (const { name, provider } of [
+    { name: 'GLM 5.3 Flash', provider: 'VyceAI' },
+    { name: 'Gemini 4 Hydrogen', provider: 'Google' },
+  ]) {
+    await trigger.click()
+    await picker.getByPlaceholder('Search models').fill(name)
+    await expect(picker.getByText(provider, { exact: true })).toBeVisible()
+    await picker.getByRole('button', { name, exact: true }).click()
+    await expect(trigger).toHaveAccessibleName(`Model: ${name}. Change model`)
+  }
+})
 
 for (const height of [923, 560, 420]) {
   test(`the model menu stays fully on screen in a ${height}px tall window`, async ({ page }) => {

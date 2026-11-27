@@ -583,9 +583,11 @@ class InteractiveSession:
 
     def _cmd_keys(self, args: List[str]) -> None:
         """Manage API keys — show, set, or delete."""
+        from dabba.providers.registry import PROVIDER_KEY_ENV_VARS
+
         keys = getattr(self.config, "api_keys", {}) or {}
         if not args or args[0] in ("show", "list"):
-            providers = ["anthropic", "openai", "google", "nvidia", "huggingface"]
+            providers = sorted(PROVIDER_KEY_ENV_VARS)
             rows = []
             for p in providers:
                 status = (
@@ -608,7 +610,7 @@ class InteractiveSession:
             registry = self.agent._get_registry()
             valid_model_ids = {m.id for m in registry.list_all_models()}
             valid_model_ids_lower = {m.id.lower() for m in registry.list_all_models()}
-            valid_providers = {"anthropic", "openai", "google", "nvidia", "huggingface"}
+            valid_providers = PROVIDER_KEY_ENV_VARS
 
             is_valid = (
                 provider.lower() in valid_providers

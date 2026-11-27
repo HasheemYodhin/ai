@@ -25,6 +25,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   google: 'Google',
   nvidia: 'NVIDIA',
   huggingface: 'Hugging Face',
+  vyceai: 'VyceAI',
   ollama: 'Ollama',
 }
 

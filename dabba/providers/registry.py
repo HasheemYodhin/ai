@@ -17,6 +17,7 @@ from dabba.providers.nvidia_provider import DEFAULT_CAPACITY_FALLBACK, NvidiaPro
 from dabba.providers.huggingface_provider import HuggingFaceProvider
 from dabba.providers.dabba_provider import DabbaProvider
 from dabba.providers.local_provider import LocalOpenAIProvider
+from dabba.providers.vyceai_provider import VyceAIProvider
 from dabba.platform.provider_gateway import ProviderGateway
 
 # Environment variables checked, in order, when no key is saved in
@@ -27,6 +28,7 @@ PROVIDER_KEY_ENV_VARS: Dict[str, tuple] = {
     "google": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "nvidia": ("NVIDIA_API_KEY",),
     "huggingface": ("HF_TOKEN", "HUGGINGFACE_API_KEY"),
+    "vyceai": ("VYCEAI_API_KEY",),
 }
 
 if TYPE_CHECKING:
@@ -41,6 +43,7 @@ _OLLAMA = OllamaProvider()
 _NVIDIA = NvidiaProvider()
 _HUGGINGFACE = HuggingFaceProvider()
 _LOCAL = LocalOpenAIProvider()
+_VYCEAI = VyceAIProvider()
 
 
 def _make_dabba(endpoint: str) -> DabbaProvider:
@@ -53,6 +56,7 @@ MODEL_CATALOG: List[ModelInfo] = (
     + _GOOGLE.list_models()
     + _NVIDIA.list_models()
     + _HUGGINGFACE.list_models()
+    + _VYCEAI.list_models()
     + _OLLAMA.list_models()
     + _LOCAL.list_models()
     + DabbaProvider().list_models()
@@ -82,6 +86,7 @@ class ProviderRegistry:
             "nvidia": _NVIDIA,
             "huggingface": _HUGGINGFACE,
             "local": _LOCAL,
+            "vyceai": _VYCEAI,
             "dabba": self._dabba,
         }
         provider = provider_map.get(provider_name, self._dabba)
@@ -108,6 +113,8 @@ class ProviderRegistry:
             return "anthropic"
         if model_l.startswith(("gpt", "o1", "o3", "text-")):
             return "openai"
+        if model_l.startswith("vyceai/"):
+            return "vyceai"
         if model_l.startswith("gemini"):
             return "google"
         # Explicit "hf/" prefix routes to Hugging Face — must be checked before
@@ -185,9 +192,7 @@ class ProviderRegistry:
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
-        if provider is _ANTHROPIC or provider is _OPENAI:
-            # Claude 5.x and GPT-6.x take effort directly
-            # (output_config.effort / reasoning.effort).
+        if provider in (_ANTHROPIC, _OPENAI, _GOOGLE):
             params["effort"] = effort
         return provider.chat(
             messages, model, api_key=api_key, usage_out=usage_out, **params
@@ -247,13 +252,11 @@ class ProviderRegistry:
             params["thinking"] = True
 
         provider, api_key = self._get_provider(model)
-        if provider is _ANTHROPIC or provider is _OPENAI:
-            # Claude 5.x and GPT-6.x take effort directly
-            # (output_config.effort / reasoning.effort).
+        if provider in (_ANTHROPIC, _OPENAI, _GOOGLE):
             params["effort"] = effort
         if cancel_event is not None and cancel_event.is_set():
             return
-        if provider is _NVIDIA:
+        if provider in (_NVIDIA, _GOOGLE, _VYCEAI):
             params["cancel_event"] = cancel_event
             params["include_reasoning"] = include_reasoning
         stream_chat = getattr(provider, "stream_chat", None)
@@ -324,6 +327,7 @@ class ProviderRegistry:
             + _GOOGLE.list_models()
             + _NVIDIA.list_models()
             + _HUGGINGFACE.list_models()
+            + _VYCEAI.list_models()
             + _OLLAMA.list_models()
             + _LOCAL.list_models()
         )

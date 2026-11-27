@@ -312,6 +312,7 @@ PROVIDER_ORDER = [
     "google",
     "nvidia",
     "huggingface",
+    "vyceai",
     "ollama",
 ]
 PROVIDER_LABELS = {
@@ -321,6 +322,7 @@ PROVIDER_LABELS = {
     "google": "◉  GOOGLE",
     "nvidia": "▶  NVIDIA NIM",
     "huggingface": "🤗 HUGGING FACE",
+    "vyceai": "◇  VYCEAI",
     "ollama": "○  LOCAL (Ollama)",
 }
 TIER_COLOR = {
@@ -1025,6 +1027,7 @@ _PROVIDERS = [
     ("google", "Gemini (Google)", "AIza…"),
     ("nvidia", "NVIDIA NIM", "nvapi-…"),
     ("huggingface", "Hugging Face", "hf_…"),
+    ("vyceai", "VyceAI", "API key…"),
 ]
 
 
@@ -1800,7 +1803,7 @@ class DabbaTUI(App[None]):
                 )
                 if not entry:
                     self._post_system(
-                        f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface"
+                        f"Unknown provider: {pid}  — valid: anthropic openai google nvidia huggingface vyceai"
                     )
                     return
                 p, label, ph = entry
